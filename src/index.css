@@ -1,0 +1,156 @@
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;850&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Cairo", ui-sans-serif, system-ui, sans-serif;
+}
+
+body {
+  font-family: "Cairo", sans-serif;
+  background-color: #f4f9ff;
+  color: #2c3e50;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 0.3s ease, color 0.3s ease;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+html.dark {
+  color-scheme: dark;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+html.dark body {
+  background-color: #0b1329 !important;
+  color: #ffffff !important;
+}
+
+/* Global Dark Mode Overrides for UI components with Maximum Contrast & Clarity */
+html.dark .min-h-screen:not(.keep-light) {
+  background-color: #0b1329 !important;
+  color: #ffffff !important;
+}
+
+html.dark .bg-white {
+  background-color: #131f37 !important;
+  color: #ffffff !important;
+  border-color: #263859 !important;
+}
+
+html.dark .bg-[#F4F9FF],
+html.dark .bg-slate-50,
+html.dark .bg-slate-100,
+html.dark .bg-stone-50,
+html.dark .bg-stone-100,
+html.dark .bg-gray-50,
+html.dark .bg-gray-100 {
+  background-color: #0e1a32 !important;
+  color: #ffffff !important;
+}
+
+html.dark .bg-[#F8FAFC],
+html.dark .bg-slate-50\/50,
+html.dark .bg-slate-100\/80 {
+  background-color: #182846 !important;
+  color: #ffffff !important;
+}
+
+html.dark .border-slate-200,
+html.dark .border-stone-200,
+html.dark .border-gray-200,
+html.dark .border-slate-150,
+html.dark .border-[#E2E8F0] {
+  border-color: #273b5e !important;
+}
+
+/* Primary text headings and main labels - Ultra Crisp Bright White */
+html.dark .text-slate-900,
+html.dark .text-slate-800,
+html.dark .text-stone-900,
+html.dark .text-stone-800,
+html.dark .text-slate-700,
+html.dark .text-stone-700,
+html.dark .text-[#2C3E50],
+html.dark .text-gray-900,
+html.dark .text-gray-800,
+html.dark .text-gray-700 {
+  color: #ffffff !important;
+  text-shadow: 0 0 1px rgba(255, 255, 255, 0.1);
+}
+
+/* Secondary text - Very clear Light Slate/Gray */
+html.dark .text-slate-600,
+html.dark .text-stone-600,
+html.dark .text-slate-500,
+html.dark .text-stone-500,
+html.dark .text-gray-600,
+html.dark .text-gray-500 {
+  color: #e2e8f0 !important;
+}
+
+/* Muted helper text - Clear Slate-300 */
+html.dark .text-slate-400,
+html.dark .text-stone-400,
+html.dark .text-gray-400 {
+  color: #cbd5e1 !important;
+}
+
+html.dark input, 
+html.dark select, 
+html.dark textarea {
+  background-color: #1a2a47 !important;
+  color: #ffffff !important;
+  border-color: #334b73 !important;
+  font-weight: 600;
+}
+
+html.dark input::placeholder, 
+html.dark textarea::placeholder {
+  color: #94a3b8 !important;
+}
+
+html.dark table th {
+  background-color: #132039 !important;
+  color: #e2e8f0 !important;
+  font-weight: 700;
+}
+
+html.dark table td {
+  border-color: #223659 !important;
+  color: #ffffff !important;
+}
+
+html.dark .hover\:bg-slate-50:hover,
+html.dark .hover\:bg-stone-50:hover,
+html.dark .hover\:bg-slate-100:hover {
+  background-color: #1e3052 !important;
+}
+
+/* Hide scrollbar for Chrome, Safari and Opera */
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* Hide scrollbar for IE, Edge and Firefox */
+.scrollbar-none {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+
+@keyframes marquee {
+  0% { transform: translate3d(50%, 0, 0); }
+  100% { transform: translate3d(-100%, 0, 0); }
+}
+
+.animate-marquee {
+  display: inline-block;
+  animation: marquee 30s linear infinite;
+}
+
+.animate-marquee:hover {
+  animation-play-state: paused;
+}
+

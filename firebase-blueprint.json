@@ -1,0 +1,102 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User account schema",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "username": { "type": "string" },
+        "phone": { "type": "string" },
+        "password": { "type": "string" },
+        "inviteCode": { "type": "string" },
+        "referrerCode": { "type": "string" },
+        "walletAddress": { "type": "string" },
+        "earnings": { "type": "number" },
+        "taskIncome": { "type": "number" },
+        "effectiveDays": { "type": "number" },
+        "role": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "username", "phone", "password", "inviteCode", "role", "createdAt"]
+    },
+    "SystemSettings": {
+      "title": "SystemSettings",
+      "description": "General system configuration",
+      "type": "object",
+      "properties": {
+        "rechargeAddress": { "type": "string" }
+      },
+      "required": ["rechargeAddress"]
+    },
+    "Deposit": {
+      "title": "Deposit",
+      "description": "User deposit transaction",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "username": { "type": "string" },
+        "phone": { "type": "string" },
+        "amount": { "type": "number" },
+        "currency": { "type": "string" },
+        "txHash": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "username", "phone", "amount", "currency", "txHash", "status", "createdAt"]
+    },
+    "Withdrawal": {
+      "title": "Withdrawal",
+      "description": "User withdrawal request",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "username": { "type": "string" },
+        "phone": { "type": "string" },
+        "amount": { "type": "number" },
+        "currency": { "type": "string" },
+        "walletAddress": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "username", "phone", "amount", "currency", "walletAddress", "status", "createdAt"]
+    },
+    "UserNotification": {
+      "title": "UserNotification",
+      "description": "User notifications schema",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "message": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "read": { "type": "boolean" }
+      },
+      "required": ["id", "userId", "message", "createdAt", "read"]
+    }
+  },
+  "firestore": {
+    "users/{phone}": {
+      "schema": "User",
+      "description": "Collection of users indexed by phone"
+    },
+    "settings/{settingId}": {
+      "schema": "SystemSettings",
+      "description": "General settings document"
+    },
+    "deposits/{depositId}": {
+      "schema": "Deposit",
+      "description": "User deposits collection"
+    },
+    "withdrawals/{withdrawalId}": {
+      "schema": "Withdrawal",
+      "description": "User withdrawals collection"
+    },
+    "notifications/{notifId}": {
+      "schema": "UserNotification",
+      "description": "User notifications collection"
+    }
+  }
+}

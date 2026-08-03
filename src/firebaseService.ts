@@ -1,0 +1,2180 @@
+import { 
+  collection, 
+  doc, 
+  setDoc, 
+  getDoc, 
+  getDocs, 
+  query, 
+  where, 
+  updateDoc, 
+  increment,
+  deleteDoc,
+  onSnapshot
+} from 'firebase/firestore';
+import { db, storage } from './firebase';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { User, Deposit, Withdrawal, SystemSettings, Task, SupportMessage, SupportChat, SupportFaq, UserNotification } from './types';
+
+// Password Hashing Helper (SHA-256)
+export async function hashPassword(password: string): Promise<string> {
+  if (!password) return '';
+  try {
+    const msgBuffer = new TextEncoder().encode(password);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  } catch (e) {
+    let hash = 0;
+    for (let i = 0; i < password.length; i++) {
+      const char = password.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash |= 0;
+    }
+    return `h_${Math.abs(hash)}`;
+  }
+}
+
+// Let's keep a state flag for Local Storage fallback mode
+let useLocalStorageFallback = false;
+
+export function isFallbackMode(): boolean {
+  return useLocalStorageFallback;
+}
+
+export function setFallbackMode(val: boolean) {
+  useLocalStorageFallback = val;
+}
+
+// Local Storage Getters and Setters
+function getLocalUsers(): Record<string, User> {
+  const saved = localStorage.getItem('local_db_users');
+  if (saved) return JSON.parse(saved);
+  
+  // Set default admin account
+  const admin: User = {
+    id: "07712345678",
+    username: "المدير العام",
+    phone: "07712345678",
+    password: "hemoome1995",
+    inviteCode: "K92W84",
+    earnings: 1000,
+    taskIncome: 500,
+    effectiveDays: 365,
+    role: "admin",
+    createdAt: new Date().toISOString()
+  };
+  const initial = { "07712345678": admin };
+  localStorage.setItem('local_db_users', JSON.stringify(initial));
+  return initial;
+}
+
+function saveLocalUsers(users: Record<string, User>) {
+  localStorage.setItem('local_db_users', JSON.stringify(users));
+}
+
+function getLocalSettings(): SystemSettings {
+  const saved = localStorage.getItem('local_db_settings');
+  if (saved) {
+    try {
+      const parsed = JSON.parse(saved);
+      // Ensure any missing fields are filled with defaults
+      return {
+        siteName: (parsed.siteName && parsed.siteName !== "BET") ? parsed.siteName : "OXLO",
+        rechargeAddress: parsed.rechargeAddress ?? "e738819b080a278d",
+        rechargeAddressTRC20: parsed.rechargeAddressTRC20 ?? "sfnmQtKLfcDarAMd",
+        rechargeAddressBEP20: parsed.rechargeAddressBEP20 ?? "0x71C7656EC7ab88b098defB751B7401B5f6d8976F",
+        telegramLink: parsed.telegramLink ?? "-fhzo.vercel.app",
+        minDeposit: parsed.minDeposit ?? 25,
+        minWithdrawal: parsed.minWithdrawal ?? 10,
+        holidayActive: parsed.holidayActive ?? false,
+        holidayDays: parsed.holidayDays ?? [5], // Default to Friday
+        globalNotification: parsed.globalNotification ?? "مرحباً بكم في منصتنا الميكروية الجديدة! ابدأ بالعمل اليوم وزد أرباحك.",
+        withdrawLockActive: parsed.withdrawLockActive ?? false,
+        withdrawLockDays: parsed.withdrawLockDays ?? [5],
+        withdrawRatesInfo: parsed.withdrawRatesInfo ?? "رسوم معالجة السحب 0% - سعر الصرف مستقر",
+        rechargeNotice: parsed.rechargeNotice ?? "يرجى تحويل المبلغ المحدد فقط وتصوير إثبات التحويل لضمان سرعة معالجة شحن حسابك.",
+        rechargeNotice2: parsed.rechargeNotice2 ?? "",
+        withdrawNotice: parsed.withdrawNotice ?? "تنبيه: يتم معالجة طلبات السحب خلال 24 ساعة كحد أقصى.",
+        withdrawNotice2: parsed.withdrawNotice2 ?? "",
+        vipPlans: (parsed.vipPlans && Array.isArray(parsed.vipPlans)) ? parsed.vipPlans : [
+          { id: 'plan_light', name: 'light', price: 150, profit: 5, tasksCount: 5 },
+          { id: 'plan_A1', name: 'A1', price: 300, profit: 9, tasksCount: 5 },
+          { id: 'plan_A2', name: 'A2', price: 600, profit: 18, tasksCount: 5 },
+          { id: 'plan_B1', name: 'B1', price: 1200, profit: 38, tasksCount: 5 },
+          { id: 'plan_B2', name: 'B2', price: 2600, profit: 65, tasksCount: 5 },
+          { id: 'plan_C1', name: 'C1', price: 5000, profit: 162, tasksCount: 5 },
+          { id: 'plan_C2', name: 'C2', price: 12000, profit: 360, tasksCount: 5 },
+          { id: 'plan_D1', name: 'D1', price: 26000, profit: 750, tasksCount: 5 },
+          { id: 'plan_D2', name: 'D2', price: 65000, profit: 1620, tasksCount: 5 },
+          { id: 'plan_business', name: 'business', price: 90000, profit: 2550, tasksCount: 5 }
+        ],
+        workingHoursNotice: parsed.workingHoursNotice ?? "💡 تنويه هام لجميع الأعضاء: يرجى العلم بأن أوقات العمل الرسمية لتنفيذ واعتماد المهام اليومية مقسمة على فترتين يومياً:\n- الفترة الأولى: من الساعة 12:00 ظهراً وحتى 03:00 عصراً.\n- الفترة الثانية: من الساعة 09:00 مساءً وحتى 01:00 ليلاً بتوقيت مكة المكرمة.",
+        enforceWorkingHours: parsed.enforceWorkingHours ?? true,
+        workStartHour: parsed.workStartHour !== undefined ? Number(parsed.workStartHour) : 12,
+        workEndHour: parsed.workEndHour !== undefined ? Number(parsed.workEndHour) : 15,
+        workStartHour2: parsed.workStartHour2 !== undefined ? Number(parsed.workStartHour2) : 21,
+        workEndHour2: parsed.workEndHour2 !== undefined ? Number(parsed.workEndHour2) : 1,
+        supportAgentName: parsed.supportAgentName ?? "مريم (الدعم الفني المباشر)",
+        supportAgentSubtitle: parsed.supportAgentSubtitle ?? "مستشارتك المالية في Mis",
+        supportAgentAvatar: parsed.supportAgentAvatar ?? "",
+        supportFaqs: parsed.supportFaqs ?? [
+          { question: "كيف يمكنني التواصل مع الدعم الفني؟", answer: "يمكنك التواصل المباشر مع الدعم الفني عبر نافذة المحادثة المتاحة في المنصة للحصول على الإرشادات والدعم الفوري." },
+          { question: "آلية العمل والمهام", answer: "آلية العمل بسيطة للغاية: تذهب إلى قسم المهام، وتختار أحد قنوات اليوتيوب أو الفيسبوك المتاحة، ثم تشترك وتلتقط لقطة شاشة وتصفيها وترفعها في الخانة المخصصة للمراجعة.\n\nبعد مراجعة الأدمن سيتم اعتماد العمولة في حسابك فوراً!" },
+          { question: "مستويات VIP", answer: "لدينا باقات مميزة لزيادة دخلكم اليومي:\n- باقة 600$: ربح يومي 18$ (5 مهام)\n- باقة 1200$: ربح يومي 38$ (5 مهام)\n\nكلما كانت ترقيتك أعلى زادت عوائدك اليومية!" },
+          { question: "كيفية شحن رصيد وتفعيل باقة", answer: "الرجاء الذهاب إلى صفحة الشحن، نسخ عنوان المحفظة بعناية (USDT Polygon أو TRC20)، ثم قم بتحويل المبلغ، وأرفق لقطة شاشة لعملية الدفع حتى يعتمدها المشرف." }
+        ]
+      };
+    } catch (e) {
+      // JSON parse error, fall through to default
+    }
+  }
+  const initial: SystemSettings = {
+    siteName: "OXLO",
+    rechargeAddress: "e738819b080a278d",
+    rechargeAddressTRC20: "sfnmQtKLfcDarAMd",
+    rechargeAddressBEP20: "0x71C7656EC7ab88b098defB751B7401B5f6d8976F",
+    telegramLink: "-fhzo.vercel.app",
+    minDeposit: 25,
+    minWithdrawal: 10,
+    holidayActive: false,
+    holidayDays: [5], // Default to Friday
+    globalNotification: "مرحباً بكم في منصتنا الميكروية الجديدة! ابدأ بالعمل اليوم وزد أرباحك.",
+    withdrawLockActive: false,
+    withdrawLockDays: [5],
+    withdrawRatesInfo: "رسوم معالجة السحب 0% - سعر الصرف مستقر",
+    rechargeNotice: "يرجى تحويل المبلغ المحدد فقط وتصوير إثبات التحويل لضمان سرعة معالجة شحن حسابك.",
+    rechargeNotice2: "",
+    withdrawNotice: "تنبيه: يتم معالجة طلبات السحب خلال 24 ساعة كحد أقصى.",
+    withdrawNotice2: "",
+    vipPlans: [
+      { id: 'plan_light', name: 'light', price: 150, profit: 5, tasksCount: 5 },
+      { id: 'plan_A1', name: 'A1', price: 300, profit: 9, tasksCount: 5 },
+      { id: 'plan_A2', name: 'A2', price: 600, profit: 18, tasksCount: 5 },
+      { id: 'plan_B1', name: 'B1', price: 1200, profit: 38, tasksCount: 5 },
+      { id: 'plan_B2', name: 'B2', price: 2600, profit: 65, tasksCount: 5 },
+      { id: 'plan_C1', name: 'C1', price: 5000, profit: 162, tasksCount: 5 },
+      { id: 'plan_C2', name: 'C2', price: 12000, profit: 360, tasksCount: 5 },
+      { id: 'plan_D1', name: 'D1', price: 26000, profit: 750, tasksCount: 5 },
+      { id: 'plan_D2', name: 'D2', price: 65000, profit: 1620, tasksCount: 5 },
+      { id: 'plan_business', name: 'business', price: 90000, profit: 2550, tasksCount: 5 }
+    ],
+    workingHoursNotice: "💡 تنويه هام لجميع الأعضاء: يرجى العلم بأن أوقات العمل الرسمية لتنفيذ واعتماد المهام اليومية مقسمة على فترتين يومياً:\n- الفترة الأولى: من الساعة 12:00 ظهراً وحتى 03:00 عصراً.\n- الفترة الثانية: من الساعة 09:00 مساءً وحتى 01:00 ليلاً بتوقيت مكة المكرمة.",
+    enforceWorkingHours: true,
+    workStartHour: 12,
+    workEndHour: 15,
+    workStartHour2: 21,
+    workEndHour2: 1,
+    supportAgentName: "مريم (الدعم الفني المباشر)",
+    supportAgentSubtitle: "مستشارتك المالية في Mis",
+    supportAgentAvatar: "",
+    supportFaqs: [
+      { question: "كيف يمكنني التواصل مع الدعم الفني؟", answer: "يمكنك التواصل المباشر مع الدعم الفني عبر نافذة المحادثة المتاحة في المنصة للحصول على الإرشادات والدعم الفوري." },
+      { question: "آلية العمل والمهام", answer: "آلية العمل بسيطة للغاية: تذهب إلى قسم المهام، وتختار أحد قنوات اليوتيوب أو الفيسبوك المتاحة، ثم تشترك وتلتقط لقطة شاشة وتصفيها وترفعها في الخانة المخصصة للمراجعة.\n\nبعد مراجعة الأدمن سيتم اعتماد العمولة في حسابك فوراً!" },
+      { question: "مستويات VIP", answer: "لدينا باقات مميزة لزيادة دخلكم اليومي:\n- باقة 600$: ربح يومي 18$ (5 مهام)\n- باقة 1200$: ربح يومي 38$ (5 مهام)\n\nكلما كانت ترقيتك أعلى زادت عوائدك اليومية!" },
+      { question: "كيفية شحن رصيد وتفعيل باقة", answer: "الرجاء الذهاب إلى صفحة الشحن، نسخ عنوان المحفظة بعناية (USDT Polygon أو TRC20)، ثم قم بتحويل المبلغ، وأرفق لقطة شاشة لعملية الدفع حتى يعتمدها المشرف." }
+    ]
+  };
+  localStorage.setItem('local_db_settings', JSON.stringify(initial));
+  return initial;
+}
+
+function saveLocalSettings(settings: SystemSettings) {
+  localStorage.setItem('local_db_settings', JSON.stringify(settings));
+}
+
+function getLocalDeposits(): Record<string, Deposit> {
+  const saved = localStorage.getItem('local_db_deposits');
+  return saved ? JSON.parse(saved) : {};
+}
+
+function saveLocalDeposits(deposits: Record<string, Deposit>) {
+  localStorage.setItem('local_db_deposits', JSON.stringify(deposits));
+}
+
+function getLocalWithdrawals(): Record<string, Withdrawal> {
+  const saved = localStorage.getItem('local_db_withdrawals');
+  return saved ? JSON.parse(saved) : {};
+}
+
+function saveLocalWithdrawals(withdrawals: Record<string, Withdrawal>) {
+  localStorage.setItem('local_db_withdrawals', JSON.stringify(withdrawals));
+}
+
+// Helper to generate custom invite codes
+function generateInviteCode(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let result = '';
+  for (let i = 0; i < 6; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
+// Check and Initialize Admin & System Settings if not exist
+export async function initializeDatabase() {
+  try {
+    // 1. Initialize Admin
+    const adminPhone = "07712345678";
+    const adminRef = doc(db, "users", adminPhone);
+    const adminSnap = await getDoc(adminRef);
+
+    if (!adminSnap.exists()) {
+      const adminUser: User = {
+        id: adminPhone,
+        username: "المدير العام",
+        phone: adminPhone,
+        password: "hemoome1995",
+        inviteCode: "K92W84",
+        earnings: 1000,
+        taskIncome: 500,
+        effectiveDays: 365,
+        role: "admin",
+        createdAt: new Date().toISOString()
+      };
+      await setDoc(adminRef, adminUser);
+      console.log("Admin account initialized successfully in Firestore!");
+    }
+
+    // 2. Initialize System Settings
+    const settingsRef = doc(db, "settings", "general");
+    const settingsSnap = await getDoc(settingsRef);
+    if (!settingsSnap.exists()) {
+      const defaultSettings: SystemSettings = {
+        siteName: "OXLO",
+        rechargeAddress: "e738819b080a278d",
+        rechargeAddressTRC20: "sfnmQtKLfcDarAMd",
+        rechargeAddressBEP20: "0x71C7656EC7ab88b098defB751B7401B5f6d8976F",
+        telegramLink: "-fhzo.vercel.app",
+        minDeposit: 25,
+        minWithdrawal: 10,
+        holidayActive: false,
+        holidayDays: [5] // Default to Friday
+      };
+      await setDoc(settingsRef, defaultSettings);
+      console.log("Default settings initialized successfully in Firestore!");
+    }
+  } catch (error) {
+    console.warn("Error initializing database (using local defaults if offline):", error);
+    getLocalUsers();
+    getLocalSettings();
+  }
+}
+
+// 1. Get user by phone
+export async function getUserByPhone(phone: string): Promise<User | null> {
+  const cleanPhone = phone.trim();
+  const digitsOnly = cleanPhone.replace(/\D/g, '');
+  const localUsers = getLocalUsers();
+
+  try {
+    // 1. Try direct doc lookup in Firestore
+    const docRef = doc(db, "users", cleanPhone);
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      const data = docSnap.data() as User;
+      const updatedLocal = { ...localUsers, [cleanPhone]: data };
+      saveLocalUsers(updatedLocal);
+      return data;
+    }
+
+    // 2. Try query by phone field in Firestore
+    const q = query(collection(db, "users"), where("phone", "==", cleanPhone));
+    const querySnapshot = await getDocs(q);
+    if (!querySnapshot.empty) {
+      const data = querySnapshot.docs[0].data() as User;
+      const updatedLocal = { ...localUsers, [cleanPhone]: data };
+      saveLocalUsers(updatedLocal);
+      return data;
+    }
+
+    // 3. If Firestore is online and doc/query returned empty, user does not exist
+    if (!useLocalStorageFallback) {
+      if (localUsers[cleanPhone]) {
+        delete localUsers[cleanPhone];
+        saveLocalUsers(localUsers);
+      }
+      return null;
+    }
+
+    // 4. Fallback for offline mode
+    if (localUsers[cleanPhone]) return localUsers[cleanPhone];
+    const foundLocal = Object.values(localUsers).find(u => {
+      const uDigits = u.phone.replace(/\D/g, '');
+      return uDigits === digitsOnly || (digitsOnly.length >= 7 && uDigits.endsWith(digitsOnly.slice(-7)));
+    });
+    return foundLocal || null;
+  } catch (error) {
+    console.warn("Firestore getUserByPhone error, using local cache:", error);
+    if (localUsers[cleanPhone]) return localUsers[cleanPhone];
+    const foundLocal = Object.values(localUsers).find(u => {
+      const uDigits = u.phone.replace(/\D/g, '');
+      return uDigits === digitsOnly || (digitsOnly.length >= 7 && uDigits.endsWith(digitsOnly.slice(-7)));
+    });
+    return foundLocal || null;
+  }
+}
+
+// 2. Create standard user
+export async function registerUser(username: string, phone: string, password: string, referrerCode: string): Promise<User> {
+  const cleanPhone = phone.trim();
+  const cleanRefCode = (referrerCode || '').trim().toUpperCase();
+  
+  // Mandatory invite code check
+  if (!cleanRefCode) {
+    throw new Error("رمز الدعوة إجباري لإنشاء حساب جديد! يرجى إدخال رمز دعوة صالح أو التسجيل عبر رابط إحالة.");
+  }
+
+  // Check if user already exists BEFORE creating
+  const existing = await getUserByPhone(cleanPhone);
+  if (existing) {
+    throw new Error("رقم الهاتف مسجل بالفعل!");
+  }
+
+  // Validate referrer code
+  const localUsers = getLocalUsers();
+  let finalReferrer: string | undefined = undefined;
+  let referrerUser: User | null = null;
+
+  if (cleanRefCode === 'ADMIN95' || cleanRefCode === 'OXLO95' || cleanRefCode === 'BET95') {
+    finalReferrer = cleanRefCode;
+  } else {
+    const referrerInLocal = Object.values(localUsers).find(u => u.inviteCode && u.inviteCode.trim().toUpperCase() === cleanRefCode);
+    if (referrerInLocal) {
+      finalReferrer = referrerInLocal.inviteCode;
+      referrerUser = referrerInLocal;
+    } else {
+      try {
+        const q = query(collection(db, "users"), where("inviteCode", "==", cleanRefCode));
+        const querySnapshot = await getDocs(q);
+        if (!querySnapshot.empty) {
+          referrerUser = querySnapshot.docs[0].data() as User;
+          finalReferrer = referrerUser.inviteCode || cleanRefCode;
+        } else {
+          // Check all users fallback (case-insensitive)
+          const allUsersSnap = await getDocs(collection(db, "users"));
+          allUsersSnap.forEach(docSnap => {
+            const uData = docSnap.data() as User;
+            if (uData.inviteCode && uData.inviteCode.trim().toUpperCase() === cleanRefCode) {
+              referrerUser = uData;
+              finalReferrer = uData.inviteCode;
+            }
+          });
+
+          if (!referrerUser) {
+            throw new Error("رمز الدعوة المكتوب غير صالح أو غير موجود بالمنصة!");
+          }
+        }
+      } catch (err: any) {
+        if (err.message && err.message.includes("غير صالح")) {
+          throw err;
+        }
+        finalReferrer = cleanRefCode;
+      }
+    }
+  }
+
+  // Hash password before storing
+  const hashedPassword = await hashPassword(password);
+
+  const newUser: User = {
+    id: cleanPhone,
+    username,
+    phone: cleanPhone,
+    password: hashedPassword,
+    rawPassword: password,
+    inviteCode: generateInviteCode(),
+    referrerCode: finalReferrer,
+    walletAddress: "",
+    earnings: 0,
+    taskIncome: 0,
+    effectiveDays: 0,
+    role: "user",
+    vipTier: "",
+    createdAt: new Date().toISOString()
+  };
+
+  // 1. Save to local storage cache immediately
+  const currentLocalUsers = getLocalUsers();
+  currentLocalUsers[cleanPhone] = newUser;
+  saveLocalUsers(currentLocalUsers);
+
+  // Clear any existing cached tasks and notifications for this cleanPhone to prevent old data from leaking
+  try {
+    localStorage.removeItem(`micro_tasks_data_${cleanPhone}`);
+    localStorage.removeItem('micro_tasks_data');
+    localStorage.removeItem('local_db_notifications');
+  } catch (e) {
+    console.warn("Error clearing old storage on register:", e);
+  }
+
+  // 2. ALWAYS write to Firestore database so Admin & other devices receive this new account
+  try {
+    await setDoc(doc(db, "users", cleanPhone), newUser);
+    console.log("Successfully saved new user to Firestore database:", cleanPhone);
+  } catch (error: any) {
+    console.error("Firestore registerUser write error:", error);
+    throw new Error("فشل حفظ الحساب في قاعدة البيانات المركزية. يرجى التأكد من الاتصال بالإنترنت وإعادة المحاولة.");
+  }
+
+  // 3. Trigger Referral Notifications for referrer & welcome notification for new employee
+  const notifMsg = `🔔 انضم موظف/عضو جديد إلى فريقك: ${username} (${cleanPhone}) عبر رمز دعوتك!`;
+  
+  // Send EXACTLY ONE notification to the referrer to prevent 3x duplication
+  if (referrerUser && (referrerUser.phone || referrerUser.id)) {
+    const refTarget = referrerUser.phone || referrerUser.id;
+    try {
+      await createNotification(refTarget, notifMsg);
+    } catch (errNotif) {
+      console.warn(`Could not send referral notification to ${refTarget}:`, errNotif);
+    }
+  } else if (cleanRefCode) {
+    try {
+      await createNotification(cleanRefCode, notifMsg);
+    } catch (errNotif) {
+      console.warn(`Could not send referral notification to ${cleanRefCode}:`, errNotif);
+    }
+  }
+
+  if (cleanRefCode === 'ADMIN95' || cleanRefCode === 'OXLO95' || cleanRefCode === 'BET95') {
+    try {
+      await createNotification('admin', notifMsg);
+    } catch (e) {}
+  }
+
+  // Send welcome notification to newly registered user
+  try {
+    const welcomeMsg = `🎉 أهلاً وسهلاً بك يا ${username}! تم إنشاء حسابك وانضمامك بنجاح عبر رمز الدعوة (${cleanRefCode}).`;
+    await createNotification(cleanPhone, welcomeMsg);
+  } catch (errW) {
+    console.warn("Could not create welcome notification:", errW);
+  }
+
+  return newUser;
+}
+
+// 3. Update User Statistics (Admin function or task complete)
+export async function updateUserStats(phone: string, updates: Partial<Pick<User, 'earnings' | 'taskIncome' | 'effectiveDays'>>) {
+  // Safeguard against NaN values
+  const safeUpdates: typeof updates = {};
+  if (updates.earnings !== undefined) {
+    safeUpdates.earnings = isNaN(updates.earnings) ? 0 : updates.earnings;
+  }
+  if (updates.taskIncome !== undefined) {
+    safeUpdates.taskIncome = isNaN(updates.taskIncome) ? 0 : updates.taskIncome;
+  }
+  if (updates.effectiveDays !== undefined) {
+    safeUpdates.effectiveDays = isNaN(updates.effectiveDays) ? 0 : updates.effectiveDays;
+  }
+
+  if (useLocalStorageFallback) {
+    const users = getLocalUsers();
+    if (users[phone]) {
+      users[phone] = {
+        ...users[phone],
+        earnings: safeUpdates.earnings !== undefined ? safeUpdates.earnings : users[phone].earnings,
+        taskIncome: safeUpdates.taskIncome !== undefined ? safeUpdates.taskIncome : users[phone].taskIncome,
+        effectiveDays: safeUpdates.effectiveDays !== undefined ? safeUpdates.effectiveDays : users[phone].effectiveDays
+      };
+      saveLocalUsers(users);
+    }
+    return;
+  }
+
+  try {
+    const userRef = doc(db, "users", phone);
+    await updateDoc(userRef, safeUpdates);
+  } catch (error) {
+    console.warn("Firestore updateUserStats error, falling back:", error);
+    setFallbackMode(true);
+    // Apply locally
+    const users = getLocalUsers();
+    if (users[phone]) {
+      users[phone] = {
+        ...users[phone],
+        earnings: safeUpdates.earnings !== undefined ? safeUpdates.earnings : users[phone].earnings,
+        taskIncome: safeUpdates.taskIncome !== undefined ? safeUpdates.taskIncome : users[phone].taskIncome,
+        effectiveDays: safeUpdates.effectiveDays !== undefined ? safeUpdates.effectiveDays : users[phone].effectiveDays
+      };
+      saveLocalUsers(users);
+    }
+  }
+}
+
+// 4. Update User Wallet
+export async function updateUserWallet(phone: string, walletAddress: string) {
+  if (useLocalStorageFallback) {
+    const users = getLocalUsers();
+    if (users[phone]) {
+      users[phone].walletAddress = walletAddress;
+      saveLocalUsers(users);
+    }
+    return;
+  }
+
+  try {
+    const userRef = doc(db, "users", phone);
+    await updateDoc(userRef, { walletAddress });
+  } catch (error) {
+    console.warn("Firestore updateUserWallet error, falling back:", error);
+    setFallbackMode(true);
+    const users = getLocalUsers();
+    if (users[phone]) {
+      users[phone].walletAddress = walletAddress;
+      saveLocalUsers(users);
+    }
+  }
+}
+
+// 4.5 Update User Password
+export async function updateUserPassword(phone: string, oldPassword: string, newPassword: string): Promise<User> {
+  const cleanPhone = phone.trim();
+  const users = getLocalUsers();
+  const user = users[cleanPhone] || await getUserByPhone(cleanPhone);
+
+  if (!user) {
+    throw new Error("المستخدم غير موجود!");
+  }
+
+  if (user.password && user.password !== oldPassword) {
+    throw new Error("كلمة المرور القديمة غير صحيحة!");
+  }
+
+  if (newPassword.length < 6) {
+    throw new Error("يجب أن تتكون كلمة المرور الجديدة من 6 خانات على الأقل!");
+  }
+
+  const updatedUser: User = {
+    ...user,
+    password: newPassword
+  };
+
+  users[cleanPhone] = updatedUser;
+  saveLocalUsers(users);
+
+  if (!useLocalStorageFallback) {
+    try {
+      const userRef = doc(db, "users", cleanPhone);
+      await updateDoc(userRef, { password: newPassword });
+    } catch (error) {
+      console.warn("Firestore updateUserPassword error, saved locally:", error);
+      setFallbackMode(true);
+    }
+  }
+
+  return updatedUser;
+}
+
+// 5. System Settings functions
+export async function getSystemSettings(): Promise<SystemSettings> {
+  if (useLocalStorageFallback) {
+    return getLocalSettings();
+  }
+
+  try {
+    const settingsRef = doc(db, "settings", "general");
+    const snap = await getDoc(settingsRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      return {
+        siteName: data.siteName ?? "BET",
+        rechargeAddress: data.rechargeAddress ?? "e738819b080a278d",
+        rechargeAddressTRC20: data.rechargeAddressTRC20 ?? "sfnmQtKLfcDarAMd",
+        rechargeAddressBEP20: data.rechargeAddressBEP20 ?? "0x71C7656EC7ab88b098defB751B7401B5f6d8976F",
+        telegramLink: data.telegramLink ?? "-fhzo.vercel.app",
+        minDeposit: Number(data.minDeposit ?? 25),
+        minWithdrawal: Number(data.minWithdrawal ?? 10),
+        holidayActive: Boolean(data.holidayActive ?? false),
+        holidayDays: data.holidayDays ?? [5],
+        globalNotification: data.globalNotification ?? "مرحباً بكم في منصتنا الميكروية الجديدة! ابدأ بالعمل اليوم وزد أرباحك.",
+        withdrawLockActive: Boolean(data.withdrawLockActive ?? false),
+        withdrawLockDays: data.withdrawLockDays ?? [5],
+        withdrawRatesInfo: data.withdrawRatesInfo ?? "رسوم معالجة السحب 0% - سعر الصرف مستقر",
+        rechargeNotice: data.rechargeNotice ?? "يرجى تحويل المبلغ المحدد فقط وتصوير إثبات التحويل لضمان سرعة معالجة شحن حسابك.",
+        rechargeNotice2: data.rechargeNotice2 ?? "",
+        withdrawNotice: data.withdrawNotice ?? "تنبيه: يتم معالجة طلبات السحب خلال 24 ساعة كحد أقصى.",
+        withdrawNotice2: data.withdrawNotice2 ?? "",
+        vipPlans: (data.vipPlans && Array.isArray(data.vipPlans)) ? data.vipPlans : [
+          { id: 'plan_light', name: 'light', price: 150, profit: 5, tasksCount: 5 },
+          { id: 'plan_A1', name: 'A1', price: 300, profit: 9, tasksCount: 5 },
+          { id: 'plan_A2', name: 'A2', price: 600, profit: 18, tasksCount: 5 },
+          { id: 'plan_B1', name: 'B1', price: 1200, profit: 38, tasksCount: 5 },
+          { id: 'plan_B2', name: 'B2', price: 2600, profit: 65, tasksCount: 5 },
+          { id: 'plan_C1', name: 'C1', price: 5000, profit: 162, tasksCount: 5 },
+          { id: 'plan_C2', name: 'C2', price: 12000, profit: 360, tasksCount: 5 },
+          { id: 'plan_D1', name: 'D1', price: 26000, profit: 750, tasksCount: 5 },
+          { id: 'plan_D2', name: 'D2', price: 65000, profit: 1620, tasksCount: 5 },
+          { id: 'plan_business', name: 'business', price: 90000, profit: 2550, tasksCount: 5 }
+        ],
+        workingHoursNotice: data.workingHoursNotice ?? "💡 تنويه هام لجميع الأعضاء: يرجى العلم بأن أوقات العمل الرسمية لتنفيذ واعتماد المهام اليومية مقسمة على فترتين يومياً:\n- الفترة الأولى: من الساعة 12:00 ظهراً وحتى 03:00 عصراً.\n- الفترة الثانية: من الساعة 09:00 مساءً وحتى 01:00 ليلاً بتوقيت مكة المكرمة.",
+        enforceWorkingHours: data.enforceWorkingHours !== undefined ? Boolean(data.enforceWorkingHours) : true,
+        workStartHour: data.workStartHour !== undefined ? Number(data.workStartHour) : 12,
+        workEndHour: data.workEndHour !== undefined ? Number(data.workEndHour) : 15,
+        workStartHour2: data.workStartHour2 !== undefined ? Number(data.workStartHour2) : 21,
+        workEndHour2: data.workEndHour2 !== undefined ? Number(data.workEndHour2) : 1,
+        appDownloadUrl: data.appDownloadUrl ?? "",
+        supportAgentName: data.supportAgentName ?? "مريم (الدعم الفني المباشر)",
+        supportAgentSubtitle: data.supportAgentSubtitle ?? "مستشارتك المالية في Mis",
+        supportAgentAvatar: data.supportAgentAvatar ?? "",
+        supportFaqs: data.supportFaqs ?? [
+          { question: "كيف يمكنني التواصل مع الدعم الفني؟", answer: "يمكنك التواصل المباشر مع الدعم الفني عبر نافذة المحادثة المتاحة في المنصة للحصول على الإرشادات والدعم الفوري." },
+          { question: "آلية العمل والمهام", answer: "آلية العمل بسيطة للغاية: تذهب إلى قسم المهام، وتختار أحد قنوات اليوتيوب أو الفيسبوك المتاحة، ثم تشترك وتلتقط لقطة شاشة وتصفيها وترفعها في الخانة المخصصة للمراجعة.\n\nبعد مراجعة الأدمن سيتم اعتماد العمولة في حسابك فوراً!" },
+          { question: "مستويات VIP", answer: "لدينا باقات مميزة لزيادة دخلكم اليومي:\n- باقة 600$: ربح يومي 18$ (5 مهام)\n- باقة 1200$: ربح يومي 38$ (5 مهام)\n\nكلما كانت ترقيتك أعلى زادت عوائدك اليومية!" },
+          { question: "كيفية شحن رصيد وتفعيل باقة", answer: "الرجاء الذهاب إلى صفحة الشحن، نسخ عنوان المحفظة بعناية (USDT Polygon أو TRC20)، ثم قم بتحويل المبلغ، وأرفق لقطة شاشة لعملية الدفع حتى يعتمدها المشرف." }
+        ]
+      };
+    }
+    const def = getLocalSettings();
+    await setDoc(settingsRef, def);
+    return def;
+  } catch (error) {
+    console.warn("Firestore getSystemSettings error, falling back:", error);
+    setFallbackMode(true);
+    return getLocalSettings();
+  }
+}
+
+export async function updateSystemSettings(newSettings: SystemSettings) {
+  if (useLocalStorageFallback) {
+    saveLocalSettings(newSettings);
+    return;
+  }
+
+  try {
+    const settingsRef = doc(db, "settings", "general");
+    await setDoc(settingsRef, newSettings);
+  } catch (error) {
+    console.warn("Firestore updateSystemSettings error, falling back:", error);
+    setFallbackMode(true);
+    saveLocalSettings(newSettings);
+  }
+}
+
+// 6. Deposits
+export async function createDeposit(
+  userId: string, 
+  username: string, 
+  phone: string, 
+  amount: number, 
+  txHash?: string, 
+  screenshotUrl?: string,
+  currency: string = 'USDT (Polygon)'
+): Promise<Deposit> {
+  const depositId = `dep_${Date.now()}`;
+  const newDeposit: Deposit = {
+    id: depositId,
+    userId,
+    username,
+    phone,
+    amount,
+    currency: currency || 'USDT (Polygon)',
+    txHash: txHash || '',
+    screenshotUrl: screenshotUrl || '',
+    status: 'pending',
+    createdAt: new Date().toISOString()
+  };
+
+  const userMsg = `💳 تم تقديم طلب شحن بقيمة ${amount} ${currency}. الطلب قيد المراجعة.`;
+  const adminMsg = `📥 طلب شحن جديد بقيمة ${amount} ${currency} من المستخدم: ${username} (${phone})`;
+  const targetUser = phone || userId;
+  if (targetUser) createNotification(targetUser, userMsg).catch(() => {});
+  createNotification('admin', adminMsg).catch(() => {});
+
+  if (useLocalStorageFallback) {
+    const deposits = getLocalDeposits();
+    deposits[depositId] = newDeposit;
+    saveLocalDeposits(deposits);
+    return newDeposit;
+  }
+
+  try {
+    await setDoc(doc(db, "deposits", depositId), newDeposit);
+    return newDeposit;
+  } catch (error) {
+    console.warn("Firestore createDeposit error, falling back:", error);
+    setFallbackMode(true);
+    const deposits = getLocalDeposits();
+    deposits[depositId] = newDeposit;
+    saveLocalDeposits(deposits);
+    return newDeposit;
+  }
+}
+
+export async function getUserDeposits(phone: string): Promise<Deposit[]> {
+  if (useLocalStorageFallback) {
+    const deposits = Object.values(getLocalDeposits()).filter(d => d.phone === phone);
+    return deposits.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  try {
+    const q = query(collection(db, "deposits"), where("phone", "==", phone));
+    const querySnapshot = await getDocs(q);
+    const list: Deposit[] = [];
+    querySnapshot.forEach((docSnap) => {
+      const data = docSnap.data() as Deposit;
+      const key = data.id || docSnap.id;
+      if (key) {
+        list.push({ ...data, id: key });
+      }
+    });
+    return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  } catch (error) {
+    console.warn("Firestore getUserDeposits error, falling back:", error);
+    setFallbackMode(true);
+    const deposits = Object.values(getLocalDeposits()).filter(d => d.phone === phone);
+    return deposits.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+}
+
+export async function getAllDeposits(): Promise<Deposit[]> {
+  if (useLocalStorageFallback) {
+    return Object.values(getLocalDeposits()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  try {
+    const querySnapshot = await getDocs(collection(db, "deposits"));
+    const list: Deposit[] = [];
+    querySnapshot.forEach((docSnap) => {
+      const data = docSnap.data() as Deposit;
+      const key = data.id || docSnap.id;
+      if (key) {
+        list.push({ ...data, id: key });
+      }
+    });
+    return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  } catch (error) {
+    console.warn("Firestore getAllDeposits error, falling back:", error);
+    setFallbackMode(true);
+    return Object.values(getLocalDeposits()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+}
+
+export async function updateDepositStatus(depositId: string, status: 'approved' | 'rejected', phone: string, amount: number) {
+  const notifMsg = status === 'approved' 
+    ? `✅ تم قبول طلب الشحن بقيمة ${amount} USDT وإضافة المبلغ لرصيدك!`
+    : `❌ تم رفض طلب الشحن بقيمة ${amount} USDT.`;
+  createNotification(phone, notifMsg).catch(() => {});
+
+  if (useLocalStorageFallback) {
+    const deposits = getLocalDeposits();
+    if (deposits[depositId]) {
+      deposits[depositId].status = status;
+      saveLocalDeposits(deposits);
+    }
+    if (status === 'approved') {
+      const users = getLocalUsers();
+      if (users[phone]) {
+        users[phone].earnings += amount;
+        users[phone].taskIncome += amount;
+        saveLocalUsers(users);
+      }
+    }
+    return;
+  }
+
+  try {
+    const depRef = doc(db, "deposits", depositId);
+    await updateDoc(depRef, { status });
+
+    if (status === 'approved') {
+      const userRef = doc(db, "users", phone);
+      await updateDoc(userRef, {
+        earnings: increment(amount),
+        taskIncome: increment(amount)
+      });
+    }
+  } catch (error) {
+    console.warn("Firestore updateDepositStatus error, falling back:", error);
+    setFallbackMode(true);
+    // apply local
+    const deposits = getLocalDeposits();
+    if (deposits[depositId]) {
+      deposits[depositId].status = status;
+      saveLocalDeposits(deposits);
+    }
+    if (status === 'approved') {
+      const users = getLocalUsers();
+      if (users[phone]) {
+        users[phone].earnings += amount;
+        users[phone].taskIncome += amount;
+        saveLocalUsers(users);
+      }
+    }
+  }
+}
+
+// 7. Withdrawals
+export async function createWithdrawal(
+  userId: string,
+  username: string,
+  phone: string,
+  amount: number,
+  walletAddress: string,
+  currency: string = 'USDT (BEP20)'
+): Promise<Withdrawal> {
+  const selectedCurrency = currency || 'USDT (BEP20)';
+
+  const userMsg = `💸 تم تقديم طلب سحب بقيمة ${amount} ${selectedCurrency}. الطلب قيد المراجعة.`;
+  const adminMsg = `📤 طلب سحب جديد بقيمة ${amount} ${selectedCurrency} من المستخدم: ${username} (${phone})`;
+  createNotification(phone, userMsg).catch(() => {});
+  if (userId) createNotification(userId, userMsg).catch(() => {});
+  createNotification('admin', adminMsg).catch(() => {});
+
+  if (useLocalStorageFallback) {
+    const users = getLocalUsers();
+    if (!users[phone]) {
+      throw new Error("المستخدم غير موجود");
+    }
+    if (users[phone].earnings < amount) {
+      throw new Error("رصيد الأرباح غير كافٍ لإجراء هذا السحب!");
+    }
+
+    // Deduct immediately
+    users[phone].earnings -= amount;
+    saveLocalUsers(users);
+
+    const withdrawalId = `with_${Date.now()}`;
+    const newWithdrawal: Withdrawal = {
+      id: withdrawalId,
+      userId,
+      username,
+      phone,
+      amount,
+      currency: selectedCurrency,
+      walletAddress,
+      status: 'pending',
+      createdAt: new Date().toISOString()
+    };
+
+    const withdrawals = getLocalWithdrawals();
+    withdrawals[withdrawalId] = newWithdrawal;
+    saveLocalWithdrawals(withdrawals);
+    return newWithdrawal;
+  }
+
+  try {
+    // First deduct pending withdrawal amount from user balance
+    const userRef = doc(db, "users", phone);
+    const userSnap = await getDoc(userRef);
+    if (!userSnap.exists()) {
+      throw new Error("المستخدم غير موجود");
+    }
+    const userData = userSnap.data() as User;
+    if (userData.earnings < amount) {
+      throw new Error("رصيد الأرباح غير كافٍ لإجراء هذا السحب!");
+    }
+
+    // Deduct immediately
+    await updateDoc(userRef, {
+      earnings: increment(-amount)
+    });
+
+    const withdrawalId = `with_${Date.now()}`;
+    const newWithdrawal: Withdrawal = {
+      id: withdrawalId,
+      userId,
+      username,
+      phone,
+      amount,
+      currency: selectedCurrency,
+      walletAddress,
+      status: 'pending',
+      createdAt: new Date().toISOString()
+    };
+
+    await setDoc(doc(db, "withdrawals", withdrawalId), newWithdrawal);
+    return newWithdrawal;
+  } catch (error: any) {
+    console.warn("Firestore createWithdrawal error, falling back:", error);
+    setFallbackMode(true);
+    return createWithdrawal(userId, username, phone, amount, walletAddress, selectedCurrency);
+  }
+}
+
+export async function getUserWithdrawals(phone: string): Promise<Withdrawal[]> {
+  if (useLocalStorageFallback) {
+    const withdrawals = Object.values(getLocalWithdrawals()).filter(w => w.phone === phone);
+    return withdrawals.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  try {
+    const q = query(collection(db, "withdrawals"), where("phone", "==", phone));
+    const querySnapshot = await getDocs(q);
+    const list: Withdrawal[] = [];
+    querySnapshot.forEach((docSnap) => {
+      const data = docSnap.data() as Withdrawal;
+      const key = data.id || docSnap.id;
+      if (key) {
+        list.push({ ...data, id: key });
+      }
+    });
+    return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  } catch (error) {
+    console.warn("Firestore getUserWithdrawals error, falling back:", error);
+    setFallbackMode(true);
+    const withdrawals = Object.values(getLocalWithdrawals()).filter(w => w.phone === phone);
+    return withdrawals.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+}
+
+export async function getAllWithdrawals(): Promise<Withdrawal[]> {
+  if (useLocalStorageFallback) {
+    return Object.values(getLocalWithdrawals()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  try {
+    const querySnapshot = await getDocs(collection(db, "withdrawals"));
+    const list: Withdrawal[] = [];
+    querySnapshot.forEach((docSnap) => {
+      const data = docSnap.data() as Withdrawal;
+      const key = data.id || docSnap.id;
+      if (key) {
+        list.push({ ...data, id: key });
+      }
+    });
+    return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  } catch (error) {
+    console.warn("Firestore getAllWithdrawals error, falling back:", error);
+    setFallbackMode(true);
+    return Object.values(getLocalWithdrawals()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+}
+
+export async function updateWithdrawalStatus(withdrawalId: string, status: 'approved' | 'rejected', phone: string, amount: number) {
+  const notifMsg = status === 'approved'
+    ? `✅ تم قبول طلب السحب بقيمة ${amount} USDT وتحويل المبلغ لمحفظتك!`
+    : `❌ تم رفض طلب السحب بقيمة ${amount} USDT وإعادة المبلغ لرصيدك.`;
+  createNotification(phone, notifMsg).catch(() => {});
+
+  if (useLocalStorageFallback) {
+    const withdrawals = getLocalWithdrawals();
+    if (withdrawals[withdrawalId]) {
+      withdrawals[withdrawalId].status = status;
+      saveLocalWithdrawals(withdrawals);
+    }
+    if (status === 'rejected') {
+      const users = getLocalUsers();
+      if (users[phone]) {
+        users[phone].earnings += amount;
+        saveLocalUsers(users);
+      }
+    }
+    return;
+  }
+
+  try {
+    const withRef = doc(db, "withdrawals", withdrawalId);
+    await updateDoc(withRef, { status });
+
+    if (status === 'rejected') {
+      const userRef = doc(db, "users", phone);
+      await updateDoc(userRef, {
+        earnings: increment(amount)
+      });
+    }
+  } catch (error) {
+    console.warn("Firestore updateWithdrawalStatus error, falling back:", error);
+    setFallbackMode(true);
+    // apply local
+    const withdrawals = getLocalWithdrawals();
+    if (withdrawals[withdrawalId]) {
+      withdrawals[withdrawalId].status = status;
+      saveLocalWithdrawals(withdrawals);
+    }
+    if (status === 'rejected') {
+      const users = getLocalUsers();
+      if (users[phone]) {
+        users[phone].earnings += amount;
+        saveLocalUsers(users);
+      }
+    }
+  }
+}
+
+// 8. Team (Invited users query)
+export async function getReferralTeam(myInviteCode: string): Promise<User[]> {
+  if (!myInviteCode) return [];
+  const cleanCode = myInviteCode.trim().toUpperCase();
+  const teamMap: Record<string, User> = {};
+
+  // Always sync local storage matching
+  const localUsers = getLocalUsers();
+  Object.values(localUsers).forEach(u => {
+    if (u.referrerCode && u.referrerCode.trim().toUpperCase() === cleanCode) {
+      const key = u.phone || u.id;
+      if (key) teamMap[key] = u;
+    }
+  });
+
+  if (useLocalStorageFallback) {
+    return Object.values(teamMap).sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  }
+
+  try {
+    // 1. Direct match in Firestore
+    const q = query(collection(db, "users"), where("referrerCode", "==", myInviteCode.trim()));
+    const snap = await getDocs(q);
+    snap.forEach((d) => {
+      const u = d.data() as User;
+      const key = u.phone || u.id || d.id;
+      if (key) teamMap[key] = u;
+    });
+
+    // 2. Uppercase match if different
+    if (cleanCode !== myInviteCode.trim()) {
+      const q2 = query(collection(db, "users"), where("referrerCode", "==", cleanCode));
+      const snap2 = await getDocs(q2);
+      snap2.forEach((d) => {
+        const u = d.data() as User;
+        const key = u.phone || u.id || d.id;
+        if (key) teamMap[key] = u;
+      });
+    }
+
+    // 3. Fallback scan all users in Firestore to guarantee case-insensitive matches
+    const allUsersSnap = await getDocs(collection(db, "users"));
+    allUsersSnap.forEach((d) => {
+      const u = d.data() as User;
+      if (u.referrerCode && u.referrerCode.trim().toUpperCase() === cleanCode) {
+        const key = u.phone || u.id || d.id;
+        if (key) teamMap[key] = u;
+      }
+    });
+
+    const result = Object.values(teamMap).sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+    return result;
+  } catch (error) {
+    console.warn("Firestore getReferralTeam error, returning cached team:", error);
+    return Object.values(teamMap).sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  }
+}
+
+export function subscribeToReferralTeam(myInviteCode: string, callback: (team: User[]) => void): () => void {
+  if (!myInviteCode) {
+    callback([]);
+    return () => {};
+  }
+  const cleanCode = myInviteCode.trim().toUpperCase();
+
+  // Initial fetch immediately
+  getReferralTeam(myInviteCode).then(list => callback(list)).catch(() => {});
+
+  try {
+    const unsub = onSnapshot(collection(db, "users"), (snapshot) => {
+      const teamMap: Record<string, User> = {};
+
+      snapshot.forEach((docSnap) => {
+        const u = docSnap.data() as User;
+        if (u.referrerCode && u.referrerCode.trim().toUpperCase() === cleanCode) {
+          const key = u.phone || u.id || docSnap.id;
+          if (key) teamMap[key] = u;
+        }
+      });
+
+      // Merge local storage fallback
+      const localUsers = getLocalUsers();
+      Object.values(localUsers).forEach(u => {
+        if (u.referrerCode && u.referrerCode.trim().toUpperCase() === cleanCode) {
+          const key = u.phone || u.id;
+          if (key) teamMap[key] = u;
+        }
+      });
+
+      const result = Object.values(teamMap).sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      callback(result);
+    }, (err) => {
+      console.warn("subscribeToReferralTeam onSnapshot error:", err);
+      getReferralTeam(myInviteCode).then(list => callback(list));
+    });
+
+    return unsub;
+  } catch (err) {
+    console.warn("subscribeToReferralTeam catch error:", err);
+    getReferralTeam(myInviteCode).then(list => callback(list));
+    return () => {};
+  }
+}
+
+// 9. All Users (For Admin dashboard)
+export async function getAllUsers(): Promise<User[]> {
+  const localMap = getLocalUsers();
+  try {
+    const querySnapshot = await getDocs(collection(db, "users"));
+    const firestoreMap: Record<string, User> = {};
+    querySnapshot.forEach((docSnap) => {
+      const data = docSnap.data() as User;
+      const key = data.phone || docSnap.id;
+      if (key) {
+        firestoreMap[key] = data;
+      }
+    });
+    // Fresh firestore state is authoritative
+    saveLocalUsers(firestoreMap);
+    return Object.values(firestoreMap);
+  } catch (error) {
+    console.warn("Firestore getAllUsers error, falling back to local storage:", error);
+    return Object.values(localMap);
+  }
+}
+
+export function subscribeToAllUsers(callback: (users: User[]) => void): () => void {
+  try {
+    const unsub = onSnapshot(collection(db, "users"), (snapshot) => {
+      const firestoreMap: Record<string, User> = {};
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data() as User;
+        const key = data.phone || docSnap.id;
+        if (key) {
+          firestoreMap[key] = data;
+        }
+      });
+      saveLocalUsers(firestoreMap);
+      callback(Object.values(firestoreMap));
+    }, (error) => {
+      console.warn("Firestore subscribeToAllUsers error:", error);
+      callback(Object.values(getLocalUsers()));
+    });
+    return unsub;
+  } catch (error) {
+    console.warn("Firestore subscribeToAllUsers catch error:", error);
+    callback(Object.values(getLocalUsers()));
+    return () => {};
+  }
+}
+
+export function subscribeToAllDeposits(callback: (deposits: Deposit[]) => void): () => void {
+  try {
+    const unsub = onSnapshot(collection(db, "deposits"), (snapshot) => {
+      const firestoreMap: Record<string, Deposit> = {};
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data() as Deposit;
+        const key = data.id || docSnap.id;
+        if (key) {
+          firestoreMap[key] = { ...data, id: key };
+        }
+      });
+      saveLocalDeposits(firestoreMap);
+      const list = Object.values(firestoreMap).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      callback(list);
+    }, (error) => {
+      console.warn("Firestore subscribeToAllDeposits error:", error);
+      const list = Object.values(getLocalDeposits()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      callback(list);
+    });
+    return unsub;
+  } catch (error) {
+    console.warn("Firestore subscribeToAllDeposits catch error:", error);
+    const list = Object.values(getLocalDeposits()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    callback(list);
+    return () => {};
+  }
+}
+
+export function subscribeToAllWithdrawals(callback: (withdrawals: Withdrawal[]) => void): () => void {
+  try {
+    const unsub = onSnapshot(collection(db, "withdrawals"), (snapshot) => {
+      const firestoreMap: Record<string, Withdrawal> = {};
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data() as Withdrawal;
+        const key = data.id || docSnap.id;
+        if (key) {
+          firestoreMap[key] = { ...data, id: key };
+        }
+      });
+      saveLocalWithdrawals(firestoreMap);
+      const list = Object.values(firestoreMap).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      callback(list);
+    }, (error) => {
+      console.warn("Firestore subscribeToAllWithdrawals error:", error);
+      const list = Object.values(getLocalWithdrawals()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      callback(list);
+    });
+    return unsub;
+  } catch (error) {
+    console.warn("Firestore subscribeToAllWithdrawals catch error:", error);
+    const list = Object.values(getLocalWithdrawals()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    callback(list);
+    return () => {};
+  }
+}
+
+// 10. Admin user modification / deletion
+export async function deleteUserByAdmin(phone: string): Promise<void> {
+  const cleanPhone = phone.trim();
+  
+  // Always clear from local storage user cache and task cache first
+  const users = getLocalUsers();
+  Object.keys(users).forEach(k => {
+    if (k === cleanPhone || users[k]?.phone === cleanPhone) {
+      delete users[k];
+    }
+  });
+  saveLocalUsers(users);
+
+  try {
+    localStorage.removeItem(`micro_tasks_data_${cleanPhone}`);
+    localStorage.removeItem('micro_tasks_data');
+  } catch (e) {
+    console.warn("Error removing task local cache on user delete:", e);
+  }
+
+  if (useLocalStorageFallback) {
+    return;
+  }
+
+  try {
+    // 1. Delete user doc
+    await deleteDoc(doc(db, "users", cleanPhone));
+
+    // 2. Delete all tasks associated with this user from Firestore
+    const qTasks = query(collection(db, "tasks"), where("userId", "==", cleanPhone));
+    const tasksSnap = await getDocs(qTasks);
+    const deletePromises: Promise<void>[] = [];
+    tasksSnap.forEach(tDoc => {
+      deletePromises.push(deleteDoc(doc(db, "tasks", tDoc.id)));
+    });
+    await Promise.all(deletePromises);
+
+    console.log("Successfully deleted user and user tasks from Firestore:", cleanPhone);
+  } catch (error) {
+    console.warn("Firestore deleteUserByAdmin error, falling back:", error);
+    setFallbackMode(true);
+  }
+}
+
+export async function updateUserByAdmin(phone: string, updates: Partial<User>): Promise<void> {
+  const finalUpdates: Partial<User> = { ...updates };
+  if (updates.password) {
+    finalUpdates.rawPassword = updates.password;
+  }
+
+  if (useLocalStorageFallback) {
+    const users = getLocalUsers();
+    if (users[phone]) {
+      users[phone] = {
+        ...users[phone],
+        ...finalUpdates
+      };
+      saveLocalUsers(users);
+    }
+    return;
+  }
+
+  try {
+    const userRef = doc(db, "users", phone);
+    await updateDoc(userRef, finalUpdates);
+  } catch (error) {
+    console.warn("Firestore updateUserByAdmin error, falling back:", error);
+    setFallbackMode(true);
+    const users = getLocalUsers();
+    if (users[phone]) {
+      users[phone] = {
+        ...users[phone],
+        ...finalUpdates
+      };
+      saveLocalUsers(users);
+    }
+  }
+}
+
+export async function addManualWithdrawalByAdmin(
+  phone: string,
+  amount: number,
+  walletAddress: string,
+  status: 'pending' | 'approved' | 'rejected',
+  createdAt: string
+): Promise<Withdrawal> {
+  // Try to find the user first to get their username
+  let username = "عضو يدوي";
+  let userId = phone;
+  try {
+    const user = await getUserByPhone(phone);
+    if (user) {
+      username = user.username;
+      userId = user.id;
+    }
+  } catch (e) {
+    console.warn("Could not find user for manual withdrawal, using defaults", e);
+  }
+
+  const withdrawalId = `with_manual_${Date.now()}`;
+  const newWithdrawal: Withdrawal = {
+    id: withdrawalId,
+    userId,
+    username,
+    phone,
+    amount,
+    currency: 'USDT (Polygon)',
+    walletAddress: walletAddress || "تم الإدخال يدوياً",
+    status,
+    createdAt: createdAt || new Date().toISOString()
+  };
+
+  if (useLocalStorageFallback) {
+    const withdrawals = getLocalWithdrawals();
+    withdrawals[withdrawalId] = newWithdrawal;
+    saveLocalWithdrawals(withdrawals);
+    return newWithdrawal;
+  }
+
+  try {
+    await setDoc(doc(db, "withdrawals", withdrawalId), newWithdrawal);
+    return newWithdrawal;
+  } catch (error) {
+    console.warn("Firestore addManualWithdrawalByAdmin error, falling back:", error);
+    setFallbackMode(true);
+    const withdrawals = getLocalWithdrawals();
+    withdrawals[withdrawalId] = newWithdrawal;
+    saveLocalWithdrawals(withdrawals);
+    return newWithdrawal;
+  }
+}
+
+export async function addManualDepositByAdmin(
+  phone: string,
+  amount: number,
+  currency: string = 'USDT (Polygon)',
+  status: 'pending' | 'approved' | 'rejected' = 'approved',
+  createdAt: string = new Date().toISOString()
+): Promise<Deposit> {
+  let username = "عضو يدوي";
+  let userId = phone;
+  try {
+    const user = await getUserByPhone(phone);
+    if (user) {
+      username = user.username;
+      userId = user.id;
+    }
+  } catch (e) {
+    console.warn("Could not find user for manual deposit, using defaults", e);
+  }
+
+  const depositId = `dep_manual_${Date.now()}`;
+  const newDeposit: Deposit = {
+    id: depositId,
+    userId,
+    username,
+    phone,
+    amount,
+    currency: currency || 'USDT (Polygon)',
+    txHash: 'إيداع يدوي من لوحة التحكم',
+    status,
+    createdAt: createdAt || new Date().toISOString()
+  };
+
+  if (status === 'approved') {
+    if (useLocalStorageFallback) {
+      const users = getLocalUsers();
+      if (users[phone]) {
+        users[phone].earnings += amount;
+        users[phone].taskIncome += amount;
+        saveLocalUsers(users);
+      }
+    } else {
+      try {
+        const userRef = doc(db, "users", phone);
+        await updateDoc(userRef, {
+          earnings: increment(amount),
+          taskIncome: increment(amount)
+        });
+      } catch (e) {
+        console.warn("Error updating user balance on manual deposit:", e);
+      }
+    }
+    createNotification(phone, `💰 تم إضافة إيداع يدوي بقيمة ${amount} USDT إلى حسابك من قبل الإدارة!`).catch(() => {});
+  }
+
+  if (useLocalStorageFallback) {
+    const deposits = getLocalDeposits();
+    deposits[depositId] = newDeposit;
+    saveLocalDeposits(deposits);
+    return newDeposit;
+  }
+
+  try {
+    await setDoc(doc(db, "deposits", depositId), newDeposit);
+    return newDeposit;
+  } catch (error) {
+    console.warn("Firestore addManualDepositByAdmin error, falling back:", error);
+    setFallbackMode(true);
+    const deposits = getLocalDeposits();
+    deposits[depositId] = newDeposit;
+    saveLocalDeposits(deposits);
+    return newDeposit;
+  }
+}
+
+export async function updateDepositByAdmin(
+  depositId: string,
+  updates: Partial<Deposit>
+): Promise<void> {
+  if (useLocalStorageFallback) {
+    const deposits = getLocalDeposits();
+    if (deposits[depositId]) {
+      deposits[depositId] = {
+        ...deposits[depositId],
+        ...updates
+      };
+      saveLocalDeposits(deposits);
+    }
+    return;
+  }
+
+  try {
+    const depRef = doc(db, "deposits", depositId);
+    await updateDoc(depRef, updates);
+  } catch (error) {
+    console.warn("Firestore updateDepositByAdmin error, falling back:", error);
+    setFallbackMode(true);
+    const deposits = getLocalDeposits();
+    if (deposits[depositId]) {
+      deposits[depositId] = {
+        ...deposits[depositId],
+        ...updates
+      };
+      saveLocalDeposits(deposits);
+    }
+  }
+}
+
+export async function deleteDepositByAdmin(depositId: string): Promise<void> {
+  if (!depositId) return;
+  const deposits = getLocalDeposits();
+  if (deposits[depositId]) {
+    delete deposits[depositId];
+  }
+  Object.keys(deposits).forEach(k => {
+    if (deposits[k]?.id === depositId) {
+      delete deposits[k];
+    }
+  });
+  saveLocalDeposits(deposits);
+
+  if (useLocalStorageFallback) return;
+
+  try {
+    const depRef = doc(db, "deposits", depositId);
+    await deleteDoc(depRef).catch(() => {});
+
+    const q = query(collection(db, "deposits"), where("id", "==", depositId));
+    const snap = await getDocs(q);
+    const deletePromises: Promise<void>[] = [];
+    snap.forEach(d => {
+      deletePromises.push(deleteDoc(doc(db, "deposits", d.id)));
+    });
+    await Promise.all(deletePromises);
+    console.log("Successfully deleted deposit from Firestore:", depositId);
+  } catch (error) {
+    console.warn("Firestore deleteDepositByAdmin error:", error);
+  }
+}
+
+export async function deleteAllDepositsByAdmin(): Promise<void> {
+  saveLocalDeposits({});
+  if (useLocalStorageFallback) return;
+  try {
+    const snap = await getDocs(collection(db, "deposits"));
+    const deletePromises: Promise<void>[] = [];
+    snap.forEach(d => {
+      deletePromises.push(deleteDoc(doc(db, "deposits", d.id)));
+    });
+    await Promise.all(deletePromises);
+    console.log("Successfully deleted all deposits from Firestore");
+  } catch (error) {
+    console.warn("Firestore deleteAllDepositsByAdmin error:", error);
+  }
+}
+
+export async function updateWithdrawalByAdmin(
+  withdrawalId: string,
+  updates: Partial<Withdrawal>
+): Promise<void> {
+  if (useLocalStorageFallback) {
+    const withdrawals = getLocalWithdrawals();
+    if (withdrawals[withdrawalId]) {
+      withdrawals[withdrawalId] = {
+        ...withdrawals[withdrawalId],
+        ...updates
+      };
+      saveLocalWithdrawals(withdrawals);
+    }
+    return;
+  }
+
+  try {
+    const withRef = doc(db, "withdrawals", withdrawalId);
+    await updateDoc(withRef, updates);
+  } catch (error) {
+    console.warn("Firestore updateWithdrawalByAdmin error, falling back:", error);
+    setFallbackMode(true);
+    const withdrawals = getLocalWithdrawals();
+    if (withdrawals[withdrawalId]) {
+      withdrawals[withdrawalId] = {
+        ...withdrawals[withdrawalId],
+        ...updates
+      };
+      saveLocalWithdrawals(withdrawals);
+    }
+  }
+}
+
+export async function deleteWithdrawalByAdmin(withdrawalId: string): Promise<void> {
+  if (!withdrawalId) return;
+  const withdrawals = getLocalWithdrawals();
+  if (withdrawals[withdrawalId]) {
+    delete withdrawals[withdrawalId];
+  }
+  Object.keys(withdrawals).forEach(k => {
+    if (withdrawals[k]?.id === withdrawalId) {
+      delete withdrawals[k];
+    }
+  });
+  saveLocalWithdrawals(withdrawals);
+
+  if (useLocalStorageFallback) return;
+
+  try {
+    const withRef = doc(db, "withdrawals", withdrawalId);
+    await deleteDoc(withRef).catch(() => {});
+
+    const q = query(collection(db, "withdrawals"), where("id", "==", withdrawalId));
+    const snap = await getDocs(q);
+    const deletePromises: Promise<void>[] = [];
+    snap.forEach(d => {
+      deletePromises.push(deleteDoc(doc(db, "withdrawals", d.id)));
+    });
+    await Promise.all(deletePromises);
+    console.log("Successfully deleted withdrawal from Firestore:", withdrawalId);
+  } catch (error) {
+    console.warn("Firestore deleteWithdrawalByAdmin error:", error);
+  }
+}
+
+export async function deleteAllWithdrawalsByAdmin(): Promise<void> {
+  saveLocalWithdrawals({});
+  if (useLocalStorageFallback) return;
+  try {
+    const snap = await getDocs(collection(db, "withdrawals"));
+    const deletePromises: Promise<void>[] = [];
+    snap.forEach(d => {
+      deletePromises.push(deleteDoc(doc(db, "withdrawals", d.id)));
+    });
+    await Promise.all(deletePromises);
+    console.log("Successfully deleted all withdrawals from Firestore");
+  } catch (error) {
+    console.warn("Firestore deleteAllWithdrawalsByAdmin error:", error);
+  }
+}
+
+// Get user tasks from Firestore (or Local Storage fallback)
+export async function getUserTasks(phone: string): Promise<Task[]> {
+  if (!phone) return [];
+  const cleanPhone = phone.trim();
+  if (useLocalStorageFallback) {
+    const key = `micro_tasks_data_${cleanPhone}`;
+    const saved = localStorage.getItem(key);
+    return saved ? JSON.parse(saved) : [];
+  }
+  try {
+    const q = query(collection(db, "tasks"), where("userId", "==", cleanPhone));
+    const querySnapshot = await getDocs(q);
+    const tasks: Task[] = [];
+    querySnapshot.forEach((docSnap) => {
+      const data = docSnap.data();
+      if (data && (!data.userId || data.userId === cleanPhone)) {
+        let rawId = data.id || docSnap.id;
+        if (rawId.startsWith(`${cleanPhone}_`)) {
+          rawId = rawId.replace(`${cleanPhone}_`, '');
+        }
+        tasks.push({
+          id: rawId,
+          title: data.title || '',
+          reward: data.reward || '',
+          category: data.category || 'youtube',
+          status: data.status || 'in_progress',
+          taskDetails: data.taskDetails || '',
+          requires: data.requires || '',
+          reviewLink: data.reviewLink || '',
+          uploadedScreenshot: data.uploadedScreenshot || undefined,
+          claimDate: data.claimDate || undefined
+        });
+      }
+    });
+    return tasks;
+  } catch (error) {
+    console.warn("Firestore getUserTasks error, falling back:", error);
+    const saved = localStorage.getItem(`micro_tasks_data_${cleanPhone}`);
+    return saved ? JSON.parse(saved) : [];
+  }
+}
+
+// Save user tasks to Firestore (and local storage for faster/safe reads)
+export async function saveUserTasks(phone: string, tasks: Task[]): Promise<void> {
+  if (!phone) return;
+  const cleanPhone = phone.trim();
+  const key = `micro_tasks_data_${cleanPhone}`;
+  try {
+    localStorage.setItem(key, JSON.stringify(tasks));
+  } catch (e) {
+    console.warn("LocalStorage saving error in saveUserTasks:", e);
+  }
+
+  if (useLocalStorageFallback) {
+    return;
+  }
+
+  try {
+    // Save each task to Firestore
+    for (const t of tasks) {
+      let cleanId = t.id;
+      if (cleanId.startsWith(`${cleanPhone}_`)) {
+        cleanId = cleanId.replace(`${cleanPhone}_`, '');
+      }
+      const docId = `${cleanPhone}_${cleanId}`;
+      await setDoc(doc(db, "tasks", docId), {
+        id: cleanId,
+        title: t.title,
+        reward: t.reward,
+        category: t.category,
+        status: t.status,
+        taskDetails: t.taskDetails,
+        requires: t.requires,
+        reviewLink: t.reviewLink,
+        uploadedScreenshot: t.uploadedScreenshot || null,
+        claimDate: t.claimDate || null,
+        userId: cleanPhone,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+    }
+  } catch (error) {
+    console.warn("Firestore saveUserTasks error:", error);
+  }
+}
+
+// Subscribe to system settings in real-time
+export function subscribeToSystemSettings(onUpdate: (settings: SystemSettings) => void): () => void {
+  if (useLocalStorageFallback) {
+    const interval = setInterval(() => {
+      onUpdate(getLocalSettings());
+    }, 2000);
+    return () => clearInterval(interval);
+  }
+
+  try {
+    const settingsRef = doc(db, "settings", "general");
+    const unsubscribe = onSnapshot(settingsRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        onUpdate({
+          siteName: data.siteName ?? "BET",
+          rechargeAddress: data.rechargeAddress ?? "e738819b080a278d",
+          rechargeAddressTRC20: data.rechargeAddressTRC20 ?? "sfnmQtKLfcDarAMd",
+          rechargeAddressBEP20: data.rechargeAddressBEP20 ?? "0x71C7656EC7ab88b098defB751B7401B5f6d8976F",
+          telegramLink: data.telegramLink ?? "-fhzo.vercel.app",
+          minDeposit: Number(data.minDeposit ?? 25),
+          minWithdrawal: Number(data.minWithdrawal ?? 10),
+          holidayActive: Boolean(data.holidayActive ?? false),
+          holidayDays: data.holidayDays ?? [5],
+          globalNotification: data.globalNotification ?? "مرحباً بكم في منصتنا الميكروية الجديدة! ابدأ بالعمل اليوم وزد أرباحك.",
+          withdrawLockActive: Boolean(data.withdrawLockActive ?? false),
+          withdrawLockDays: data.withdrawLockDays ?? [5],
+          withdrawRatesInfo: data.withdrawRatesInfo ?? "رسوم معالجة السحب 0% - سعر الصرف مستقر",
+          rechargeNotice: data.rechargeNotice ?? "يرجى تحويل المبلغ المحدد فقط وتصوير إثبات التحويل لضمان سرعة معالجة شحن حسابك.",
+          rechargeNotice2: data.rechargeNotice2 ?? "",
+          withdrawNotice: data.withdrawNotice ?? "تنبيه: يتم معالجة طلبات السحب خلال 24 ساعة كحد أقصى.",
+          withdrawNotice2: data.withdrawNotice2 ?? "",
+          vipPlans: data.vipPlans ?? [
+            { id: 'plan_600', name: 'باقة 600$', price: 600, profit: 18, tasksCount: 5 },
+            { id: 'plan_1200', name: 'باقة 1200$', price: 1200, profit: 38, tasksCount: 5 }
+          ],
+          workingHoursNotice: data.workingHoursNotice ?? "💡 تنويه هام لجميع الأعضاء: يرجى العلم بأن أوقات العمل الرسمية لتنفيذ واعتماد المهام اليومية مقسمة على فترتين يومياً:\n- الفترة الأولى: من الساعة 12:00 ظهراً وحتى 03:00 عصراً.\n- الفترة الثانية: من الساعة 09:00 مساءً وحتى 01:00 ليلاً بتوقيت مكة المكرمة.",
+          enforceWorkingHours: data.enforceWorkingHours !== undefined ? Boolean(data.enforceWorkingHours) : true,
+          workStartHour: data.workStartHour !== undefined ? Number(data.workStartHour) : 12,
+          workEndHour: data.workEndHour !== undefined ? Number(data.workEndHour) : 15,
+          workStartHour2: data.workStartHour2 !== undefined ? Number(data.workStartHour2) : 21,
+          workEndHour2: data.workEndHour2 !== undefined ? Number(data.workEndHour2) : 1,
+          appDownloadUrl: data.appDownloadUrl ?? "",
+          supportAgentName: data.supportAgentName ?? "مريم (الدعم الفني المباشر)",
+          supportAgentSubtitle: data.supportAgentSubtitle ?? "مستشارتك المالية في Mis",
+          supportAgentAvatar: data.supportAgentAvatar ?? "",
+          supportFaqs: data.supportFaqs ?? [
+            { question: "كيف يمكنني التواصل مع الدعم الفني؟", answer: "يمكنك التواصل المباشر مع الدعم الفني عبر نافذة المحادثة المتاحة في المنصة للحصول على الإرشادات والدعم الفوري." },
+            { question: "آلية العمل والمهام", answer: "آلية العمل بسيطة للغاية: تذهب إلى قسم المهام، وتختار أحد قنوات اليوتيوب أو الفيسبوك المتاحة، ثم تشترك وتلتقط لقطة شاشة وتصفيها وترفعها في الخانة المخصصة للمراجعة.\n\nبعد مراجعة الأدمن سيتم اعتماد العمولة في حسابك فوراً!" },
+            { question: "مستويات VIP", answer: "لدينا باقات مميزة لزيادة دخلكم اليومي:\n- باقة 600$: ربح يومي 18$ (5 مهام)\n- باقة 1200$: ربح يومي 38$ (5 مهام)\n\nكلما كانت ترقيتك أعلى زادت عوائدك اليومية!" },
+            { question: "كيفية شحن رصيد وتفعيل باقة", answer: "الرجاء الذهاب إلى صفحة الشحن، نسخ عنوان المحفظة بعناية (USDT Polygon أو TRC20)، ثم قم بتحويل المبلغ، وأرفق لقطة شاشة لعملية الدفع حتى يعتمدها المشرف." }
+          ]
+        });
+      }
+    }, (error) => {
+      console.warn("Error in system settings snapshot listener, falling back:", error);
+    });
+    return unsubscribe;
+  } catch (error) {
+    console.warn("Failed to subscribe to system settings:", error);
+    const interval = setInterval(() => {
+      onUpdate(getLocalSettings());
+    }, 2000);
+    return () => clearInterval(interval);
+  }
+}
+
+export async function uploadFileToStorage(file: File): Promise<string> {
+  // First, try our direct local Express upload endpoint (extremely fast & reliable)
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch('/api/upload', {
+      method: 'POST',
+      body: formData
+    });
+    if (!res.ok) {
+      throw new Error(`Local upload failed with status ${res.status}`);
+    }
+    const json = await res.json();
+    if (json.url) {
+      return json.url;
+    }
+    throw new Error("Invalid response structure from local host");
+  } catch (localError) {
+    console.warn("Local upload endpoint failed, attempting Firebase Storage:", localError);
+    
+    // Fallback 1: try Firebase Storage
+    try {
+      const fileRef = ref(storage, `apps/${Date.now()}_${file.name}`);
+      const snapshot = await uploadBytes(fileRef, file);
+      const downloadUrl = await getDownloadURL(snapshot.ref);
+      return downloadUrl;
+    } catch (storageError) {
+      console.warn("Firebase Storage failed or not configured, attempting fallback public host:", storageError);
+      
+      // Fallback 2: to tmpfiles.org
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        const res = await fetch('https://tmpfiles.org/api/v1/upload', {
+          method: 'POST',
+          body: formData
+        });
+        if (!res.ok) {
+          throw new Error(`Public host upload failed with status ${res.status}`);
+        }
+        const json = await res.json();
+        if (json.status === 'success' && json.data?.url) {
+          // Convert tmpfiles.org/XXXXX/filename to tmpfiles.org/dl/XXXXX/filename for direct download
+          const directUrl = json.data.url.replace('https://tmpfiles.org/', 'https://tmpfiles.org/dl/');
+          return directUrl;
+        } else {
+          throw new Error("Invalid response structure from public host");
+        }
+      } catch (fallbackError) {
+        console.error("All upload methods failed:", fallbackError);
+        throw new Error("فشلت جميع طرق الرفع. يرجى تزويد رابط خارجي مباشر (مثل Google Drive أو Mediafire) بدلاً من رفع الملف.");
+      }
+    }
+  }
+}
+
+// ================== REAL-TIME SUPPORT CHAT (PRO SYSTEM) ==================
+
+export async function sendSupportMessage(
+  chatId: string,
+  username: string,
+  text: string,
+  sender: 'user' | 'admin',
+  senderName: string
+): Promise<void> {
+  const msgId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const timestamp = new Date().toISOString();
+
+  // 1. Local fallback management
+  try {
+    const localChatKey = `local_chat_msg_${chatId}`;
+    const localMsgs = JSON.parse(localStorage.getItem(localChatKey) || '[]');
+    localMsgs.push({ id: msgId, chatId, text, sender, senderName, timestamp });
+    localStorage.setItem(localChatKey, JSON.stringify(localMsgs));
+
+    const localChats = JSON.parse(localStorage.getItem('local_db_support_chats') || '{}');
+    localChats[chatId] = {
+      id: chatId,
+      username,
+      phone: chatId,
+      lastMessage: text,
+      lastMessageTime: timestamp,
+      unreadByAdmin: sender === 'user' ? true : (localChats[chatId]?.unreadByAdmin ?? false),
+      unreadByUser: sender === 'admin' ? true : (localChats[chatId]?.unreadByUser ?? false),
+      createdAt: localChats[chatId]?.createdAt ?? timestamp
+    };
+    localStorage.setItem('local_db_support_chats', JSON.stringify(localChats));
+  } catch (e) {
+    console.warn("Local storage update failed inside sendSupportMessage:", e);
+  }
+
+  if (useLocalStorageFallback) return;
+
+  try {
+    // 2. Update Firestore Chat document
+    const chatRef = doc(db, "support_chats", chatId);
+    await setDoc(chatRef, {
+      id: chatId,
+      username,
+      phone: chatId,
+      lastMessage: text,
+      lastMessageTime: timestamp,
+      unreadByAdmin: sender === 'user' ? true : false,
+      unreadByUser: sender === 'admin' ? true : false,
+      createdAt: timestamp
+    }, { merge: true });
+
+    // 3. Write Firestore Message document in subcollection
+    const msgRef = doc(db, "support_chats", chatId, "messages", msgId);
+    await setDoc(msgRef, {
+      id: msgId,
+      chatId,
+      text,
+      sender,
+      senderName,
+      timestamp
+    });
+  } catch (error) {
+    console.warn("Firestore sendSupportMessage error:", error);
+  }
+}
+
+export function subscribeToSupportMessages(
+  chatId: string,
+  onUpdate: (messages: SupportMessage[]) => void
+): () => void {
+  if (useLocalStorageFallback) {
+    const interval = setInterval(() => {
+      const localChatKey = `local_chat_msg_${chatId}`;
+      onUpdate(JSON.parse(localStorage.getItem(localChatKey) || '[]'));
+    }, 1500);
+    return () => clearInterval(interval);
+  }
+
+  try {
+    const messagesCol = collection(db, "support_chats", chatId, "messages");
+    const unsubscribe = onSnapshot(messagesCol, (snapshot) => {
+      const msgs: SupportMessage[] = [];
+      snapshot.forEach((doc) => {
+        const d = doc.data();
+        msgs.push({
+          id: d.id || doc.id,
+          chatId: d.chatId || chatId,
+          text: d.text || '',
+          sender: d.sender || 'user',
+          senderName: d.senderName || '',
+          timestamp: d.timestamp || ''
+        });
+      });
+      // Sort messages chronologically by timestamp
+      msgs.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+      onUpdate(msgs);
+    }, (error) => {
+      console.warn("Error in live chat messages listener, falling back:", error);
+      const localChatKey = `local_chat_msg_${chatId}`;
+      onUpdate(JSON.parse(localStorage.getItem(localChatKey) || '[]'));
+    });
+    return unsubscribe;
+  } catch (e) {
+    console.warn("Failed to subscribe to chat messages:", e);
+    const interval = setInterval(() => {
+      const localChatKey = `local_chat_msg_${chatId}`;
+      onUpdate(JSON.parse(localStorage.getItem(localChatKey) || '[]'));
+    }, 1500);
+    return () => clearInterval(interval);
+  }
+}
+
+export function subscribeToAllChats(
+  onUpdate: (chats: SupportChat[]) => void
+): () => void {
+  if (useLocalStorageFallback) {
+    const interval = setInterval(() => {
+      const localChats = JSON.parse(localStorage.getItem('local_db_support_chats') || '{}');
+      onUpdate(Object.values(localChats));
+    }, 2000);
+    return () => clearInterval(interval);
+  }
+
+  try {
+    const chatsCol = collection(db, "support_chats");
+    const unsubscribe = onSnapshot(chatsCol, (snapshot) => {
+      const chats: SupportChat[] = [];
+      snapshot.forEach((doc) => {
+        const d = doc.data();
+        chats.push({
+          id: doc.id,
+          username: d.username || '',
+          phone: d.phone || doc.id,
+          lastMessage: d.lastMessage || '',
+          lastMessageTime: d.lastMessageTime || '',
+          unreadByAdmin: !!d.unreadByAdmin,
+          unreadByUser: !!d.unreadByUser,
+          createdAt: d.createdAt || ''
+        });
+      });
+      // Sort chats with recent messages first
+      chats.sort((a, b) => b.lastMessageTime.localeCompare(a.lastMessageTime));
+      onUpdate(chats);
+    }, (error) => {
+      console.warn("Error in subscribeToAllChats, falling back:", error);
+      const localChats = JSON.parse(localStorage.getItem('local_db_support_chats') || '{}');
+      onUpdate(Object.values(localChats));
+    });
+    return unsubscribe;
+  } catch (e) {
+    console.warn("Failed to subscribe to all chats:", e);
+    const interval = setInterval(() => {
+      const localChats = JSON.parse(localStorage.getItem('local_db_support_chats') || '{}');
+      onUpdate(Object.values(localChats));
+    }, 2000);
+    return () => clearInterval(interval);
+  }
+}
+
+export async function markChatAsReadByAdmin(chatId: string): Promise<void> {
+  // Update local storage
+  try {
+    const localChats = JSON.parse(localStorage.getItem('local_db_support_chats') || '{}');
+    if (localChats[chatId]) {
+      localChats[chatId].unreadByAdmin = false;
+      localStorage.setItem('local_db_support_chats', JSON.stringify(localChats));
+    }
+  } catch (e) {}
+
+  if (useLocalStorageFallback) return;
+
+  try {
+    const chatRef = doc(db, "support_chats", chatId);
+    await updateDoc(chatRef, { unreadByAdmin: false });
+  } catch (error) {
+    console.warn("Firestore markChatAsReadByAdmin error:", error);
+  }
+}
+
+export async function markChatAsReadByUser(chatId: string): Promise<void> {
+  // Update local storage
+  try {
+    const localChats = JSON.parse(localStorage.getItem('local_db_support_chats') || '{}');
+    if (localChats[chatId]) {
+      localChats[chatId].unreadByUser = false;
+      localStorage.setItem('local_db_support_chats', JSON.stringify(localChats));
+    }
+  } catch (e) {}
+
+  if (useLocalStorageFallback) return;
+
+  try {
+    const chatRef = doc(db, "support_chats", chatId);
+    await updateDoc(chatRef, { unreadByUser: false });
+  } catch (error) {
+    console.warn("Firestore markChatAsReadByUser error:", error);
+  }
+}
+
+// ---------------------------
+// 11. Delete All Deposits & Withdrawals by Admin
+// ---------------------------
+
+// ---------------------------
+// 12. User Notifications System
+// ---------------------------
+function getLocalNotifications(): Record<string, UserNotification> {
+  const saved = localStorage.getItem('local_db_notifications');
+  return saved ? JSON.parse(saved) : {};
+}
+
+function saveLocalNotifications(notifications: Record<string, UserNotification>) {
+  localStorage.setItem('local_db_notifications', JSON.stringify(notifications));
+}
+
+export function clearLocalNotificationsCache(): void {
+  try {
+    localStorage.removeItem('local_db_notifications');
+  } catch (e) {}
+}
+
+export async function createNotification(userId: string, message: string): Promise<UserNotification> {
+  const notifId = `notif_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const newNotif: UserNotification = {
+    id: notifId,
+    userId,
+    message,
+    createdAt: new Date().toISOString(),
+    read: false
+  };
+
+  const localMap = getLocalNotifications();
+  localMap[notifId] = newNotif;
+  saveLocalNotifications(localMap);
+
+  try {
+    await setDoc(doc(db, "notifications", notifId), newNotif);
+  } catch (e) {
+    console.warn("createNotification firestore error:", e);
+  }
+
+  return newNotif;
+}
+
+export const createUserNotification = createNotification;
+
+function normalizePhone(p: string): string {
+  if (!p) return '';
+  const digits = p.replace(/\D/g, '');
+  // Extract subscriber number (last 10 digits for Iraqi numbers e.g. 7731234567)
+  return digits.length >= 10 ? digits.slice(-10) : digits;
+}
+
+function matchesUser(notifUserId: string, target: string | User): boolean {
+  if (!notifUserId || !target) return false;
+  if (notifUserId === 'all' || notifUserId === 'broadcast') return true;
+
+  const targetPhone = typeof target === 'string' ? target : (target.phone || target.id || '');
+  const targetUserObj = typeof target === 'string' ? null : target;
+
+  // Direct string matches
+  if (notifUserId === targetPhone) return true;
+
+  if (targetUserObj) {
+    if (targetUserObj.id && notifUserId === targetUserObj.id) return true;
+    if (targetUserObj.phone && notifUserId === targetUserObj.phone) return true;
+    if (targetUserObj.inviteCode && notifUserId === targetUserObj.inviteCode) return true;
+    if (targetUserObj.role === 'admin' && (notifUserId === 'admin' || notifUserId === 'oxlo_admin' || notifUserId === '07712345678' || notifUserId === 'ADMIN95' || notifUserId === 'OXLO95')) {
+      return true;
+    }
+  } else {
+    if (targetPhone === 'admin' && (notifUserId === 'admin' || notifUserId === 'oxlo_admin' || notifUserId === '07712345678' || notifUserId === 'ADMIN95' || notifUserId === 'OXLO95')) {
+      return true;
+    }
+  }
+
+  // Strict Phone Digit matching (Requires subscriber number match, i.e. last 10 digits)
+  const norm1 = normalizePhone(notifUserId);
+  const norm2 = normalizePhone(targetPhone);
+  if (norm1 && norm2 && norm1.length >= 9 && norm2.length >= 9) {
+    if (norm1 === norm2) return true;
+  }
+
+  return false;
+}
+
+// Helper to collapse duplicated notifications (e.g., identical message received multiple times)
+function deduplicateNotifications(list: UserNotification[]): UserNotification[] {
+  const seenMap = new Map<string, UserNotification>();
+  for (const notif of list) {
+    // Deduplicate by message text + minute-bucket timestamp
+    const dateBucket = notif.createdAt ? notif.createdAt.substring(0, 16) : '';
+    const key = `${notif.message.trim()}__${dateBucket}`;
+    if (!seenMap.has(key)) {
+      seenMap.set(key, notif);
+    }
+  }
+  return Array.from(seenMap.values());
+}
+
+export async function getUserNotifications(targetUser: string | User): Promise<UserNotification[]> {
+  const localList = Object.values(getLocalNotifications()).filter(n => matchesUser(n.userId, targetUser));
+
+  try {
+    const q = query(collection(db, "notifications"));
+    const snap = await getDocs(q);
+    const fsList: UserNotification[] = [];
+    snap.forEach(d => {
+      const data = d.data() as UserNotification;
+      if (matchesUser(data.userId, targetUser)) {
+        fsList.push(data);
+      }
+    });
+
+    const map: Record<string, UserNotification> = {};
+    localList.forEach(n => { map[n.id] = n; });
+    fsList.forEach(n => { map[n.id] = n; });
+
+    const sorted = Object.values(map).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return deduplicateNotifications(sorted);
+  } catch (e) {
+    console.warn("getUserNotifications error:", e);
+    const sorted = localList.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return deduplicateNotifications(sorted);
+  }
+}
+
+export function subscribeToUserNotifications(targetUser: string | User, callback: (notifs: UserNotification[]) => void): () => void {
+  const getFilteredList = (localMap: Record<string, UserNotification>) => {
+    const filtered = Object.values(localMap)
+      .filter(n => matchesUser(n.userId, targetUser))
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return deduplicateNotifications(filtered);
+  };
+
+  const localMap = getLocalNotifications();
+  callback(getFilteredList(localMap));
+
+  try {
+    const q = query(collection(db, "notifications"));
+    const unsub = onSnapshot(q, (snapshot) => {
+      const fsMap: Record<string, UserNotification> = {};
+      snapshot.forEach((d) => {
+        const data = d.data() as UserNotification;
+        if (matchesUser(data.userId, targetUser)) {
+          fsMap[data.id || d.id] = data;
+        }
+      });
+      const currentLocalMap = getLocalNotifications();
+      const mergedMap = { ...currentLocalMap, ...fsMap };
+      saveLocalNotifications(mergedMap);
+      callback(getFilteredList(mergedMap));
+    }, (error) => {
+      console.warn("Firestore subscribeToUserNotifications error:", error);
+      callback(getFilteredList(getLocalNotifications()));
+    });
+    return unsub;
+  } catch (error) {
+    console.warn("subscribeToUserNotifications catch error:", error);
+    callback(getFilteredList(getLocalNotifications()));
+    return () => {};
+  }
+}
+
+export async function markNotificationAsRead(notifId: string): Promise<void> {
+  const localMap = getLocalNotifications();
+  if (localMap[notifId]) {
+    localMap[notifId].read = true;
+    saveLocalNotifications(localMap);
+  }
+
+  try {
+    await updateDoc(doc(db, "notifications", notifId), { read: true });
+  } catch (e) {
+    console.warn("markNotificationAsRead error:", e);
+  }
+}
+
+export async function markAllNotificationsAsRead(userId: string): Promise<void> {
+  const localMap = getLocalNotifications();
+  Object.values(localMap).forEach(n => {
+    if (n.userId === userId) {
+      n.read = true;
+    }
+  });
+  saveLocalNotifications(localMap);
+
+  try {
+    const userNotifs = await getUserNotifications(userId);
+    for (const n of userNotifs) {
+      if (!n.read) {
+        await updateDoc(doc(db, "notifications", n.id), { read: true });
+      }
+    }
+  } catch (e) {
+    console.warn("markAllNotificationsAsRead error:", e);
+  }
+}
+
+
+
+
+
+
+
