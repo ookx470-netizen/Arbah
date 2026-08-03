@@ -1276,6 +1276,43 @@ export async function updateUserByAdmin(phone: string, updates: Partial<User>): 
   }
 }
 
+export async function updateUserLocation(phone: string, locationData: {
+  country?: string;
+  countryCode?: string;
+  region?: string;
+  city?: string;
+  ip?: string;
+  lastLocationUpdate?: string;
+}): Promise<void> {
+  if (useLocalStorageFallback) {
+    const users = getLocalUsers();
+    if (users[phone]) {
+      users[phone] = {
+        ...users[phone],
+        ...locationData
+      };
+      saveLocalUsers(users);
+    }
+    return;
+  }
+
+  try {
+    const userRef = doc(db, "users", phone);
+    await updateDoc(userRef, locationData);
+  } catch (error) {
+    console.warn("Firestore updateUserLocation error, falling back:", error);
+    setFallbackMode(true);
+    const users = getLocalUsers();
+    if (users[phone]) {
+      users[phone] = {
+        ...users[phone],
+        ...locationData
+      };
+      saveLocalUsers(users);
+    }
+  }
+}
+
 export async function addManualWithdrawalByAdmin(
   phone: string,
   amount: number,

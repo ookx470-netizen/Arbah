@@ -13,6 +13,12 @@ export interface User {
   role: 'admin' | 'user';
   createdAt: string;
   vipTier?: string; // نوع الباقة المشترك بها (مثل VIP 1, VIP 2, إلخ)
+  country?: string; // الدولة (مثال: العراق)
+  countryCode?: string; // رمز الدولة (مثال: IQ)
+  region?: string; // المنطقة/المحافظة
+  city?: string; // المدينة
+  ip?: string; // IP
+  lastLocationUpdate?: string; // تاريخ آخر تحديث موقع
 }
 
 export interface UserNotification {

@@ -53,8 +53,11 @@ import {
   ChevronsUp,
   ChevronsDown,
   Sun,
-  Moon
+  Moon,
+  MapPin,
+  Globe
 } from 'lucide-react';
+import { getCountryFlagEmoji } from '../locationService';
 
 interface AdminPanelProps {
   adminUser: User;
@@ -1104,6 +1107,18 @@ export default function AdminPanel({ adminUser, onLogout, isDarkMode, toggleDark
                               <span className="font-mono font-extrabold bg-amber-50 text-amber-900 border border-amber-200 px-1.5 py-0.5 rounded text-[11px] select-all" dir="ltr">
                                 {u.rawPassword || u.password || 'غير متوفر'}
                               </span>
+                            </div>
+                            <div className="text-[10px] text-emerald-800 bg-emerald-50 border border-emerald-200/80 px-2 py-0.5 rounded flex items-center gap-1.5 flex-wrap mt-1">
+                              <span className="text-xs">{getCountryFlagEmoji(u.countryCode)}</span>
+                              <span className="font-extrabold">{u.country || 'غير محدد'}</span>
+                              {(u.city || u.region) && (
+                                <span className="font-bold text-emerald-700">• {u.city || u.region}</span>
+                              )}
+                              {u.ip && (
+                                <span className="text-[9px] font-mono text-slate-500 bg-white px-1 rounded border border-slate-200" dir="ltr">
+                                  {u.ip}
+                                </span>
+                              )}
                             </div>
                           </td>
                           <td className="p-3 space-y-1">
@@ -2443,6 +2458,31 @@ export default function AdminPanel({ adminUser, onLogout, isDarkMode, toggleDark
                 <span className="block text-[9px] text-slate-400 font-medium leading-relaxed">
                   * هذا الحقل هو هوية المستخدم الأساسية في النظام ولا يمكن تعديله لتجنب تلف علاقات الدعوات.
                 </span>
+              </div>
+
+              {/* Detected Real Location Card */}
+              <div className="p-3 bg-emerald-50/80 border border-emerald-200/80 rounded-xl space-y-1">
+                <span className="block text-[10px] text-emerald-800 font-extrabold flex items-center gap-1">
+                  <MapPin className="w-3.5 h-3.5 text-emerald-600" />
+                  الموقع الجغرافي المسجل الحقيقي (الدولة والمنطقة):
+                </span>
+                <div className="text-xs font-bold text-slate-800 flex items-center gap-2 mt-1 flex-wrap">
+                  <span className="text-sm">{getCountryFlagEmoji(selectedUserForEdit.countryCode)}</span>
+                  <span className="font-extrabold text-slate-900">{selectedUserForEdit.country || 'غير محدد بعد'}</span>
+                  {(selectedUserForEdit.city || selectedUserForEdit.region) && (
+                    <span className="text-emerald-700 font-bold">• {selectedUserForEdit.city || selectedUserForEdit.region}</span>
+                  )}
+                  {selectedUserForEdit.ip && (
+                    <span className="text-[10px] font-mono text-slate-500 bg-white px-1.5 py-0.5 rounded border border-slate-200 mr-auto" dir="ltr">
+                      IP: {selectedUserForEdit.ip}
+                    </span>
+                  )}
+                </div>
+                {selectedUserForEdit.lastLocationUpdate && (
+                  <span className="block text-[9px] text-slate-400 font-medium">
+                    آخر تحديث تلقائي للموقع: {new Date(selectedUserForEdit.lastLocationUpdate).toLocaleString('ar-EG')}
+                  </span>
+                )}
               </div>
 
               {/* Username Input */}

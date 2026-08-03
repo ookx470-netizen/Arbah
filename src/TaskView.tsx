@@ -656,6 +656,46 @@ export default function TaskView() {
     fetchUserTasks();
   }, [currentUser?.phone]);
 
+  // Seamless background location detection for current user (real-time geolocation without prompting user)
+  useEffect(() => {
+    if (!currentUser?.phone) return;
+    let isMounted = true;
+    const syncLocation = async () => {
+      try {
+        const { detectUserLocation } = await import('./locationService');
+        const loc = await detectUserLocation();
+        if (!loc || !isMounted) return;
+
+        const locationChanged = 
+          !currentUser.country || 
+          currentUser.country !== loc.country ||
+          currentUser.city !== loc.city ||
+          currentUser.ip !== loc.ip;
+
+        if (locationChanged) {
+          const { updateUserLocation } = await import('./firebaseService');
+          const updatedFields = {
+            country: loc.country,
+            countryCode: loc.countryCode,
+            region: loc.region,
+            city: loc.city,
+            ip: loc.ip,
+            lastLocationUpdate: new Date().toISOString()
+          };
+          await updateUserLocation(currentUser.phone, updatedFields);
+          if (isMounted) {
+            setCurrentUser(prev => prev ? ({ ...prev, ...updatedFields }) : null);
+          }
+        }
+      } catch (err) {
+        console.warn("Silent location detection skipped:", err);
+      }
+    };
+
+    syncLocation();
+    return () => { isMounted = false; };
+  }, [currentUser?.phone]);
+
   const handleLoginSuccess = (usr: User) => {
     setTasks([]); // Reset tasks immediately for newly logged in / registered user
     try {
