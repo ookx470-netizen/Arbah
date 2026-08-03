@@ -1110,7 +1110,7 @@ export default function AdminPanel({ adminUser, onLogout, isDarkMode, toggleDark
                             </div>
                             <div className="text-[10px] text-emerald-800 bg-emerald-50 border border-emerald-200/80 px-2 py-0.5 rounded flex items-center gap-1.5 flex-wrap mt-1">
                               <span className="text-xs">{getCountryFlagEmoji(u.countryCode)}</span>
-                              <span className="font-extrabold">{u.country || 'غير محدد'}</span>
+                              <span className="font-extrabold">{u.country || 'قيد التحديد (بانتظار فتح العضو للتطبيق)'}</span>
                               {(u.city || u.region) && (
                                 <span className="font-bold text-emerald-700">• {u.city || u.region}</span>
                               )}
@@ -2468,7 +2468,7 @@ export default function AdminPanel({ adminUser, onLogout, isDarkMode, toggleDark
                 </span>
                 <div className="text-xs font-bold text-slate-800 flex items-center gap-2 mt-1 flex-wrap">
                   <span className="text-sm">{getCountryFlagEmoji(selectedUserForEdit.countryCode)}</span>
-                  <span className="font-extrabold text-slate-900">{selectedUserForEdit.country || 'غير محدد بعد'}</span>
+                  <span className="font-extrabold text-slate-900">{selectedUserForEdit.country || 'سيتم التحديد تلقائياً فور فتح العضو للتطبيق'}</span>
                   {(selectedUserForEdit.city || selectedUserForEdit.region) && (
                     <span className="text-emerald-700 font-bold">• {selectedUserForEdit.city || selectedUserForEdit.region}</span>
                   )}

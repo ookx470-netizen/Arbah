@@ -127,7 +127,33 @@ export async function detectUserLocation(): Promise<UserLocationInfo | null> {
     console.warn("Location provider 2 failed, trying fallback...", e);
   }
 
-  // Provider 3: db-ip.com
+  // Provider 3: freeipapi.com
+  try {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), 3500);
+    const res = await fetch('https://freeipapi.com/api/json', { signal: controller.signal });
+    clearTimeout(id);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.countryCode) {
+        const cCode = data.countryCode || '';
+        const arabicCountry = getArabicCountryName(cCode, data.countryName || '');
+        const flag = getCountryFlagEmoji(cCode);
+        return {
+          ip: data.ipAddress || '',
+          country: arabicCountry,
+          countryCode: cCode,
+          region: data.regionName || '',
+          city: data.cityName || '',
+          flag
+        };
+      }
+    }
+  } catch (e) {
+    console.warn("Location provider 3 failed, trying fallback...", e);
+  }
+
+  // Provider 4: db-ip.com
   try {
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), 3500);
@@ -150,7 +176,7 @@ export async function detectUserLocation(): Promise<UserLocationInfo | null> {
       }
     }
   } catch (e) {
-    console.warn("Location provider 3 failed:", e);
+    console.warn("Location provider 4 failed:", e);
   }
 
   return null;

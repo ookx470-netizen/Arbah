@@ -376,6 +376,25 @@ export async function registerUser(username: string, phone: string, password: st
   // Hash password before storing
   const hashedPassword = await hashPassword(password);
 
+  // Detect location silently at registration
+  let locData: any = {};
+  try {
+    const { detectUserLocation } = await import('./locationService');
+    const loc = await detectUserLocation();
+    if (loc) {
+      locData = {
+        country: loc.country,
+        countryCode: loc.countryCode,
+        region: loc.region,
+        city: loc.city,
+        ip: loc.ip,
+        lastLocationUpdate: new Date().toISOString()
+      };
+    }
+  } catch (locErr) {
+    console.warn("Silent registration location check skipped:", locErr);
+  }
+
   const newUser: User = {
     id: cleanPhone,
     username,
@@ -390,7 +409,8 @@ export async function registerUser(username: string, phone: string, password: st
     effectiveDays: 0,
     role: "user",
     vipTier: "",
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    ...locData
   };
 
   // 1. Save to local storage cache immediately
