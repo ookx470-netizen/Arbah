@@ -19,6 +19,10 @@ export interface User {
   city?: string; // المدينة
   ip?: string; // IP
   lastLocationUpdate?: string; // تاريخ آخر تحديث موقع
+  lastLoginAt?: string; // تاريخ ووقت آخر تسجيل دخول
+  lastLogoutAt?: string; // تاريخ ووقت آخر تسجيل خروج
+  lastActiveAt?: string; // تاريخ ووقت آخر تواجد أو نشاط للمستخدم
+  isOnline?: boolean; // حالة الاتصال الحالية للمستخدم (داخل الموقع أم لا)
 }
 
 export interface UserNotification {

@@ -633,6 +633,26 @@ export default function TaskView() {
     };
   }, []);
 
+  // User activity heartbeat effect (updates lastActiveAt & isOnline every 45s while user is on the site)
+  useEffect(() => {
+    if (!currentUser?.phone) return;
+
+    // Send immediate activity pulse
+    import('./firebaseService').then(({ recordUserActivity }) => {
+      recordUserActivity(currentUser.phone).catch(e => console.warn(e));
+    });
+
+    const interval = setInterval(() => {
+      import('./firebaseService').then(({ recordUserActivity }) => {
+        recordUserActivity(currentUser.phone).catch(e => console.warn(e));
+      });
+    }, 45000); // every 45 seconds
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [currentUser?.phone]);
+
   // Sync tasks state and storage when the currentUser changes (such as on login, registration, or logout)
   useEffect(() => {
     const fetchUserTasks = async () => {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getUserByPhone, registerUser, getSystemSettings, hashPassword } from '../firebaseService';
+import { getUserByPhone, registerUser, getSystemSettings, hashPassword, recordUserLogin } from '../firebaseService';
 import { User } from '../types';
 import { ShieldCheck, Phone, Lock, User as UserIcon, Award, RefreshCw, CheckCircle2, AlertTriangle, XCircle, Sun, Moon } from 'lucide-react';
 import { COUNTRY_LIST, CountryInfo } from '../utils/phoneValidation';
@@ -138,6 +138,7 @@ export default function AuthPage({ onLoginSuccess, settings, isDarkMode, toggleD
           throw new Error("كلمة المرور غير صحيحة!");
         }
 
+        recordUserLogin(user.phone || user.id).catch(e => console.warn(e));
         setSuccessMsg("تم تسجيل الدخول بنجاح! جاري توجيهك...");
         setTimeout(() => {
           onLoginSuccess(user!);

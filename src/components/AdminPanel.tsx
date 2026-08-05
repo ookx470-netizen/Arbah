@@ -24,7 +24,8 @@ import {
   deleteAllWithdrawalsByAdmin,
   subscribeToUserNotifications,
   markNotificationAsRead,
-  markAllNotificationsAsRead
+  markAllNotificationsAsRead,
+  updateAdminPhone
 } from '../firebaseService';
 import { User, Deposit, Withdrawal, SystemSettings, VipPlan, UserNotification } from '../types';
 import { formatHourToArabic } from '../utils';
@@ -201,6 +202,47 @@ export default function AdminPanel({ adminUser, onLogout, isDarkMode, toggleDark
   const [editWithWalletAddress, setEditWithWalletAddress] = useState<string>('');
   const [editWithStatus, setEditWithStatus] = useState<'pending' | 'approved' | 'rejected'>('approved');
   const [editWithDate, setEditWithDate] = useState<string>('');
+
+  // States for Admin Phone & Password change
+  const [adminPhoneInput, setAdminPhoneInput] = useState<string>(adminUser?.phone || '');
+  const [adminPasswordInput, setAdminPasswordInput] = useState<string>(adminUser?.rawPassword || adminUser?.password || '');
+  const [savingAdminCreds, setSavingAdminCreds] = useState<boolean>(false);
+  const [adminCredMsg, setAdminCredMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  useEffect(() => {
+    if (adminUser) {
+      setAdminPhoneInput(adminUser.phone || '');
+      setAdminPasswordInput(adminUser.rawPassword || adminUser.password || '');
+    }
+  }, [adminUser]);
+
+  const handleSaveAdminCredentials = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminCredMsg(null);
+    if (!adminPhoneInput.trim()) {
+      setAdminCredMsg({ type: 'error', text: 'يرجى إدخال رقم هاتف جديد صالح لتسجيل الدخول' });
+      return;
+    }
+    setSavingAdminCreds(true);
+    try {
+      const res = await updateAdminPhone(adminUser.phone, adminPhoneInput.trim(), adminPasswordInput.trim());
+      if (res.success) {
+        setAdminCredMsg({ type: 'success', text: res.message });
+        showToast(res.message);
+        adminUser.phone = adminPhoneInput.trim();
+        if (adminPasswordInput.trim()) {
+          adminUser.password = adminPasswordInput.trim();
+          adminUser.rawPassword = adminPasswordInput.trim();
+        }
+      } else {
+        setAdminCredMsg({ type: 'error', text: res.message });
+      }
+    } catch (err: any) {
+      setAdminCredMsg({ type: 'error', text: err.message || 'حدث خطأ أثناء تعديل بيانات المدير' });
+    } finally {
+      setSavingAdminCreds(false);
+    }
+  };
 
 
 
@@ -741,11 +783,29 @@ export default function AdminPanel({ adminUser, onLogout, isDarkMode, toggleDark
     }
   };
 
-  // Filter users based on phone or username search
-  const filteredUsers = users.filter(u => 
-    u.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    u.phone.includes(searchQuery)
-  );
+  // User Online Filter State
+  const [userOnlineFilter, setUserOnlineFilter] = useState<'all' | 'online' | 'offline'>('all');
+
+  const isUserOnline = (u: User) => {
+    if (!u.isOnline) return false;
+    if (!u.lastActiveAt) return false;
+    const diff = Date.now() - new Date(u.lastActiveAt).getTime();
+    return diff < 3 * 60 * 1000; // active in last 3 minutes
+  };
+
+  // Filter users based on phone or username search and online status
+  const filteredUsers = users.filter(u => {
+    const matchesSearch = u.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      u.phone.includes(searchQuery);
+    if (!matchesSearch) return false;
+
+    if (userOnlineFilter === 'online') {
+      return isUserOnline(u);
+    } else if (userOnlineFilter === 'offline') {
+      return !isUserOnline(u);
+    }
+    return true;
+  });
 
   const filteredDeposits = deposits.filter(d => depositFilter === 'all' ? true : d.status === depositFilter);
   const sortedDeposits = [...filteredDeposits].sort((a, b) => {
@@ -1047,11 +1107,32 @@ export default function AdminPanel({ adminUser, onLogout, isDarkMode, toggleDark
             {/* Table: Registered Users Panel */}
             {(activeTab === 'users' || activeTab === 'all') && (
           <div className="bg-white rounded-2xl border border-slate-200 shadow-md hover:shadow-lg transition-all overflow-hidden">
-            <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <Users className="w-5 h-5 text-slate-500" />
                 <h2 className="text-xs font-bold text-slate-700">قائمة الأعضاء وتعديل الأرصدة الفوري</h2>
               </div>
+
+              {/* Online / Offline Filter Pills */}
+              <div className="flex items-center gap-1 bg-slate-200/80 p-1 rounded-xl text-[10px] font-bold">
+                {[
+                  { id: 'all', label: `الكل (${users.length})` },
+                  { id: 'online', label: `🟢 نشط الآن (${users.filter(u => isUserOnline(u)).length})` },
+                  { id: 'offline', label: `🔴 غير نشط (${users.filter(u => !isUserOnline(u)).length})` }
+                ].map(f => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => setUserOnlineFilter(f.id as any)}
+                    className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+                      userOnlineFilter === f.id ? 'bg-white text-slate-900 shadow-sm font-extrabold' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+
               <div className="relative max-w-xs">
                 <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
                 <input
@@ -1069,6 +1150,7 @@ export default function AdminPanel({ adminUser, onLogout, isDarkMode, toggleDark
                 <thead>
                   <tr className="bg-slate-100/50 text-slate-500 border-b border-slate-200">
                     <th className="p-3 font-bold">تفاصيل العضو (اسم، هاتف، كلمة مرور)</th>
+                    <th className="p-3 font-bold">تاريخ التسجيل والنشاط (داخل/خارج)</th>
                     <th className="p-3 font-bold">رمز الدعوة والباقة</th>
                     <th className="p-3 font-bold">الرصيد الكلي (الأرباح)</th>
                     <th className="p-3 font-bold">دخل المهمة</th>
@@ -1080,14 +1162,14 @@ export default function AdminPanel({ adminUser, onLogout, isDarkMode, toggleDark
                 <tbody className="divide-y divide-slate-100 font-medium">
                   {loading ? (
                     <tr>
-                      <td colSpan={7} className="text-center py-8 text-slate-400">
+                      <td colSpan={8} className="text-center py-8 text-slate-400">
                         <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2" />
                         جاري تحميل قائمة الأعضاء...
                       </td>
                     </tr>
                   ) : filteredUsers.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="text-center py-8 text-slate-400">
+                      <td colSpan={8} className="text-center py-8 text-slate-400">
                         لا يوجد أعضاء يطابقون البحث حالياً.
                       </td>
                     </tr>
@@ -1119,6 +1201,70 @@ export default function AdminPanel({ adminUser, onLogout, isDarkMode, toggleDark
                                   {u.ip}
                                 </span>
                               )}
+                            </div>
+                          </td>
+                          <td className="p-3 space-y-1 text-[10px]">
+                            {/* Creation Date */}
+                            <div className="text-slate-600 font-bold flex items-center gap-1 bg-slate-50 p-1 rounded border border-slate-200/60">
+                              <span className="text-slate-400 font-medium">أنشئ:</span>
+                              <span dir="ltr" className="font-mono text-slate-800 text-[9.5px]">
+                                {u.createdAt ? new Date(u.createdAt).toLocaleString('ar-EG', {
+                                  year: 'numeric',
+                                  month: '2-digit',
+                                  day: '2-digit',
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                  hour12: true
+                                }) : 'غير معروف'}
+                              </span>
+                            </div>
+
+                            {/* Active/Inactive Status Badge */}
+                            <div className="pt-0.5">
+                              {isUserOnline(u) ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-xs">
+                                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                                  نشط الآن (داخل الموقع)
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-slate-100 text-slate-500 border border-slate-200">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
+                                  غير نشط (خارج الموقع)
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Login / Logout Timestamps */}
+                            <div className="text-[9px] text-slate-500 space-y-0.5 pt-1 border-t border-slate-100">
+                              {u.lastLoginAt && (
+                                <div className="flex items-center gap-1">
+                                  <span className="font-bold text-slate-600">آخر دخول:</span>
+                                  <span dir="ltr" className="font-mono text-slate-700">
+                                    {new Date(u.lastLoginAt).toLocaleString('ar-EG', {
+                                      month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true
+                                    })}
+                                  </span>
+                                </div>
+                              )}
+                              {u.lastLogoutAt ? (
+                                <div className="flex items-center gap-1">
+                                  <span className="font-bold text-slate-600">آخر خروج:</span>
+                                  <span dir="ltr" className="font-mono text-slate-700">
+                                    {new Date(u.lastLogoutAt).toLocaleString('ar-EG', {
+                                      month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true
+                                    })}
+                                  </span>
+                                </div>
+                              ) : u.lastActiveAt ? (
+                                <div className="flex items-center gap-1">
+                                  <span className="font-bold text-slate-600">آخر تواجد:</span>
+                                  <span dir="ltr" className="font-mono text-slate-700">
+                                    {new Date(u.lastActiveAt).toLocaleString('ar-EG', {
+                                      month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true
+                                    })}
+                                  </span>
+                                </div>
+                              ) : null}
                             </div>
                           </td>
                           <td className="p-3 space-y-1">
@@ -1473,6 +1619,82 @@ export default function AdminPanel({ adminUser, onLogout, isDarkMode, toggleDark
         {(activeTab === 'settings' || activeTab === 'plans' || activeTab === 'withdrawals' || activeTab === 'all') && (
         <div className={activeTab === 'all' ? 'space-y-6' : 'space-y-6'}>
           
+          {/* Admin Account Credentials Card (تغيير رقم هاتف ودخول المدير) */}
+          {(activeTab === 'settings' || activeTab === 'all') && (
+          <div className="bg-[#0B1528] p-5 rounded-2xl shadow-xl border border-[#F39C12]/40 text-white">
+            <div className="flex items-center justify-between border-b border-blue-900/30 pb-3 mb-4">
+              <div className="flex items-center gap-2">
+                <ShieldAlert className="w-5 h-5 text-[#F39C12]" />
+                <h2 className="text-sm font-extrabold text-[#F39C12]">إعدادات حساب المدير (تغيير رقم تسجيل الدخول وكلمة السر)</h2>
+              </div>
+              <span className="text-[10px] bg-[#F39C12]/20 text-[#F39C12] border border-[#F39C12]/30 px-2 py-0.5 rounded-full font-bold">
+                خاص بالمدير
+              </span>
+            </div>
+
+            <form onSubmit={handleSaveAdminCredentials} className="space-y-4">
+              {adminCredMsg && (
+                <div className={`p-3 rounded-xl text-xs font-bold text-center ${
+                  adminCredMsg.type === 'success' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                }`}>
+                  {adminCredMsg.text}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-300 mb-1.5 text-right">رقم هاتف المدير الجديد (لتسجيل الدخول)</label>
+                  <input
+                    type="text"
+                    required
+                    value={adminPhoneInput}
+                    onChange={(e) => setAdminPhoneInput(e.target.value)}
+                    placeholder="مثال: 07712345678"
+                    className="w-full px-3 py-2.5 bg-[#070D19] border border-blue-900/50 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-[#F39C12] text-center font-mono"
+                    dir="ltr"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-300 mb-1.5 text-right">كلمة مرور المدير الجديد</label>
+                  <input
+                    type="text"
+                    required
+                    value={adminPasswordInput}
+                    onChange={(e) => setAdminPasswordInput(e.target.value)}
+                    placeholder="أدخل كلمة المرور الجديدة"
+                    className="w-full px-3 py-2.5 bg-[#070D19] border border-blue-900/50 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-[#F39C12] text-center font-mono"
+                    dir="ltr"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
+                <span className="text-[10px] text-slate-400 text-right">
+                  * سيمكنك استخدام الرقم الجديد فوراً لتسجيل الدخول إلى لوحة التحكم من أي جهاز.
+                </span>
+                <button
+                  type="submit"
+                  disabled={savingAdminCreds}
+                  className="w-full sm:w-auto bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 px-5 py-2.5 rounded-xl text-xs font-black transition-all cursor-pointer shadow-md flex items-center justify-center gap-1.5 disabled:opacity-50"
+                >
+                  {savingAdminCreds ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>جاري الحفظ...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-3.5 h-3.5 stroke-[3]" />
+                      <span>حفظ رقم وكلمة سر المدير</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+          )}
+
           {/* Settings Card: General System Settings */}
           {(activeTab === 'settings' || activeTab === 'all') && (
           <div className="bg-[#0B1528] p-5 rounded-2xl shadow-xl border border-blue-900/40 text-white">
@@ -2458,6 +2680,65 @@ export default function AdminPanel({ adminUser, onLogout, isDarkMode, toggleDark
                 <span className="block text-[9px] text-slate-400 font-medium leading-relaxed">
                   * هذا الحقل هو هوية المستخدم الأساسية في النظام ولا يمكن تعديله لتجنب تلف علاقات الدعوات.
                 </span>
+              </div>
+
+              {/* Creation Date and Online Status Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+                  <span className="block text-[10px] text-slate-500 font-extrabold flex items-center gap-1">
+                    <Clock className="w-3.5 h-3.5 text-slate-500" />
+                    تاريخ إنشاء الحساب (التسجيل):
+                  </span>
+                  <span className="block font-mono font-bold text-slate-800 text-[11px]" dir="ltr">
+                    {selectedUserForEdit.createdAt ? new Date(selectedUserForEdit.createdAt).toLocaleString('ar-EG', {
+                      year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true
+                    }) : 'غير معروف'}
+                  </span>
+                </div>
+
+                <div className="p-3 bg-amber-50/60 border border-amber-200/80 rounded-xl space-y-1">
+                  <span className="block text-[10px] text-amber-900 font-extrabold">حالة الاتصال والتواجد:</span>
+                  <div>
+                    {isUserOnline(selectedUserForEdit) ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                        نشط الآن (داخل الموقع)
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-slate-100 text-slate-500 border border-slate-200">
+                        <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
+                        غير نشط (خارج الموقع)
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Login and Logout Times Card */}
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1 text-[10px]">
+                <span className="block text-slate-500 font-extrabold border-b border-slate-200 pb-1 mb-1">
+                  سجل الدخول والخروج والنشاط:
+                </span>
+                <div className="grid grid-cols-2 gap-2 font-mono">
+                  <div>
+                    <span className="font-sans text-slate-400 block text-[9px]">آخر دخول:</span>
+                    <span className="text-slate-800 font-bold" dir="ltr">
+                      {selectedUserForEdit.lastLoginAt ? new Date(selectedUserForEdit.lastLoginAt).toLocaleString('ar-EG', {
+                        month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true
+                      }) : 'لم يسجل دخول'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="font-sans text-slate-400 block text-[9px]">آخر خروج / تواجد:</span>
+                    <span className="text-slate-800 font-bold" dir="ltr">
+                      {selectedUserForEdit.lastLogoutAt ? new Date(selectedUserForEdit.lastLogoutAt).toLocaleString('ar-EG', {
+                        month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true
+                      }) : (selectedUserForEdit.lastActiveAt ? new Date(selectedUserForEdit.lastActiveAt).toLocaleString('ar-EG', {
+                        month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true
+                      }) : 'غير معروف')}
+                    </span>
+                  </div>
+                </div>
               </div>
 
               {/* Detected Real Location Card */}

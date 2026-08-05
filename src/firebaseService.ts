@@ -410,6 +410,9 @@ export async function registerUser(username: string, phone: string, password: st
     role: "user",
     vipTier: "",
     createdAt: new Date().toISOString(),
+    lastLoginAt: new Date().toISOString(),
+    lastActiveAt: new Date().toISOString(),
+    isOnline: true,
     ...locData
   };
 
@@ -470,6 +473,83 @@ export async function registerUser(username: string, phone: string, password: st
   }
 
   return newUser;
+}
+
+// Record User Login Time & Online Status
+export async function recordUserLogin(phone: string): Promise<void> {
+  if (!phone) return;
+  const now = new Date().toISOString();
+  const updates = {
+    lastLoginAt: now,
+    lastActiveAt: now,
+    isOnline: true
+  };
+
+  // 1. Local storage update
+  const users = getLocalUsers();
+  if (users[phone]) {
+    users[phone] = { ...users[phone], ...updates };
+    saveLocalUsers(users);
+  }
+
+  // 2. Firestore update
+  try {
+    const userRef = doc(db, "users", phone);
+    await updateDoc(userRef, updates);
+  } catch (err) {
+    console.warn("recordUserLogin Firestore error:", err);
+  }
+}
+
+// Record User Logout Time & Offline Status
+export async function recordUserLogout(phone: string): Promise<void> {
+  if (!phone) return;
+  const now = new Date().toISOString();
+  const updates = {
+    lastLogoutAt: now,
+    lastActiveAt: now,
+    isOnline: false
+  };
+
+  // 1. Local storage update
+  const users = getLocalUsers();
+  if (users[phone]) {
+    users[phone] = { ...users[phone], ...updates };
+    saveLocalUsers(users);
+  }
+
+  // 2. Firestore update
+  try {
+    const userRef = doc(db, "users", phone);
+    await updateDoc(userRef, updates);
+  } catch (err) {
+    console.warn("recordUserLogout Firestore error:", err);
+  }
+}
+
+// Heartbeat to keep lastActiveAt fresh and isOnline true
+export async function recordUserActivity(phone: string): Promise<void> {
+  if (!phone) return;
+  const now = new Date().toISOString();
+  const updates = {
+    lastActiveAt: now,
+    isOnline: true
+  };
+
+  // 1. Local storage update
+  const users = getLocalUsers();
+  if (users[phone]) {
+    users[phone] = { ...users[phone], ...updates };
+    saveLocalUsers(users);
+  }
+
+  // 2. Firestore update
+  try {
+    const userRef = doc(db, "users", phone);
+    await updateDoc(userRef, updates);
+  } catch (err) {
+    console.warn("recordUserActivity Firestore error:", err);
+  }
 }
 
 // 3. Update User Statistics (Admin function or task complete)
@@ -1294,6 +1374,85 @@ export async function updateUserByAdmin(phone: string, updates: Partial<User>): 
       saveLocalUsers(users);
     }
   }
+}
+
+export async function updateAdminPhone(oldPhone: string, newPhone: string, newPassword?: string): Promise<{ success: boolean; message: string }> {
+  const cleanOld = oldPhone ? oldPhone.trim() : "";
+  const cleanNew = newPhone ? newPhone.trim() : "";
+
+  if (!cleanNew) {
+    return { success: false, message: "رقم الهاتف الجديد لا يمكن أن يكون فارغاً" };
+  }
+
+  // If changing to a different phone number, check if the new phone is taken by a non-admin user
+  if (cleanOld && cleanOld !== cleanNew) {
+    const existing = await getUserByPhone(cleanNew);
+    if (existing && existing.id !== cleanOld && existing.phone !== cleanOld && existing.role !== 'admin') {
+      return { success: false, message: "رقم الهاتف الجديد مستخدم بالفعل لحساب آخر!" };
+    }
+  }
+
+  // 1. Update in local storage
+  const users = getLocalUsers();
+  let adminObj: User | null = users[cleanOld] || null;
+
+  if (!adminObj) {
+    const foundKey = Object.keys(users).find(k => users[k].role === 'admin' || users[k].phone === cleanOld);
+    if (foundKey) {
+      adminObj = users[foundKey];
+      delete users[foundKey];
+    }
+  } else if (cleanOld !== cleanNew) {
+    delete users[cleanOld];
+  }
+
+  if (!adminObj) {
+    adminObj = {
+      id: cleanNew,
+      username: "المدير العام",
+      phone: cleanNew,
+      password: newPassword ? newPassword.trim() : "hemoome1995",
+      rawPassword: newPassword ? newPassword.trim() : "hemoome1995",
+      inviteCode: "K92W84",
+      earnings: 1000,
+      taskIncome: 500,
+      effectiveDays: 365,
+      role: "admin",
+      createdAt: new Date().toISOString()
+    };
+  } else {
+    adminObj.phone = cleanNew;
+    adminObj.id = cleanNew;
+    adminObj.role = "admin";
+    if (newPassword && newPassword.trim()) {
+      adminObj.password = newPassword.trim();
+      adminObj.rawPassword = newPassword.trim();
+    }
+  }
+
+  users[cleanNew] = adminObj;
+  saveLocalUsers(users);
+  localStorage.setItem('logged_in_phone', cleanNew);
+
+  // 2. Update in Firestore
+  if (!useLocalStorageFallback) {
+    try {
+      if (cleanOld && cleanOld !== cleanNew) {
+        await setDoc(doc(db, "users", cleanNew), adminObj);
+        await deleteDoc(doc(db, "users", cleanOld)).catch(() => {});
+      } else {
+        await updateDoc(doc(db, "users", cleanNew), {
+          phone: cleanNew,
+          role: "admin",
+          ...(newPassword && newPassword.trim() ? { password: newPassword.trim(), rawPassword: newPassword.trim() } : {})
+        });
+      }
+    } catch (e) {
+      console.warn("Firestore updateAdminPhone error:", e);
+    }
+  }
+
+  return { success: true, message: `تم تحديث رقم دخول الأدمن بنجاح إلى: (${cleanNew})` };
 }
 
 export async function updateUserLocation(phone: string, locationData: {

@@ -12,7 +12,8 @@ import {
   getUserByPhone,
   subscribeToUserNotifications,
   markNotificationAsRead,
-  markAllNotificationsAsRead
+  markAllNotificationsAsRead,
+  recordUserLogout
 } from '../firebaseService';
 import { User, Deposit, Withdrawal, SystemSettings, UserNotification } from '../types';
 import { compressBase64Image } from '../utils';
@@ -725,7 +726,12 @@ export default function ProfileCenter({
 
               {/* Item 8: تسجيل الخروج باللغة العربية */}
               <button
-                onClick={onLogout}
+                onClick={async () => {
+                  if (currentUser) {
+                    await recordUserLogout(currentUser.phone || currentUser.id).catch(e => console.warn(e));
+                  }
+                  onLogout();
+                }}
                 className="w-full p-4 flex items-center justify-between text-right hover:bg-rose-50/40 transition-colors group cursor-pointer"
               >
                 <div className="flex items-center gap-3">
