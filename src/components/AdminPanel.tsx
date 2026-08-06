@@ -23,6 +23,7 @@ import {
   deleteAllDepositsByAdmin,
   deleteAllWithdrawalsByAdmin,
   subscribeToUserNotifications,
+  createNotification,
   markNotificationAsRead,
   markAllNotificationsAsRead,
   updateAdminPhone,
@@ -49,6 +50,7 @@ import {
   Zap,
   Clock,
   MessageSquare,
+  Key,
   Send,
   Bell,
   Volume2,
@@ -173,6 +175,9 @@ export default function AdminPanel({ adminUser, onLogout, isDarkMode, toggleDark
   const [holidayDaysInput, setHolidayDaysInput] = useState<number[]>([5]); // Default to Friday
   const [globalNotificationInput, setGlobalNotificationInput] = useState<string>('');
   const [appDownloadUrlInput, setAppDownloadUrlInput] = useState<string>('');
+  const [tasksCodeInput, setTasksCodeInput] = useState<string>('');
+  const [sendingNotification, setSendingNotification] = useState<boolean>(false);
+  const [showSendCodeConfirm, setShowSendCodeConfirm] = useState<boolean>(false);
 
   // Withdrawal lock states
   const [withdrawLockActiveInput, setWithdrawLockActiveInput] = useState<boolean>(false);
@@ -350,6 +355,7 @@ export default function AdminPanel({ adminUser, onLogout, isDarkMode, toggleDark
       setWorkStartHour2Input(sysSettings.workStartHour2 ?? 21);
       setWorkEndHour2Input(sysSettings.workEndHour2 ?? 1);
       setAppDownloadUrlInput(sysSettings.appDownloadUrl ?? '');
+      setTasksCodeInput(sysSettings.tasksCode ?? '');
     } catch (error) {
       console.error("Error loading admin data:", error);
       showToast("خطأ أثناء تحميل البيانات من قاعدة البيانات");
@@ -421,6 +427,7 @@ export default function AdminPanel({ adminUser, onLogout, isDarkMode, toggleDark
         workStartHour2: Number(workStartHour2Input),
         workEndHour2: Number(workEndHour2Input),
         appDownloadUrl: appDownloadUrlInput.trim(),
+        tasksCode: tasksCodeInput.trim(),
         vipPlans: settings.vipPlans ?? [
           { id: 'plan_600', name: 'باقة 600$', price: 600, profit: 18, tasksCount: 5 },
           { id: 'plan_1200', name: 'باقة 1200$', price: 1200, profit: 38, tasksCount: 5 }
@@ -436,6 +443,46 @@ export default function AdminPanel({ adminUser, onLogout, isDarkMode, toggleDark
       showToast("فشل في تحديث الإعدادات");
     } finally {
       setUpdating(null);
+    }
+  };
+
+  const handleSendCodeToSubscribers = async (confirmed?: boolean) => {
+    const code = tasksCodeInput.trim();
+    if (!code) {
+      showToast("⚠️ يرجى تعيين رمز مهام صالح أولاً!");
+      return;
+    }
+
+    const subscribedUsers = users.filter(u => {
+      const tier = (u.vipTier || '').trim();
+      return tier !== '' && tier !== 'الباقة العادية' && tier !== 'العادية';
+    });
+
+    if (subscribedUsers.length === 0) {
+      showToast("⚠️ لا يوجد أي أعضاء مشتركين في باقة VIP حالياً لإرسال الرمز لهم.");
+      return;
+    }
+
+    if (!confirmed) {
+      setShowSendCodeConfirm(true);
+      return;
+    }
+
+    setShowSendCodeConfirm(false);
+    setSendingNotification(true);
+    let successCount = 0;
+    try {
+      const msg = `🔑 رمز المهام اليومي الجديد لفتح السجل الخاص بك هو: ${code}`;
+      for (const user of subscribedUsers) {
+        await createNotification(user.phone, msg);
+        successCount++;
+      }
+      showToast(`🎉 تم إرسال الرمز اليومي بنجاح إلى جرس إشعارات ${successCount} عضو مشترك في VIP!`);
+    } catch (err) {
+      console.error("Error sending daily code to subscribers:", err);
+      showToast("⚠️ حدث خطأ أثناء إرسال الإشعارات للأعضاء.");
+    } finally {
+      setSendingNotification(false);
     }
   };
 
@@ -2336,6 +2383,85 @@ export default function AdminPanel({ adminUser, onLogout, isDarkMode, toggleDark
                         placeholder="أدخل رسالة تنويه العمل بالمهام (الظاهرة في أعلى السجل)..."
                         className="w-full px-3 py-2 bg-[#070D19] border border-blue-900/50 rounded-xl text-xs text-white focus:outline-none focus:border-[#F39C12] text-right"
                       />
+                    </div>
+                  </div>
+
+                  {/* Daily Tasks Code Settings (إعدادات رمز المهام اليومي) */}
+                  <div className="bg-[#0D1E36] p-4 rounded-xl border border-blue-900/30 space-y-4">
+                    <span className="block text-xs font-extrabold text-[#F39C12] border-b border-blue-900/30 pb-1.5 flex items-center gap-1.5 justify-start">
+                      <Key className="w-4 h-4 text-[#F39C12]" />
+                      <span>قفل السجل برمز المهام اليومي</span>
+                    </span>
+
+                    <div className="space-y-2 text-right">
+                      <div className="flex items-center justify-between">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            // Generate random 5 digit numeric code
+                            const randomCode = Math.floor(10000 + Math.random() * 90000).toString();
+                            setTasksCodeInput(randomCode);
+                          }}
+                          className="text-[10px] text-teal-400 hover:underline font-bold bg-teal-500/10 px-2.5 py-1 rounded-lg border border-teal-500/20 cursor-pointer"
+                        >
+                          🎲 توليد رمز عشوائي جديد
+                        </button>
+                        <label className="block text-[10px] font-bold text-white">رمز المهام اليومي المطلوب لدخول صفحة السجل</label>
+                      </div>
+                      <input
+                        type="text"
+                        value={tasksCodeInput}
+                        onChange={(e) => setTasksCodeInput(e.target.value)}
+                        placeholder="اتركه فارغاً لإلغاء القفل (رمز المهام اليومي)"
+                        className="w-full px-3 py-2.5 bg-[#070D19] border border-blue-900/50 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-[#F39C12] text-center"
+                        dir="ltr"
+                      />
+                      <p className="text-[10px] text-stone-400 leading-relaxed mt-1">
+                        * فكرة جميلة: عند تفعيل هذا الرمز، سيُطلب من العضو إدخال الرمز الصحيح قبل فتح صفحة السجل (المهمات). يمكنك تغيير الرمز كل يوم وإعطائه للأعضاء النشطين لتنظيم وتوجيه العمل! اتركه فارغاً لتعطيل هذا الطلب.
+                      </p>
+
+                      {/* Send code to VIP members button with inline confirmation */}
+                      {tasksCodeInput.trim() && (
+                        showSendCodeConfirm ? (
+                          <div className="mt-3 bg-blue-950/40 border border-blue-800/40 p-2.5 rounded-xl flex flex-col gap-2 animate-fadeIn text-center">
+                            <span className="text-[10px] text-teal-300 font-extrabold leading-relaxed">
+                              هل أنت متأكد من إرسال رمز المهام اليومي ({tasksCodeInput.trim()}) إلى جرس إشعارات المشتركين VIP؟
+                            </span>
+                            <div className="flex gap-2 justify-center">
+                              <button
+                                type="button"
+                                onClick={() => handleSendCodeToSubscribers(true)}
+                                disabled={sendingNotification}
+                                className="bg-teal-600 hover:bg-teal-700 text-white text-[10px] px-3 py-1.5 rounded-lg font-black cursor-pointer transition-all active:scale-95 flex items-center justify-center gap-1"
+                              >
+                                {sendingNotification && <RefreshCw className="w-3 h-3 animate-spin" />}
+                                نعم، أرسل الآن
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setShowSendCodeConfirm(false)}
+                                className="bg-stone-700 hover:bg-stone-600 text-white text-[10px] px-3 py-1.5 rounded-lg font-black cursor-pointer transition-all active:scale-95"
+                              >
+                                تراجع
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleSendCodeToSubscribers(false)}
+                            disabled={sendingNotification}
+                            className="w-full mt-3 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white py-2 px-3 rounded-lg text-[11px] font-black shadow transition-all cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 disabled:opacity-50"
+                          >
+                            {sendingNotification ? (
+                              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Bell className="w-3.5 h-3.5" />
+                            )}
+                            <span>📢 إرسال الرمز الحالي إلى جرس إشعارات المشتركين فقط</span>
+                          </button>
+                        )
+                      )}
                     </div>
                   </div>
                 </div>

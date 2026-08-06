@@ -111,6 +111,7 @@ export interface SystemSettings {
   supportAgentSubtitle?: string; // المسمى الوظيفي أو الوصف
   supportAgentAvatar?: string; // الصورة الرمزية لوكيل الدعم (رابط أو base64)
   supportFaqs?: SupportFaq[]; // الأسئلة الشائعة للرد التلقائي المخصص
+  tasksCode?: string; // رمز المهام اليومي المطلوب لدخول السجل
 }
 
 export interface SupportFaq {

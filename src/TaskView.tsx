@@ -29,6 +29,8 @@ import {
   ArrowDownCircle,
   ArrowUpCircle,
   Bell,
+  Key,
+  Lock,
   Volume2,
   VolumeX,
   Gift,
@@ -335,8 +337,83 @@ export default function TaskView() {
   // 'list' -> Task Log View, 'detail' -> Task Details View
   const [currentView, setCurrentView] = useState<'list' | 'detail'>('list');
   const [activeBottomTab, setActiveBottomTab] = useState<'home' | 'jobs' | 'rank' | 'log' | 'profile'>('log');
+  
+  // Daily Tasks Code Verification States
+  const [isTasksCodeVerified, setIsTasksCodeVerified] = useState<boolean>(false);
+  const [showTasksCodeModal, setShowTasksCodeModal] = useState<boolean>(false);
+  const [tasksCodeAttempt, setTasksCodeAttempt] = useState<string>('');
+  const [tasksCodeError, setTasksCodeError] = useState<string | null>(null);
+  const [pendingTabSwitch, setPendingTabSwitch] = useState<'log' | null>(null);
+  const [pendingListTab, setPendingListTab] = useState<'withdrawn' | 'in_progress' | 'completed' | 'rejected' | null>(null);
+  const [showSubscribeRequiredModal, setShowSubscribeRequiredModal] = useState<boolean>(false);
+
   const [homeCategoryTab, setHomeCategoryTab] = useState<'youtube' | 'facebook'>('youtube');
   const [activeListTab, setActiveListTab] = useState<'withdrawn' | 'in_progress' | 'completed' | 'rejected'>('in_progress');
+
+  const navigateToTab = (tab: 'home' | 'jobs' | 'rank' | 'log' | 'profile', targetListTab?: 'withdrawn' | 'in_progress' | 'completed' | 'rejected') => {
+    const codeNeeded = settings.tasksCode && settings.tasksCode.trim() !== '';
+    const isAlreadyUnlocked = isTasksCodeVerified || (settings.tasksCode && localStorage.getItem(`tasks_code_verified_${settings.tasksCode}`) === 'true');
+    const isAdmin = currentUser?.role === 'admin';
+
+    // Verify subscription status for Log tab
+    const vipTier = (currentUser?.vipTier || '').trim();
+    const isVip = vipTier !== '' && vipTier !== 'الباقة العادية' && vipTier !== 'العادية' && vipTier !== 'العضوية العادية';
+
+    if (tab === 'log' && !isAdmin) {
+      if (!isVip) {
+        setShowSubscribeRequiredModal(true);
+        return;
+      }
+
+      if (codeNeeded && !isAlreadyUnlocked) {
+        setPendingTabSwitch('log');
+        if (targetListTab) {
+          setPendingListTab(targetListTab);
+        } else {
+          setPendingListTab(null);
+        }
+        setShowTasksCodeModal(true);
+        setTasksCodeAttempt('');
+        setTasksCodeError(null);
+        return;
+      }
+    }
+
+    setActiveBottomTab(tab);
+    setCurrentView('list');
+    if (targetListTab) {
+      setActiveListTab(targetListTab);
+    }
+  };
+
+  const handleVerifyTasksCode = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    
+    const correctCode = (settings.tasksCode || '').trim();
+    const attempt = tasksCodeAttempt.trim();
+
+    if (attempt === correctCode) {
+      setIsTasksCodeVerified(true);
+      if (correctCode) {
+        localStorage.setItem(`tasks_code_verified_${correctCode}`, 'true');
+      }
+      setShowTasksCodeModal(false);
+      setTasksCodeAttempt('');
+      setTasksCodeError(null);
+      
+      // Perform the deferred tab transition
+      if (pendingTabSwitch) {
+        setActiveBottomTab(pendingTabSwitch);
+        setCurrentView('list');
+        if (pendingListTab) {
+          setActiveListTab(pendingListTab);
+        }
+      }
+      triggerNotification("🎉 تم التحقق من رمز المهام بنجاح! تم فتح صفحة السجل.");
+    } else {
+      setTasksCodeError("⚠️ الرمز غير صحيح! يرجى مراجعة إدارة المنصة للحصول على الرمز اليومي الجديد.");
+    }
+  };
   
   // Selected Task for Details View
   const [selectedTaskId, setSelectedTaskId] = useState<string>('task-1');
@@ -883,10 +960,8 @@ export default function TaskView() {
     
     triggerNotification("🎉 تم الحصول على المهمة بنجاح! تم نقلها إلى السجل لتنفيذها.");
     
-    // Auto-redirect to log tab
-    setActiveBottomTab('log');
-    setActiveListTab('in_progress');
-    setCurrentView('list');
+    // Auto-redirect to log tab using navigateToTab
+    navigateToTab('log', 'in_progress');
   };
 
   // Add toast notification helper
@@ -2385,8 +2460,7 @@ export default function TaskView() {
         {/* Navigation Tab 1: الرئيسية */}
         <button
           onClick={() => {
-            setActiveBottomTab('home');
-            setCurrentView('list');
+            navigateToTab('home');
           }}
           className={`flex flex-col items-center justify-center flex-1 py-1 transition-all ${
             activeBottomTab === 'home' ? 'text-blue-600 scale-105' : 'text-stone-400 hover:text-stone-600'
@@ -2399,8 +2473,7 @@ export default function TaskView() {
         {/* Navigation Tab 2: التوظيف */}
         <button
           onClick={() => {
-            setActiveBottomTab('jobs');
-            setCurrentView('list');
+            navigateToTab('jobs');
           }}
           className={`flex flex-col items-center justify-center flex-1 py-1 transition-all ${
             activeBottomTab === 'jobs' ? 'text-blue-600 scale-105' : 'text-stone-400 hover:text-stone-600'
@@ -2413,8 +2486,7 @@ export default function TaskView() {
         {/* Navigation Tab 3: المنصب */}
         <button
           onClick={() => {
-            setActiveBottomTab('rank');
-            setCurrentView('list');
+            navigateToTab('rank');
           }}
           className={`flex flex-col items-center justify-center flex-1 py-1 transition-all ${
             activeBottomTab === 'rank' ? 'text-blue-600 scale-105' : 'text-stone-400 hover:text-stone-600'
@@ -2427,8 +2499,7 @@ export default function TaskView() {
         {/* Navigation Tab 4: السجل (Active/Selected) */}
         <button
           onClick={() => {
-            setActiveBottomTab('log');
-            setCurrentView('list');
+            navigateToTab('log');
           }}
           className={`flex flex-col items-center justify-center flex-1 py-1 transition-all ${
             activeBottomTab === 'log' ? 'text-blue-600 scale-105' : 'text-stone-400 hover:text-stone-600'
@@ -2441,8 +2512,7 @@ export default function TaskView() {
         {/* Navigation Tab 5: المركز الشخصي */}
         <button
           onClick={() => {
-            setActiveBottomTab('profile');
-            setCurrentView('list');
+            navigateToTab('profile');
             setProfileSubView('menu');
           }}
           className={`flex flex-col items-center justify-center flex-1 py-1 transition-all ${
@@ -2480,6 +2550,109 @@ export default function TaskView() {
                 className="flex-1 bg-stone-150 hover:bg-stone-200 text-stone-700 font-extrabold py-2 rounded-xl text-xs cursor-pointer transition-all active:scale-95"
               >
                 إلغاء
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Daily Tasks Code Verification Modal */}
+      {showTasksCodeModal && (
+        <div className="fixed inset-0 z-50 bg-stone-950/40 backdrop-blur-sm flex items-center justify-center p-4">
+          <form 
+            onSubmit={handleVerifyTasksCode}
+            className="bg-white rounded-2xl border border-stone-200 p-6 w-full max-w-xs shadow-2xl text-center space-y-4"
+          >
+            <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto">
+              <Key className="w-6 h-6 stroke-[2]" />
+            </div>
+            <div>
+              <h3 className="text-sm font-black text-stone-900">رمز المرور لصفحة السجل</h3>
+              <p className="text-[11px] text-stone-500 mt-1 leading-relaxed">
+                يرجى إدخال رمز المهام اليومي المعتمد لفتح صفحة السجل والبدء بالعمل وتنفيذ مهامك.
+              </p>
+            </div>
+            
+            <div className="space-y-1.5 text-center">
+              <input
+                type="text"
+                required
+                value={tasksCodeAttempt}
+                onChange={(e) => {
+                  setTasksCodeAttempt(e.target.value);
+                  setTasksCodeError(null);
+                }}
+                placeholder="أدخل رمز المهام اليومي"
+                className="w-full px-3 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-xs font-bold text-stone-800 text-center tracking-widest focus:outline-none focus:border-blue-500 focus:bg-white"
+                autoFocus
+              />
+              {tasksCodeError && (
+                <p className="text-[10px] text-rose-500 font-bold leading-relaxed">{tasksCodeError}</p>
+              )}
+            </div>
+
+            <div className="flex gap-2 pt-1">
+              <button
+                type="submit"
+                className="flex-grow bg-blue-600 hover:bg-blue-700 text-white font-extrabold py-2.5 rounded-xl text-xs cursor-pointer transition-all active:scale-95 flex items-center justify-center gap-1.5"
+              >
+                <span>تأكيد الدخول</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowTasksCodeModal(false);
+                  setTasksCodeAttempt('');
+                  setTasksCodeError(null);
+                  setPendingTabSwitch(null);
+                  setPendingListTab(null);
+                }}
+                className="bg-stone-150 hover:bg-stone-200 text-stone-700 font-extrabold px-4 py-2.5 rounded-xl text-xs cursor-pointer transition-all active:scale-95"
+              >
+                إلغاء
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Subscription Required Modal */}
+      {showSubscribeRequiredModal && (
+        <div className="fixed inset-0 z-50 bg-stone-950/40 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl border border-stone-200 p-6 w-full max-w-xs shadow-2xl text-center space-y-4 animate-scaleIn">
+            <div className="w-12 h-12 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center mx-auto">
+              <Lock className="w-6 h-6 stroke-[2]" />
+            </div>
+            <div>
+              <h3 className="text-sm font-black text-stone-900">⚠️ الاشتراك مطلوب أولاً</h3>
+              <p className="text-[11px] text-stone-500 mt-1.5 leading-relaxed">
+                أهلاً بك! صفحة السجل والمهام اليومية مخصصة فقط للأعضاء المشتركين في باقات <strong>VIP</strong>.
+              </p>
+              <p className="text-[11px] text-stone-500 mt-2 leading-relaxed">
+                يرجى ترقية حسابك أولاً إلى إحدى باقات VIP لتتمكن من استلام رمز المهام اليومي المعتمد والبدء بالعمل وجني الأرباح!
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowSubscribeRequiredModal(false);
+                  navigateToTab('rank');
+                }}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-extrabold py-2.5 rounded-xl text-xs cursor-pointer transition-all active:scale-95 flex items-center justify-center gap-1.5"
+              >
+                <Zap className="w-4 h-4 fill-white" />
+                <span>الذهاب إلى صفحة ترقيات VIP</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowSubscribeRequiredModal(false);
+                }}
+                className="w-full bg-stone-150 hover:bg-stone-200 text-stone-700 font-extrabold py-2.5 rounded-xl text-xs cursor-pointer transition-all active:scale-95"
+              >
+                إغلاق
               </button>
             </div>
           </div>

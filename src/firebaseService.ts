@@ -144,7 +144,8 @@ function getLocalSettings(): SystemSettings {
         supportAgentName: (parsed.supportAgentName && !parsed.supportAgentName.includes("مريم")) ? parsed.supportAgentName : "دعم فني منصة oxlo",
         supportAgentSubtitle: (parsed.supportAgentSubtitle && !parsed.supportAgentSubtitle.includes("المالية") && !parsed.supportAgentSubtitle.includes("Mis")) ? parsed.supportAgentSubtitle : "مستشارتك المساعدة في oxlo",
         supportAgentAvatar: parsed.supportAgentAvatar ?? "",
-        supportFaqs: (parsed.supportFaqs && parsed.supportFaqs.length > 4 && !parsed.supportFaqs.some((f: any) => f.question.includes("كيف يمكنني التواصل مع الدعم الفني؟"))) ? parsed.supportFaqs : defaultSupportFaqs
+        supportFaqs: (parsed.supportFaqs && parsed.supportFaqs.length > 4 && !parsed.supportFaqs.some((f: any) => f.question.includes("كيف يمكنني التواصل مع الدعم الفني؟"))) ? parsed.supportFaqs : defaultSupportFaqs,
+        tasksCode: parsed.tasksCode ?? ""
       };
     } catch (e) {
       // JSON parse error, fall through to default
@@ -189,7 +190,8 @@ function getLocalSettings(): SystemSettings {
     supportAgentName: "دعم فني منصة oxlo",
     supportAgentSubtitle: "مستشارتك المساعدة في oxlo",
     supportAgentAvatar: "",
-    supportFaqs: defaultSupportFaqs
+    supportFaqs: defaultSupportFaqs,
+    tasksCode: ""
   };
   localStorage.setItem('local_db_settings', JSON.stringify(initial));
   return initial;
@@ -732,7 +734,8 @@ export async function getSystemSettings(): Promise<SystemSettings> {
         supportAgentName: (data.supportAgentName && !data.supportAgentName.includes("مريم")) ? data.supportAgentName : "دعم فني منصة oxlo",
         supportAgentSubtitle: (data.supportAgentSubtitle && !data.supportAgentSubtitle.includes("المالية") && !data.supportAgentSubtitle.includes("Mis")) ? data.supportAgentSubtitle : "مستشارتك المساعدة في oxlo",
         supportAgentAvatar: data.supportAgentAvatar ?? "",
-        supportFaqs: (data.supportFaqs && data.supportFaqs.length > 4 && !data.supportFaqs.some((f: any) => f.question.includes("كيف يمكنني التواصل مع الدعم الفني؟"))) ? data.supportFaqs : defaultSupportFaqs
+        supportFaqs: (data.supportFaqs && data.supportFaqs.length > 4 && !data.supportFaqs.some((f: any) => f.question.includes("كيف يمكنني التواصل مع الدعم الفني؟"))) ? data.supportFaqs : defaultSupportFaqs,
+        tasksCode: data.tasksCode ?? ""
       };
     }
     const def = getLocalSettings();
@@ -1924,7 +1927,8 @@ export function subscribeToSystemSettings(onUpdate: (settings: SystemSettings) =
           supportAgentName: (data.supportAgentName && !data.supportAgentName.includes("مريم")) ? data.supportAgentName : "دعم فني منصة oxlo",
           supportAgentSubtitle: (data.supportAgentSubtitle && !data.supportAgentSubtitle.includes("المالية") && !data.supportAgentSubtitle.includes("Mis")) ? data.supportAgentSubtitle : "مستشارتك المساعدة في oxlo",
           supportAgentAvatar: data.supportAgentAvatar ?? "",
-          supportFaqs: (data.supportFaqs && data.supportFaqs.length > 4 && !data.supportFaqs.some((f: any) => f.question.includes("كيف يمكنني التواصل مع الدعم الفني؟"))) ? data.supportFaqs : defaultSupportFaqs
+          supportFaqs: (data.supportFaqs && data.supportFaqs.length > 4 && !data.supportFaqs.some((f: any) => f.question.includes("كيف يمكنني التواصل مع الدعم الفني؟"))) ? data.supportFaqs : defaultSupportFaqs,
+          tasksCode: data.tasksCode ?? ""
         });
       }
     }, (error) => {
