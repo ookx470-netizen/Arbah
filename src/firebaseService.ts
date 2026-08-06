@@ -37,6 +37,33 @@ export async function hashPassword(password: string): Promise<string> {
 // Let's keep a state flag for Local Storage fallback mode
 let useLocalStorageFallback = false;
 
+export const defaultSupportFaqs = [
+  {
+    question: "ما هي منصة oxlo وكيف تعمل؟",
+    answer: "منصة oxlo هي منصة ذكية لزيادة الدخل وتأدية المهام المصغرة اليومية. تتيح للمشتركين تحقيق أرباح مستقرة من خلال القيام بمهام بسيطة مثل متابعة الحسابات والاشتراك في قنوات التواصل الاجتماعي وتأكيدها بلقطة شاشة."
+  },
+  {
+    question: "كيف يمكنني شحن حسابي وترقية VIP؟",
+    answer: "يمكنك شحن رصيدك بالذهاب إلى صفحة 'المركز الشخصي' ثم 'شحن الحساب' والتحويل لعنوان المحفظة (USDT Polygon أو TRC20). بعد إرسال المبلغ، أرفق لقطة الشاشة ورقم المعاملة (الهاش). لتفعيل الـ VIP، انتقل إلى قسم 'المنصب' واشترك في الباقة المناسبة لك."
+  },
+  {
+    question: "ما هي آلية تنفيذ المهام اليومية؟",
+    answer: "اذهب لتبويب 'التوظيف' في القائمة السفلية، اختر فئة التواصل الاجتماعي، ثم انقر على المهمة لمشاهدة التفاصيل وزيارة الرابط لتنفيذه (اشتراك/إعجاب)، التقط لقطة الشاشة، قم برفعها في الخانة المخصصة ثم انقر على تقديم المهمة. سيقوم المشرف بمراجعتها واعتماد العمولة في رصيدك."
+  },
+  {
+    question: "ما هو الحد الأدنى للسحب وكيف أسحب أرباحي؟",
+    answer: "الحد الأدنى للسحب هو 2 USDT. يمكنك السحب بالانتقال إلى 'المركز الشخصي' واختيار 'سحب الأرباح'، أدخل عنوان محفظتك ومبلغ السحب ورقم سري الصرف. يتم معالجة طلبات السحب يومياً خلال ساعات العمل الرسمية."
+  },
+  {
+    question: "ما هي أوقات العمل الرسمية للمنصة؟",
+    answer: "يرجى العلم بأن أوقات العمل الرسمية لتقديم واعتماد المهام وسحب الأرباح مقسمة إلى فترتين: الفترة الأولى من 12:00 ظهراً وحتى 05:00 عصراً، والفترة الثانية من 09:00 مساءً وحتى 01:00 ليلاً بتوقيت مكة المكرمة."
+  },
+  {
+    question: "كيف يمكنني زيادة أرباحي عبر نظام الإحالة؟",
+    answer: "يمكنك نسخ رابط دعوتك ورمز الإحالة الخاص بك من صفحة المركز الشخصي ومشاركته مع أصدقائك. ستحصل على مكافآت وعمولات مميزة ونسب من الأرباح اليومية لكل عضو يسجل ويقوم بالترقية من خلال رابطك."
+  }
+];
+
 export function isFallbackMode(): boolean {
   return useLocalStorageFallback;
 }
@@ -85,7 +112,7 @@ function getLocalSettings(): SystemSettings {
         rechargeAddressBEP20: parsed.rechargeAddressBEP20 ?? "0x71C7656EC7ab88b098defB751B7401B5f6d8976F",
         telegramLink: parsed.telegramLink ?? "-fhzo.vercel.app",
         minDeposit: parsed.minDeposit ?? 25,
-        minWithdrawal: parsed.minWithdrawal ?? 10,
+        minWithdrawal: parsed.minWithdrawal ?? 2,
         holidayActive: parsed.holidayActive ?? false,
         holidayDays: parsed.holidayDays ?? [5], // Default to Friday
         globalNotification: parsed.globalNotification ?? "مرحباً بكم في منصتنا الميكروية الجديدة! ابدأ بالعمل اليوم وزد أرباحك.",
@@ -108,21 +135,16 @@ function getLocalSettings(): SystemSettings {
           { id: 'plan_D2', name: 'D2', price: 65000, profit: 1620, tasksCount: 5 },
           { id: 'plan_business', name: 'business', price: 90000, profit: 2550, tasksCount: 5 }
         ],
-        workingHoursNotice: parsed.workingHoursNotice ?? "💡 تنويه هام لجميع الأعضاء: يرجى العلم بأن أوقات العمل الرسمية لتنفيذ واعتماد المهام اليومية مقسمة على فترتين يومياً:\n- الفترة الأولى: من الساعة 12:00 ظهراً وحتى 03:00 عصراً.\n- الفترة الثانية: من الساعة 09:00 مساءً وحتى 01:00 ليلاً بتوقيت مكة المكرمة.",
+        workingHoursNotice: parsed.workingHoursNotice ?? "💡 تنويه هام لجميع الأعضاء: يرجى العلم بأن أوقات العمل الرسمية لتنفيذ واعتماد المهام اليومية مقسمة على فترتين يومياً:\n- الفترة الأولى: من الساعة 12:00 ظهراً وحتى 05:00 عصراً.\n- الفترة الثانية: من الساعة 09:00 مساءً وحتى 01:00 ليلاً بتوقيت مكة المكرمة.",
         enforceWorkingHours: parsed.enforceWorkingHours ?? true,
         workStartHour: parsed.workStartHour !== undefined ? Number(parsed.workStartHour) : 12,
-        workEndHour: parsed.workEndHour !== undefined ? Number(parsed.workEndHour) : 15,
+        workEndHour: parsed.workEndHour !== undefined ? Number(parsed.workEndHour) : 17,
         workStartHour2: parsed.workStartHour2 !== undefined ? Number(parsed.workStartHour2) : 21,
         workEndHour2: parsed.workEndHour2 !== undefined ? Number(parsed.workEndHour2) : 1,
-        supportAgentName: parsed.supportAgentName ?? "مريم (الدعم الفني المباشر)",
-        supportAgentSubtitle: parsed.supportAgentSubtitle ?? "مستشارتك المالية في Mis",
+        supportAgentName: (parsed.supportAgentName && !parsed.supportAgentName.includes("مريم")) ? parsed.supportAgentName : "دعم فني منصة oxlo",
+        supportAgentSubtitle: (parsed.supportAgentSubtitle && !parsed.supportAgentSubtitle.includes("المالية") && !parsed.supportAgentSubtitle.includes("Mis")) ? parsed.supportAgentSubtitle : "مستشارتك المساعدة في oxlo",
         supportAgentAvatar: parsed.supportAgentAvatar ?? "",
-        supportFaqs: parsed.supportFaqs ?? [
-          { question: "كيف يمكنني التواصل مع الدعم الفني؟", answer: "يمكنك التواصل المباشر مع الدعم الفني عبر نافذة المحادثة المتاحة في المنصة للحصول على الإرشادات والدعم الفوري." },
-          { question: "آلية العمل والمهام", answer: "آلية العمل بسيطة للغاية: تذهب إلى قسم المهام، وتختار أحد قنوات اليوتيوب أو الفيسبوك المتاحة، ثم تشترك وتلتقط لقطة شاشة وتصفيها وترفعها في الخانة المخصصة للمراجعة.\n\nبعد مراجعة الأدمن سيتم اعتماد العمولة في حسابك فوراً!" },
-          { question: "مستويات VIP", answer: "لدينا باقات مميزة لزيادة دخلكم اليومي:\n- باقة 600$: ربح يومي 18$ (5 مهام)\n- باقة 1200$: ربح يومي 38$ (5 مهام)\n\nكلما كانت ترقيتك أعلى زادت عوائدك اليومية!" },
-          { question: "كيفية شحن رصيد وتفعيل باقة", answer: "الرجاء الذهاب إلى صفحة الشحن، نسخ عنوان المحفظة بعناية (USDT Polygon أو TRC20)، ثم قم بتحويل المبلغ، وأرفق لقطة شاشة لعملية الدفع حتى يعتمدها المشرف." }
-        ]
+        supportFaqs: (parsed.supportFaqs && parsed.supportFaqs.length > 4 && !parsed.supportFaqs.some((f: any) => f.question.includes("كيف يمكنني التواصل مع الدعم الفني؟"))) ? parsed.supportFaqs : defaultSupportFaqs
       };
     } catch (e) {
       // JSON parse error, fall through to default
@@ -135,7 +157,7 @@ function getLocalSettings(): SystemSettings {
     rechargeAddressBEP20: "0x71C7656EC7ab88b098defB751B7401B5f6d8976F",
     telegramLink: "-fhzo.vercel.app",
     minDeposit: 25,
-    minWithdrawal: 10,
+    minWithdrawal: 2,
     holidayActive: false,
     holidayDays: [5], // Default to Friday
     globalNotification: "مرحباً بكم في منصتنا الميكروية الجديدة! ابدأ بالعمل اليوم وزد أرباحك.",
@@ -158,21 +180,16 @@ function getLocalSettings(): SystemSettings {
       { id: 'plan_D2', name: 'D2', price: 65000, profit: 1620, tasksCount: 5 },
       { id: 'plan_business', name: 'business', price: 90000, profit: 2550, tasksCount: 5 }
     ],
-    workingHoursNotice: "💡 تنويه هام لجميع الأعضاء: يرجى العلم بأن أوقات العمل الرسمية لتنفيذ واعتماد المهام اليومية مقسمة على فترتين يومياً:\n- الفترة الأولى: من الساعة 12:00 ظهراً وحتى 03:00 عصراً.\n- الفترة الثانية: من الساعة 09:00 مساءً وحتى 01:00 ليلاً بتوقيت مكة المكرمة.",
+    workingHoursNotice: "💡 تنويه هام لجميع الأعضاء: يرجى العلم بأن أوقات العمل الرسمية لتنفيذ واعتماد المهام اليومية مقسمة على فترتين يومياً:\n- الفترة الأولى: من الساعة 12:00 ظهراً وحتى 05:00 عصراً.\n- الفترة الثانية: من الساعة 09:00 مساءً وحتى 01:00 ليلاً بتوقيت مكة المكرمة.",
     enforceWorkingHours: true,
     workStartHour: 12,
-    workEndHour: 15,
+    workEndHour: 17,
     workStartHour2: 21,
     workEndHour2: 1,
-    supportAgentName: "مريم (الدعم الفني المباشر)",
-    supportAgentSubtitle: "مستشارتك المالية في Mis",
+    supportAgentName: "دعم فني منصة oxlo",
+    supportAgentSubtitle: "مستشارتك المساعدة في oxlo",
     supportAgentAvatar: "",
-    supportFaqs: [
-      { question: "كيف يمكنني التواصل مع الدعم الفني؟", answer: "يمكنك التواصل المباشر مع الدعم الفني عبر نافذة المحادثة المتاحة في المنصة للحصول على الإرشادات والدعم الفوري." },
-      { question: "آلية العمل والمهام", answer: "آلية العمل بسيطة للغاية: تذهب إلى قسم المهام، وتختار أحد قنوات اليوتيوب أو الفيسبوك المتاحة، ثم تشترك وتلتقط لقطة شاشة وتصفيها وترفعها في الخانة المخصصة للمراجعة.\n\nبعد مراجعة الأدمن سيتم اعتماد العمولة في حسابك فوراً!" },
-      { question: "مستويات VIP", answer: "لدينا باقات مميزة لزيادة دخلكم اليومي:\n- باقة 600$: ربح يومي 18$ (5 مهام)\n- باقة 1200$: ربح يومي 38$ (5 مهام)\n\nكلما كانت ترقيتك أعلى زادت عوائدك اليومية!" },
-      { question: "كيفية شحن رصيد وتفعيل باقة", answer: "الرجاء الذهاب إلى صفحة الشحن، نسخ عنوان المحفظة بعناية (USDT Polygon أو TRC20)، ثم قم بتحويل المبلغ، وأرفق لقطة شاشة لعملية الدفع حتى يعتمدها المشرف." }
-    ]
+    supportFaqs: defaultSupportFaqs
   };
   localStorage.setItem('local_db_settings', JSON.stringify(initial));
   return initial;
@@ -246,7 +263,7 @@ export async function initializeDatabase() {
         rechargeAddressBEP20: "0x71C7656EC7ab88b098defB751B7401B5f6d8976F",
         telegramLink: "-fhzo.vercel.app",
         minDeposit: 25,
-        minWithdrawal: 10,
+        minWithdrawal: 2,
         holidayActive: false,
         holidayDays: [5] // Default to Friday
       };
@@ -682,7 +699,7 @@ export async function getSystemSettings(): Promise<SystemSettings> {
         rechargeAddressBEP20: data.rechargeAddressBEP20 ?? "0x71C7656EC7ab88b098defB751B7401B5f6d8976F",
         telegramLink: data.telegramLink ?? "-fhzo.vercel.app",
         minDeposit: Number(data.minDeposit ?? 25),
-        minWithdrawal: Number(data.minWithdrawal ?? 10),
+        minWithdrawal: Number(data.minWithdrawal ?? 2),
         holidayActive: Boolean(data.holidayActive ?? false),
         holidayDays: data.holidayDays ?? [5],
         globalNotification: data.globalNotification ?? "مرحباً بكم في منصتنا الميكروية الجديدة! ابدأ بالعمل اليوم وزد أرباحك.",
@@ -705,22 +722,17 @@ export async function getSystemSettings(): Promise<SystemSettings> {
           { id: 'plan_D2', name: 'D2', price: 65000, profit: 1620, tasksCount: 5 },
           { id: 'plan_business', name: 'business', price: 90000, profit: 2550, tasksCount: 5 }
         ],
-        workingHoursNotice: data.workingHoursNotice ?? "💡 تنويه هام لجميع الأعضاء: يرجى العلم بأن أوقات العمل الرسمية لتنفيذ واعتماد المهام اليومية مقسمة على فترتين يومياً:\n- الفترة الأولى: من الساعة 12:00 ظهراً وحتى 03:00 عصراً.\n- الفترة الثانية: من الساعة 09:00 مساءً وحتى 01:00 ليلاً بتوقيت مكة المكرمة.",
+        workingHoursNotice: data.workingHoursNotice ?? "💡 تنويه هام لجميع الأعضاء: يرجى العلم بأن أوقات العمل الرسمية لتنفيذ واعتماد المهام اليومية مقسمة على فترتين يومياً:\n- الفترة الأولى: من الساعة 12:00 ظهراً وحتى 05:00 عصراً.\n- الفترة الثانية: من الساعة 09:00 مساءً وحتى 01:00 ليلاً بتوقيت مكة المكرمة.",
         enforceWorkingHours: data.enforceWorkingHours !== undefined ? Boolean(data.enforceWorkingHours) : true,
         workStartHour: data.workStartHour !== undefined ? Number(data.workStartHour) : 12,
-        workEndHour: data.workEndHour !== undefined ? Number(data.workEndHour) : 15,
+        workEndHour: data.workEndHour !== undefined ? Number(data.workEndHour) : 17,
         workStartHour2: data.workStartHour2 !== undefined ? Number(data.workStartHour2) : 21,
         workEndHour2: data.workEndHour2 !== undefined ? Number(data.workEndHour2) : 1,
         appDownloadUrl: data.appDownloadUrl ?? "",
-        supportAgentName: data.supportAgentName ?? "مريم (الدعم الفني المباشر)",
-        supportAgentSubtitle: data.supportAgentSubtitle ?? "مستشارتك المالية في Mis",
+        supportAgentName: (data.supportAgentName && !data.supportAgentName.includes("مريم")) ? data.supportAgentName : "دعم فني منصة oxlo",
+        supportAgentSubtitle: (data.supportAgentSubtitle && !data.supportAgentSubtitle.includes("المالية") && !data.supportAgentSubtitle.includes("Mis")) ? data.supportAgentSubtitle : "مستشارتك المساعدة في oxlo",
         supportAgentAvatar: data.supportAgentAvatar ?? "",
-        supportFaqs: data.supportFaqs ?? [
-          { question: "كيف يمكنني التواصل مع الدعم الفني؟", answer: "يمكنك التواصل المباشر مع الدعم الفني عبر نافذة المحادثة المتاحة في المنصة للحصول على الإرشادات والدعم الفوري." },
-          { question: "آلية العمل والمهام", answer: "آلية العمل بسيطة للغاية: تذهب إلى قسم المهام، وتختار أحد قنوات اليوتيوب أو الفيسبوك المتاحة، ثم تشترك وتلتقط لقطة شاشة وتصفيها وترفعها في الخانة المخصصة للمراجعة.\n\nبعد مراجعة الأدمن سيتم اعتماد العمولة في حسابك فوراً!" },
-          { question: "مستويات VIP", answer: "لدينا باقات مميزة لزيادة دخلكم اليومي:\n- باقة 600$: ربح يومي 18$ (5 مهام)\n- باقة 1200$: ربح يومي 38$ (5 مهام)\n\nكلما كانت ترقيتك أعلى زادت عوائدك اليومية!" },
-          { question: "كيفية شحن رصيد وتفعيل باقة", answer: "الرجاء الذهاب إلى صفحة الشحن، نسخ عنوان المحفظة بعناية (USDT Polygon أو TRC20)، ثم قم بتحويل المبلغ، وأرفق لقطة شاشة لعملية الدفع حتى يعتمدها المشرف." }
-        ]
+        supportFaqs: (data.supportFaqs && data.supportFaqs.length > 4 && !data.supportFaqs.some((f: any) => f.question.includes("كيف يمكنني التواصل مع الدعم الفني؟"))) ? data.supportFaqs : defaultSupportFaqs
       };
     }
     const def = getLocalSettings();
@@ -1887,7 +1899,7 @@ export function subscribeToSystemSettings(onUpdate: (settings: SystemSettings) =
           rechargeAddressBEP20: data.rechargeAddressBEP20 ?? "0x71C7656EC7ab88b098defB751B7401B5f6d8976F",
           telegramLink: data.telegramLink ?? "-fhzo.vercel.app",
           minDeposit: Number(data.minDeposit ?? 25),
-          minWithdrawal: Number(data.minWithdrawal ?? 10),
+          minWithdrawal: Number(data.minWithdrawal ?? 2),
           holidayActive: Boolean(data.holidayActive ?? false),
           holidayDays: data.holidayDays ?? [5],
           globalNotification: data.globalNotification ?? "مرحباً بكم في منصتنا الميكروية الجديدة! ابدأ بالعمل اليوم وزد أرباحك.",
@@ -1902,22 +1914,17 @@ export function subscribeToSystemSettings(onUpdate: (settings: SystemSettings) =
             { id: 'plan_600', name: 'باقة 600$', price: 600, profit: 18, tasksCount: 5 },
             { id: 'plan_1200', name: 'باقة 1200$', price: 1200, profit: 38, tasksCount: 5 }
           ],
-          workingHoursNotice: data.workingHoursNotice ?? "💡 تنويه هام لجميع الأعضاء: يرجى العلم بأن أوقات العمل الرسمية لتنفيذ واعتماد المهام اليومية مقسمة على فترتين يومياً:\n- الفترة الأولى: من الساعة 12:00 ظهراً وحتى 03:00 عصراً.\n- الفترة الثانية: من الساعة 09:00 مساءً وحتى 01:00 ليلاً بتوقيت مكة المكرمة.",
+          workingHoursNotice: data.workingHoursNotice ?? "💡 تنويه هام لجميع الأعضاء: يرجى العلم بأن أوقات العمل الرسمية لتنفيذ واعتماد المهام اليومية مقسمة على فترتين يومياً:\n- الفترة الأولى: من الساعة 12:00 ظهراً وحتى 05:00 عصراً.\n- الفترة الثانية: من الساعة 09:00 مساءً وحتى 01:00 ليلاً بتوقيت مكة المكرمة.",
           enforceWorkingHours: data.enforceWorkingHours !== undefined ? Boolean(data.enforceWorkingHours) : true,
           workStartHour: data.workStartHour !== undefined ? Number(data.workStartHour) : 12,
-          workEndHour: data.workEndHour !== undefined ? Number(data.workEndHour) : 15,
+          workEndHour: data.workEndHour !== undefined ? Number(data.workEndHour) : 17,
           workStartHour2: data.workStartHour2 !== undefined ? Number(data.workStartHour2) : 21,
           workEndHour2: data.workEndHour2 !== undefined ? Number(data.workEndHour2) : 1,
           appDownloadUrl: data.appDownloadUrl ?? "",
-          supportAgentName: data.supportAgentName ?? "مريم (الدعم الفني المباشر)",
-          supportAgentSubtitle: data.supportAgentSubtitle ?? "مستشارتك المالية في Mis",
+          supportAgentName: (data.supportAgentName && !data.supportAgentName.includes("مريم")) ? data.supportAgentName : "دعم فني منصة oxlo",
+          supportAgentSubtitle: (data.supportAgentSubtitle && !data.supportAgentSubtitle.includes("المالية") && !data.supportAgentSubtitle.includes("Mis")) ? data.supportAgentSubtitle : "مستشارتك المساعدة في oxlo",
           supportAgentAvatar: data.supportAgentAvatar ?? "",
-          supportFaqs: data.supportFaqs ?? [
-            { question: "كيف يمكنني التواصل مع الدعم الفني؟", answer: "يمكنك التواصل المباشر مع الدعم الفني عبر نافذة المحادثة المتاحة في المنصة للحصول على الإرشادات والدعم الفوري." },
-            { question: "آلية العمل والمهام", answer: "آلية العمل بسيطة للغاية: تذهب إلى قسم المهام، وتختار أحد قنوات اليوتيوب أو الفيسبوك المتاحة، ثم تشترك وتلتقط لقطة شاشة وتصفيها وترفعها في الخانة المخصصة للمراجعة.\n\nبعد مراجعة الأدمن سيتم اعتماد العمولة في حسابك فوراً!" },
-            { question: "مستويات VIP", answer: "لدينا باقات مميزة لزيادة دخلكم اليومي:\n- باقة 600$: ربح يومي 18$ (5 مهام)\n- باقة 1200$: ربح يومي 38$ (5 مهام)\n\nكلما كانت ترقيتك أعلى زادت عوائدك اليومية!" },
-            { question: "كيفية شحن رصيد وتفعيل باقة", answer: "الرجاء الذهاب إلى صفحة الشحن، نسخ عنوان المحفظة بعناية (USDT Polygon أو TRC20)، ثم قم بتحويل المبلغ، وأرفق لقطة شاشة لعملية الدفع حتى يعتمدها المشرف." }
-          ]
+          supportFaqs: (data.supportFaqs && data.supportFaqs.length > 4 && !data.supportFaqs.some((f: any) => f.question.includes("كيف يمكنني التواصل مع الدعم الفني؟"))) ? data.supportFaqs : defaultSupportFaqs
         });
       }
     }, (error) => {
@@ -2022,6 +2029,19 @@ export async function sendSupportMessage(
     localStorage.setItem('local_db_support_chats', JSON.stringify(localChats));
   } catch (e) {
     console.warn("Local storage update failed inside sendSupportMessage:", e);
+  }
+
+  // Trigger private in-app notification (bell system) for fallback & live users
+  try {
+    if (sender === 'admin') {
+      // Create a private notification for this user (chatId is user's identifier/phone)
+      createNotification(chatId, `💬 رسالة جديدة من الدعم الفني: "${text}"`).catch(() => {});
+    } else if (sender === 'user') {
+      // Create a notification for the administrator
+      createNotification('admin', `💬 رسالة جديدة من العضو ${username} (${chatId}): "${text}"`).catch(() => {});
+    }
+  } catch (notifErr) {
+    console.warn("sendSupportMessage notification trigger failed:", notifErr);
   }
 
   if (useLocalStorageFallback) return;
@@ -2144,6 +2164,52 @@ export function subscribeToAllChats(
       const localChats = JSON.parse(localStorage.getItem('local_db_support_chats') || '{}');
       onUpdate(Object.values(localChats));
     }, 2000);
+    return () => clearInterval(interval);
+  }
+}
+
+export function subscribeToUserChat(
+  phone: string,
+  onUpdate: (chat: SupportChat | null) => void
+): () => void {
+  if (useLocalStorageFallback) {
+    const interval = setInterval(() => {
+      const localChats = JSON.parse(localStorage.getItem('local_db_support_chats') || '{}');
+      onUpdate(localChats[phone] || null);
+    }, 1500);
+    return () => clearInterval(interval);
+  }
+
+  try {
+    const chatRef = doc(db, "support_chats", phone);
+    const unsubscribe = onSnapshot(chatRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const d = docSnap.data();
+        onUpdate({
+          id: docSnap.id,
+          username: d.username || '',
+          phone: d.phone || docSnap.id,
+          lastMessage: d.lastMessage || '',
+          lastMessageTime: d.lastMessageTime || '',
+          unreadByAdmin: !!d.unreadByAdmin,
+          unreadByUser: !!d.unreadByUser,
+          createdAt: d.createdAt || ''
+        });
+      } else {
+        onUpdate(null);
+      }
+    }, (error) => {
+      console.warn("Error in subscribeToUserChat, falling back:", error);
+      const localChats = JSON.parse(localStorage.getItem('local_db_support_chats') || '{}');
+      onUpdate(localChats[phone] || null);
+    });
+    return unsubscribe;
+  } catch (e) {
+    console.warn("Failed to subscribe to user chat:", e);
+    const interval = setInterval(() => {
+      const localChats = JSON.parse(localStorage.getItem('local_db_support_chats') || '{}');
+      onUpdate(localChats[phone] || null);
+    }, 1500);
     return () => clearInterval(interval);
   }
 }

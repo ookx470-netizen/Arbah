@@ -25,9 +25,13 @@ import {
   subscribeToUserNotifications,
   markNotificationAsRead,
   markAllNotificationsAsRead,
-  updateAdminPhone
+  updateAdminPhone,
+  subscribeToAllChats,
+  subscribeToSupportMessages,
+  sendSupportMessage,
+  markChatAsReadByAdmin
 } from '../firebaseService';
-import { User, Deposit, Withdrawal, SystemSettings, VipPlan, UserNotification } from '../types';
+import { User, Deposit, Withdrawal, SystemSettings, VipPlan, UserNotification, SupportChat, SupportMessage } from '../types';
 import { formatHourToArabic } from '../utils';
 import { 
   ShieldAlert, 
@@ -94,9 +98,68 @@ export default function AdminPanel({ adminUser, onLogout, isDarkMode, toggleDark
   });
   
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'deposits' | 'withdrawals' | 'plans' | 'settings' | 'all'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'deposits' | 'withdrawals' | 'plans' | 'settings' | 'all' | 'support'>('overview');
   const [depositFilter, setDepositFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
   const [withdrawalFilter, setWithdrawalFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
+
+  // Support Chat admin states
+  const [chats, setChats] = useState<SupportChat[]>([]);
+  const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
+  const [chatMessages, setChatMessages] = useState<SupportMessage[]>([]);
+  const [adminReplyText, setAdminReplyText] = useState<string>('');
+  const [chatSearchQuery, setChatSearchQuery] = useState<string>('');
+  const [chatFilter, setChatFilter] = useState<'all' | 'unread'>('all');
+  const adminChatEndRef = useRef<HTMLDivElement>(null);
+
+  // Subscribe to all chats
+  useEffect(() => {
+    const unsubChats = subscribeToAllChats((updatedChats) => {
+      setChats(updatedChats);
+    });
+    return () => unsubChats();
+  }, []);
+
+  // Subscribe to selected chat's messages
+  useEffect(() => {
+    if (!selectedChatId) return;
+
+    // Mark chat as read by admin
+    markChatAsReadByAdmin(selectedChatId).catch(err => console.error("Error marking chat as read:", err));
+
+    const unsubMsgs = subscribeToSupportMessages(selectedChatId, (msgs) => {
+      setChatMessages(msgs);
+    });
+
+    return () => unsubMsgs();
+  }, [selectedChatId]);
+
+  // Scroll to bottom of active admin chat on messages change
+  useEffect(() => {
+    if (selectedChatId && activeTab === 'support') {
+      setTimeout(() => {
+        adminChatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 100);
+    }
+  }, [chatMessages.length, selectedChatId, activeTab]);
+
+  const handleSendAdminReply = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!adminReplyText.trim() || !selectedChatId) return;
+
+    const replyText = adminReplyText.trim();
+    setAdminReplyText('');
+
+    const activeChat = chats.find(c => c.id === selectedChatId);
+    const username = activeChat?.username || selectedChatId;
+    const senderName = "المدير - الدعم الفني";
+
+    try {
+      await sendSupportMessage(selectedChatId, username, replyText, 'admin', senderName);
+    } catch (err) {
+      console.error("Error sending admin reply:", err);
+      showToast("حدث خطأ أثناء إرسال الرد");
+    }
+  };
   
   // Settings Inputs
   const [siteNameInput, setSiteNameInput] = useState<string>('BET');
@@ -899,7 +962,14 @@ export default function AdminPanel({ adminUser, onLogout, isDarkMode, toggleDark
               },
               { id: 'plans', label: 'باقات VIP', icon: Zap, badge: settings.vipPlans?.length || 0 },
               { id: 'settings', label: 'إعدادات المنصة', icon: Settings, badge: null },
-              { id: 'all', label: 'العرض الشامل', icon: RefreshCw, badge: null }
+              { id: 'all', label: 'العرض الشامل', icon: RefreshCw, badge: null },
+              { 
+                id: 'support', 
+                label: 'الدعم الفني والرسائل', 
+                icon: MessageSquare, 
+                badge: chats.filter(c => c.unreadByAdmin).length > 0 ? chats.filter(c => c.unreadByAdmin).length : null,
+                badgeColor: 'bg-green-500 text-white animate-pulse font-extrabold'
+              }
             ].map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
@@ -2175,7 +2245,7 @@ export default function AdminPanel({ adminUser, onLogout, isDarkMode, toggleDark
                       <div className="flex items-center justify-between text-xs font-black text-teal-400 border-b border-teal-500/10 pb-1.5">
                         <span className="flex items-center gap-1.5">
                           <span>☀️</span>
-                          <span>الفترة الأولى (مثال: من 12 ظهراً إلى 3 عصراً)</span>
+                          <span>الفترة الأولى (مثال: من 12 ظهراً إلى 5 عصراً)</span>
                         </span>
                         <span className="text-[10px] text-teal-300 font-bold bg-teal-950/60 px-2 py-0.5 rounded-full border border-teal-500/30">
                           من {formatHourToArabic(workStartHourInput)} إلى {formatHourToArabic(workEndHourInput)}
@@ -2654,6 +2724,344 @@ export default function AdminPanel({ adminUser, onLogout, isDarkMode, toggleDark
         )}
 
       </div>
+      )}
+
+      {/* Support Chat Admin Tab View */}
+      {activeTab === 'support' && (
+        <div className="max-w-6xl mx-auto px-4 mt-6">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-lg overflow-hidden flex flex-col md:flex-row h-[700px]">
+            
+            {/* Right Column: Chats List (Sidebar) */}
+            <div className="w-full md:w-80 border-l border-slate-200 flex flex-col h-full bg-slate-50/50">
+              
+              {/* Sidebar Header */}
+              <div className="p-4 border-b border-slate-200 bg-white space-y-3 shrink-0">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-black text-slate-800 flex items-center gap-1.5">
+                    <MessageSquare className="w-5 h-5 text-blue-600" />
+                    محادثات الدعم الفني
+                  </h3>
+                  <span className="bg-blue-50 text-blue-700 text-[10px] font-black px-2.5 py-0.5 rounded-full border border-blue-200">
+                    {chats.length} محادثة
+                  </span>
+                </div>
+
+                {/* Search Input */}
+                <div className="relative">
+                  <span className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-slate-400">
+                    <Search className="w-4 h-4" />
+                  </span>
+                  <input
+                    type="text"
+                    value={chatSearchQuery}
+                    onChange={(e) => setChatSearchQuery(e.target.value)}
+                    className="w-full pr-9 pl-3 py-2 bg-slate-100 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-right"
+                    placeholder="ابحث بالاسم أو رقم الهاتف..."
+                  />
+                </div>
+
+                {/* Filter Tabs */}
+                <div className="flex bg-slate-100 p-1 rounded-xl text-[10px] font-black">
+                  <button
+                    onClick={() => setChatFilter('all')}
+                    className={`flex-1 py-1.5 rounded-lg transition-all cursor-pointer ${
+                      chatFilter === 'all' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-900'
+                    }`}
+                  >
+                    الكل ({chats.length})
+                  </button>
+                  <button
+                    onClick={() => setChatFilter('unread')}
+                    className={`flex-1 py-1.5 rounded-lg transition-all cursor-pointer relative ${
+                      chatFilter === 'unread' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-900'
+                    }`}
+                  >
+                    غير المقروء ({chats.filter(c => c.unreadByAdmin).length})
+                    {chats.filter(c => c.unreadByAdmin).length > 0 && (
+                      <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-rose-500 rounded-full animate-ping"></span>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Conversations List */}
+              <div className="flex-1 overflow-y-auto divide-y divide-slate-100 p-2 space-y-1">
+                {(() => {
+                  const filtered = chats
+                    .filter(c => {
+                      const q = chatSearchQuery.trim().toLowerCase();
+                      if (!q) return true;
+                      return c.phone.toLowerCase().includes(q) || c.username.toLowerCase().includes(q);
+                    })
+                    .filter(c => {
+                      if (chatFilter === 'unread') return c.unreadByAdmin;
+                      return true;
+                    });
+
+                  if (filtered.length === 0) {
+                    return (
+                      <div className="text-center py-12 text-slate-400 font-bold text-xs space-y-2">
+                        <MessageSquare className="w-8 h-8 mx-auto opacity-30" />
+                        <span>لا توجد محادثات مطابقة.</span>
+                      </div>
+                    );
+                  }
+
+                  return filtered.map((chat) => {
+                    const isSelected = selectedChatId === chat.id;
+                    const userObj = users.find(u => u.phone === chat.phone);
+                    const isOnline = userObj ? isUserOnline(userObj) : false;
+                    
+                    return (
+                      <button
+                        key={chat.id}
+                        onClick={() => setSelectedChatId(chat.id)}
+                        className={`w-full p-3 rounded-xl flex items-center justify-between text-right transition-all cursor-pointer border ${
+                          isSelected
+                            ? 'bg-blue-600 text-white border-blue-600 shadow-md scale-[1.01]'
+                            : 'bg-white hover:bg-slate-100 border-slate-100 hover:border-slate-200'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          {/* Avatar & Online status */}
+                          <div className="relative shrink-0">
+                            <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black text-xs ${
+                              isSelected ? 'bg-white/20 text-white' : 'bg-blue-50 text-blue-600 border border-blue-100'
+                            }`}>
+                              {chat.username ? chat.username.charAt(0) : "ع"}
+                            </div>
+                            {isOnline && (
+                              <span className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 rounded-full border-2 border-white animate-pulse"></span>
+                            )}
+                          </div>
+
+                          {/* Info Text */}
+                          <div className="min-w-0">
+                            <h4 className={`text-xs font-black truncate ${isSelected ? 'text-white' : 'text-slate-800'}`}>
+                              {chat.username || chat.phone}
+                            </h4>
+                            <p className={`text-[10px] font-mono mt-0.5 truncate ${isSelected ? 'text-white/85' : 'text-slate-500'}`} dir="ltr">
+                              {chat.phone}
+                            </p>
+                            <p className={`text-[10px] mt-1 line-clamp-1 ${isSelected ? 'text-white/80' : 'text-slate-400'}`}>
+                              {chat.lastMessage || 'بدء المحادثة...'}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Unread badge or Time */}
+                        <div className="flex flex-col items-end gap-1.5 shrink-0">
+                          {chat.unreadByAdmin && !isSelected ? (
+                            <span className="w-2.5 h-2.5 bg-rose-500 rounded-full animate-bounce"></span>
+                          ) : (
+                            <span className={`text-[9px] font-mono ${isSelected ? 'text-white/70' : 'text-slate-400'}`}>
+                              {chat.lastMessageTime ? new Date(chat.lastMessageTime).toLocaleTimeString('ar-EG', {hour: '2-digit', minute: '2-digit'}) : ''}
+                            </span>
+                          )}
+                          
+                          {userObj?.vipTier && (
+                            <span className={`text-[8px] font-extrabold px-1.5 py-0.5 rounded border ${
+                              isSelected 
+                                ? 'bg-white/20 text-white border-white/10' 
+                                : 'bg-amber-50 text-amber-700 border-amber-200'
+                            }`}>
+                              VIP {userObj.vipTier}
+                            </span>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  });
+                })()}
+              </div>
+            </div>
+
+            {/* Left Column: Active Chat Area */}
+            <div className="flex-1 flex flex-col h-full bg-white relative">
+              {selectedChatId ? (
+                (() => {
+                  const activeChat = chats.find(c => c.id === selectedChatId);
+                  const userObj = users.find(u => u.phone === activeChat?.phone);
+                  const isOnline = userObj ? isUserOnline(userObj) : false;
+
+                  return (
+                    <>
+                      {/* Active Chat Header */}
+                      <div className="p-4 border-b border-slate-200 bg-slate-50/60 flex items-center justify-between shrink-0">
+                        <div className="flex items-center gap-3 text-right">
+                          <div className="relative shrink-0">
+                            <div className="w-11 h-11 rounded-full bg-blue-500 text-white flex items-center justify-center font-black text-sm shadow-sm">
+                              {activeChat?.username ? activeChat.username.charAt(0) : "ع"}
+                            </div>
+                            {isOnline && (
+                              <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-500 rounded-full border-2 border-white animate-pulse"></span>
+                            )}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h4 className="text-xs font-black text-slate-800">{activeChat?.username || "عضو المنصة"}</h4>
+                              {userObj?.vipTier && (
+                                <span className="bg-amber-100 text-amber-800 text-[8px] font-black px-2 py-0.5 rounded border border-amber-200">
+                                  VIP {userObj.vipTier}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1.5 text-[10px] text-slate-500 mt-1">
+                              <span className="font-mono" dir="ltr">{activeChat?.phone}</span>
+                              <span>•</span>
+                              <span>الرصيد: {userObj?.earnings ?? 0} USDT</span>
+                              <span>•</span>
+                              {isOnline ? (
+                                <span className="text-emerald-600 font-extrabold">متصل الآن</span>
+                              ) : (
+                                <span>آخر ظهور: {userObj?.lastActiveAt ? new Date(userObj.lastActiveAt).toLocaleDateString('ar-EG', {hour: '2-digit', minute: '2-digit'}) : 'غير متوفر'}</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Action buttons on the left of header */}
+                        <div className="flex items-center gap-2">
+                          {userObj && (
+                            <button
+                              onClick={() => setSelectedUserForEdit(userObj)}
+                              className="bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-[10px] font-black px-3 py-1.5 rounded-xl transition-all cursor-pointer flex items-center gap-1 shadow-sm"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                              تعديل حساب العضو
+                            </button>
+                          )}
+                          <button
+                            onClick={() => setSelectedChatId(null)}
+                            className="bg-slate-100 hover:bg-slate-200 text-slate-500 p-2 rounded-xl transition-all cursor-pointer border border-slate-200"
+                            title="إغلاق المحادثة"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Chat Messages Scrolling Box */}
+                      <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50/30 flex flex-col">
+                        {chatMessages.length === 0 ? (
+                          <div className="text-center py-12 text-slate-400 font-bold text-xs">
+                            لا توجد رسائل سابقة في هذه المحادثة.
+                          </div>
+                        ) : (
+                          chatMessages.map((msg) => {
+                            const isAdmin = msg.sender === 'admin';
+                            return (
+                              <div
+                                key={msg.id}
+                                className={`flex flex-col max-w-[70%] ${isAdmin ? 'self-end items-end text-right' : 'self-start items-start text-left'}`}
+                              >
+                                {/* Sender Name Label */}
+                                <span className="text-[9px] text-slate-400 mb-0.5 font-bold">
+                                  {isAdmin ? 'أنا (المدير)' : (msg.senderName || activeChat?.username || "العضو")}
+                                </span>
+
+                                {/* Message bubble */}
+                                <div className={`p-3 rounded-2xl text-xs font-semibold leading-relaxed shadow-sm ${
+                                  isAdmin
+                                    ? 'bg-slate-900 text-white rounded-tr-none'
+                                    : 'bg-white text-slate-850 border border-slate-200 rounded-tl-none'
+                                }`}>
+                                  {msg.text}
+                                </div>
+
+                                {/* Timestamp */}
+                                <span className="text-[8px] text-slate-400 mt-1" dir="ltr">
+                                  {new Date(msg.createdAt).toLocaleTimeString('ar-EG', {hour: '2-digit', minute: '2-digit'})}
+                                </span>
+                              </div>
+                            );
+                          })
+                        )}
+                        <div ref={adminChatEndRef} />
+                      </div>
+
+                      {/* Preset Replies Panel */}
+                      <div className="px-4 py-2 bg-slate-50 border-t border-slate-200 shrink-0">
+                        <span className="text-[9px] text-slate-400 font-extrabold block mb-1">ردود سريعة معتمدة للدعم:</span>
+                        <div className="flex flex-wrap gap-1.5">
+                          {[
+                            "مرحباً بك عزيزي، كيف يمكنني مساعدتك اليوم؟",
+                            "تم تفعيل وشحن حسابك بنجاح، يرجى مراجعة المحفظة.",
+                            "يرجى رفع لقطة شاشة واضحة لعملية التحويل يظهر فيها الهاش.",
+                            "الحد الأدنى للسحب هو 2 USDT، يرجى الاستمرار بتجميع الأرباح.",
+                            "تمت الموافقة على طلب السحب الخاص بك بنجاح، يرجى فحص محفظتك.",
+                            "يرجى التحقق من صحة رابط المهمة المرفوعة والمحاولة مجدداً."
+                          ].map((preset, pIdx) => (
+                            <button
+                              key={pIdx}
+                              onClick={() => setAdminReplyText(preset)}
+                              className="bg-white hover:bg-blue-50 border border-slate-200 hover:border-blue-300 text-[9px] text-slate-600 hover:text-blue-700 font-extrabold px-2.5 py-1 rounded-lg transition-all cursor-pointer shadow-sm"
+                            >
+                              {preset}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Message Input Form */}
+                      <form onSubmit={handleSendAdminReply} className="p-3 bg-white border-t border-slate-200 flex items-center gap-2 shrink-0">
+                        <button
+                          type="submit"
+                          disabled={!adminReplyText.trim()}
+                          className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-100 disabled:text-slate-400 text-white text-xs font-black rounded-xl transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
+                        >
+                          <Send className="w-4.5 h-4.5 rotate-180" />
+                          إرسال الرد
+                        </button>
+                        <input
+                          type="text"
+                          value={adminReplyText}
+                          onChange={(e) => setAdminReplyText(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && e.ctrlKey) {
+                              handleSendAdminReply();
+                            }
+                          }}
+                          className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-right"
+                          placeholder="اكتب ردك للمشترك هنا... (اضغط Ctrl+Enter للإرسال السريع)"
+                        />
+                      </form>
+                    </>
+                  );
+                })()
+              ) : (
+                /* Active Chat Placeholder */
+                <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-slate-50/20">
+                  <div className="w-20 h-20 bg-blue-50 text-blue-500 rounded-full flex items-center justify-center shadow-inner border border-blue-100 mb-4 animate-bounce">
+                    <MessageSquare className="w-10 h-10 stroke-[2]" />
+                  </div>
+                  <h3 className="text-sm font-black text-slate-800">منصة إدارة المحادثات والدعم المباشر</h3>
+                  <p className="text-xs text-slate-500 max-w-sm mt-2 leading-relaxed">
+                    الرجاء تحديد محادثة عضو من القائمة الجانبية للبدء في التواصل ومراجع طلباته والرد الفوري عليه.
+                  </p>
+
+                  {/* Summary support stats */}
+                  <div className="grid grid-cols-2 gap-4 mt-6 max-w-md w-full">
+                    <div className="bg-white p-4 rounded-xl border border-slate-200 text-center shadow-sm">
+                      <span className="text-[10px] text-slate-400 font-extrabold block">إجمالي المحادثات</span>
+                      <span className="text-lg font-black text-slate-800 mt-1 block">{chats.length}</span>
+                    </div>
+                    <div className="bg-white p-4 rounded-xl border border-slate-200 text-center shadow-sm relative overflow-hidden">
+                      <span className="text-[10px] text-slate-400 font-extrabold block">محادثات بانتظار الرد</span>
+                      <span className="text-lg font-black text-rose-600 mt-1 block">
+                        {chats.filter(c => c.unreadByAdmin).length}
+                      </span>
+                      {chats.filter(c => c.unreadByAdmin).length > 0 && (
+                        <div className="absolute top-0 right-0 w-1.5 h-full bg-rose-500"></div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+          </div>
+        </div>
       )}
 
       {/* Advanced Edit User Modal */}

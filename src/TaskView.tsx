@@ -359,7 +359,7 @@ export default function TaskView() {
 
   // User Authentication & Admin status
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [profileSubView, setProfileSubView] = useState<'menu' | 'recharge' | 'withdraw' | 'team' | 'bind' | 'dep_log' | 'with_log' | 'change_pass'>('menu');
+  const [profileSubView, setProfileSubView] = useState<'menu' | 'recharge' | 'withdraw' | 'team' | 'bind' | 'dep_log' | 'with_log' | 'change_pass' | 'support'>('menu');
   const [selectedPlanForUpgrade, setSelectedPlanForUpgrade] = useState<VipPlan | null>(null);
   const [adminMode, setAdminModeState] = useState<boolean>(() => {
     return localStorage.getItem('admin_mode_active') === 'true';
@@ -1999,25 +1999,26 @@ export default function TaskView() {
             </div>
           )}
 
-          {/* Home Portal Administration Link Navigation */}
+          {/* Direct Technical Support Trigger Card */}
           <div className="bg-white rounded-2xl p-5 border border-stone-200/80 shadow-sm text-center mb-4">
             <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-3">
-              <Users className="w-5 h-5 stroke-[2.5]" />
+              <MessageSquare className="w-5 h-5 stroke-[2.5]" />
             </div>
-            <h3 className="text-xs font-black text-stone-900">الادارة والتواصل المباشر</h3>
+            <h3 className="text-xs font-black text-stone-900">الدعم الفني المباشر</h3>
             <p className="text-[10px] text-stone-500 font-semibold leading-relaxed mt-1.5 max-w-xs mx-auto">
-              تواصل معنا الآن للحصول على الإرشادات والدعم الفوري المباشر من إدارة المنصة.
+              تواصل معنا الآن للحصول على الإرشادات والدعم الفوري لحل أي مشكلات أو استفسارات فوراً عبر المحادثة المباشرة.
             </p>
-            {settings.telegramLink && (
-              <a
-                href={settings.telegramLink.startsWith('http') ? settings.telegramLink : `https://${settings.telegramLink}`}
-                target="_blank"
-                rel="noreferrer"
-                className="mt-4 w-full bg-gradient-to-r from-blue-500 to-indigo-600 text-white py-2.5 rounded-xl text-xs font-extrabold transition-all flex items-center justify-center gap-1.5 shadow-md active:scale-95 cursor-pointer"
-              >
-                <span>الادارة</span>
-              </a>
-            )}
+            <button
+              onClick={() => {
+                setActiveBottomTab('profile');
+                setCurrentView('list');
+                setProfileSubView('support');
+              }}
+              className="mt-4 w-full bg-gradient-to-r from-blue-500 to-indigo-600 text-white py-2.5 rounded-xl text-xs font-extrabold transition-all flex items-center justify-center gap-1.5 shadow-md active:scale-95 cursor-pointer hover:shadow-lg hover:from-blue-600 hover:to-indigo-700"
+            >
+              <MessageSquare className="w-4 h-4" />
+              <span>بدء محادثة الدعم الفني</span>
+            </button>
           </div>
           
           <div className="bg-gradient-to-br from-blue-50 to-indigo-50/70 rounded-2xl p-4 border border-blue-200/60 text-right space-y-3 shadow-sm">
