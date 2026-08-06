@@ -451,6 +451,7 @@ export default function TaskView() {
     }
   };
   const [initDone, setInitDone] = useState<boolean>(false);
+  const [loadingProgress, setLoadingProgress] = useState<number>(15);
   const [isFallback, setIsFallback] = useState<boolean>(false);
   const [settings, setSettings] = useState<SystemSettings>({
     siteName: 'BET',
@@ -662,8 +663,12 @@ export default function TaskView() {
   // Initialize and load from localStorage & database
   useEffect(() => {
     const startDbAndLoad = async () => {
+      const startTime = Date.now();
+      setLoadingProgress(25);
+
       // Initialize Firestore admin and settings
       await initializeDatabase();
+      setLoadingProgress(55);
 
       // Auto login user from localStorage if exists
       const cachedPhone = localStorage.getItem('logged_in_phone');
@@ -678,6 +683,19 @@ export default function TaskView() {
           console.error("Error auto-logging in:", e);
         }
       }
+      setLoadingProgress(85);
+
+      // Guarantee minimum splash screen visibility time (2200ms) for professional branding display
+      const elapsedTime = Date.now() - startTime;
+      const minDuration = 2200;
+      if (elapsedTime < minDuration) {
+        const remaining = minDuration - elapsedTime;
+        // Animate remaining progress smoothly
+        setTimeout(() => setLoadingProgress(95), Math.max(100, remaining - 300));
+        await new Promise(resolve => setTimeout(resolve, remaining));
+      }
+
+      setLoadingProgress(100);
       setInitDone(true);
       setIsFallback(isFallbackMode());
     };
@@ -1248,13 +1266,16 @@ export default function TaskView() {
             </div>
             
             {/* Loading bar progression */}
-            <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden p-0.5 border border-slate-200">
-              <div className="bg-gradient-to-r from-[#3B82F6] to-[#1D4ED8] h-full rounded-full animate-marquee" style={{ width: '60%' }}></div>
+            <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden p-0.5 border border-slate-200">
+              <div 
+                className="bg-gradient-to-r from-[#3B82F6] to-[#1D4ED8] h-full rounded-full transition-all duration-500 ease-out" 
+                style={{ width: `${loadingProgress}%` }}
+              ></div>
             </div>
             
             <div className="flex items-center justify-between text-[9px] text-slate-400 font-bold">
-              <span>بروتوكول SSL آمن</span>
-              <span>تشفير 256-بت</span>
+              <span>نسبة التهيئة: {loadingProgress}%</span>
+              <span>تشفير 256-بت SSL 🔒</span>
             </div>
           </div>
 
