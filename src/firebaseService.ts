@@ -619,6 +619,89 @@ export async function updateUserStats(phone: string, updates: Partial<Pick<User,
   }
 }
 
+// 3.5 Credit 10% Referrer Commission when a team member completes a task
+export async function creditReferrerCommission(childPhone: string, rewardValue: number, childUsername: string): Promise<void> {
+  if (!childPhone || rewardValue <= 0) return;
+
+  const commission = Number((rewardValue * 0.10).toFixed(2));
+  if (commission <= 0) return;
+
+  let referrerPhone: string | null = null;
+  let childReferrerCode = "";
+
+  // 1. Find child user and their referrerCode
+  const localUsers = getLocalUsers();
+  const childUser = localUsers[childPhone];
+  if (childUser && childUser.referrerCode) {
+    childReferrerCode = childUser.referrerCode.trim().toUpperCase();
+  }
+
+  if (useLocalStorageFallback) {
+    if (!childReferrerCode) return;
+    const referrerInLocal = Object.values(localUsers).find(u => u.inviteCode && u.inviteCode.trim().toUpperCase() === childReferrerCode);
+    if (referrerInLocal) {
+      referrerPhone = referrerInLocal.phone;
+    }
+  } else {
+    try {
+      // If we don't have local childReferrerCode, fetch child doc from firestore first
+      if (!childReferrerCode) {
+        const childRef = doc(db, "users", childPhone);
+        const childSnap = await getDoc(childRef);
+        if (childSnap.exists()) {
+          const cData = childSnap.data() as User;
+          if (cData.referrerCode) {
+            childReferrerCode = cData.referrerCode.trim().toUpperCase();
+          }
+        }
+      }
+
+      if (childReferrerCode) {
+        // Query user with inviteCode == childReferrerCode
+        const q = query(collection(db, "users"), where("inviteCode", "==", childReferrerCode));
+        const querySnapshot = await getDocs(q);
+        if (!querySnapshot.empty) {
+          const referrerDoc = querySnapshot.docs[0];
+          referrerPhone = referrerDoc.id; // user document ID is phone
+        }
+      }
+    } catch (err) {
+      console.warn("Firestore error in creditReferrerCommission finding referrer:", err);
+    }
+  }
+
+  // If referrer is found, increment their earnings (credit balance) and send notification!
+  if (referrerPhone) {
+    const notifMsg = `💰 حصلت على عمولة قدرها ${commission} USDT من إتمام العضو (${childUsername}) لمهمته بنجاح!`;
+
+    // 1. Update in local storage
+    const updatedLocalUsers = getLocalUsers();
+    if (updatedLocalUsers[referrerPhone]) {
+      updatedLocalUsers[referrerPhone].earnings = Number((updatedLocalUsers[referrerPhone].earnings + commission).toFixed(2));
+      saveLocalUsers(updatedLocalUsers);
+    }
+
+    // 2. Update in firestore
+    if (!useLocalStorageFallback) {
+      try {
+        const refUserRef = doc(db, "users", referrerPhone);
+        await updateDoc(refUserRef, {
+          earnings: increment(commission)
+        });
+      } catch (err) {
+        console.warn("Firestore error in creditReferrerCommission updating referrer:", err);
+      }
+    }
+
+    // Send notification to referrer
+    try {
+      await createNotification(referrerPhone, notifMsg);
+    } catch (nErr) {
+      console.warn("Error triggering commission notification:", nErr);
+    }
+  }
+}
+
 // 4. Update User Wallet
 export async function updateUserWallet(phone: string, walletAddress: string) {
   if (useLocalStorageFallback) {
@@ -879,7 +962,6 @@ export async function updateDepositStatus(depositId: string, status: 'approved' 
       const users = getLocalUsers();
       if (users[phone]) {
         users[phone].earnings += amount;
-        users[phone].taskIncome += amount;
         saveLocalUsers(users);
       }
     }
@@ -893,8 +975,7 @@ export async function updateDepositStatus(depositId: string, status: 'approved' 
     if (status === 'approved') {
       const userRef = doc(db, "users", phone);
       await updateDoc(userRef, {
-        earnings: increment(amount),
-        taskIncome: increment(amount)
+        earnings: increment(amount)
       });
     }
   } catch (error) {
@@ -910,7 +991,6 @@ export async function updateDepositStatus(depositId: string, status: 'approved' 
       const users = getLocalUsers();
       if (users[phone]) {
         users[phone].earnings += amount;
-        users[phone].taskIncome += amount;
         saveLocalUsers(users);
       }
     }
@@ -1597,15 +1677,13 @@ export async function addManualDepositByAdmin(
       const users = getLocalUsers();
       if (users[phone]) {
         users[phone].earnings += amount;
-        users[phone].taskIncome += amount;
         saveLocalUsers(users);
       }
     } else {
       try {
         const userRef = doc(db, "users", phone);
         await updateDoc(userRef, {
-          earnings: increment(amount),
-          taskIncome: increment(amount)
+          earnings: increment(amount)
         });
       } catch (e) {
         console.warn("Error updating user balance on manual deposit:", e);

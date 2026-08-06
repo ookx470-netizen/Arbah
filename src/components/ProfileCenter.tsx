@@ -532,7 +532,7 @@ export default function ProfileCenter({
                     <span className="text-[10px] font-extrabold text-emerald-700">رصيد المستخدم</span>
                   </div>
                   <span className="text-sm font-black text-emerald-600 tracking-wide">
-                    {currentUser.earnings} USDT
+                    {Number(currentUser.earnings || 0).toFixed(2)} USDT
                   </span>
                 </div>
 
@@ -543,7 +543,7 @@ export default function ProfileCenter({
                     <span className="text-[10px] font-extrabold text-blue-700">الأرباح والمهام</span>
                   </div>
                   <span className="text-sm font-black text-blue-600 tracking-wide">
-                    {currentUser.taskIncome} USDT
+                    {Number(currentUser.taskIncome || 0).toFixed(2)} USDT
                   </span>
                 </div>
 
@@ -630,7 +630,7 @@ export default function ProfileCenter({
                   <div className="space-y-1.5">
                     <div className="flex justify-between text-[10px] font-bold text-slate-300">
                       <span>الهدف القادم: {nextTierName}</span>
-                      <span>{currentEarn} / {targetPrice} USDT</span>
+                      <span>{Number(currentEarn).toFixed(2)} / {targetPrice} USDT</span>
                     </div>
 
                     <div className="w-full bg-slate-950/80 h-3 rounded-full overflow-hidden p-0.5 border border-slate-700">
@@ -1099,7 +1099,7 @@ export default function ProfileCenter({
           {/* Wallet balance display card */}
           <div className="bg-gradient-to-br from-[#4F46E5] to-[#3B82F6] p-5 rounded-2xl text-white shadow-md">
             <span className="text-[10px] text-indigo-50 block">رصيد الأرباح المتاح للسحب الفوري</span>
-            <span className="text-2xl font-black block mt-1 tracking-wide">{currentUser.earnings} USDT</span>
+            <span className="text-2xl font-black block mt-1 tracking-wide">{Number(currentUser.earnings || 0).toFixed(2)} USDT</span>
             <div className="border-t border-white/10 mt-3 pt-3 flex items-center justify-between text-[10px] text-indigo-50 font-bold">
               <span>المحفظة المرتبطة بالحساب:</span>
               <span className="font-mono truncate max-w-[200px]" dir="ltr">{currentUser.walletAddress || "غير مرتبطة بعد (اربطها لتلقي الدفع)"}</span>
@@ -1294,7 +1294,7 @@ export default function ProfileCenter({
                           <span className="text-[9px] text-stone-400 block mt-0.5" dir="ltr">رقم الهاتف: {member.phone.substring(0, 7)}****</span>
                         </div>
                         <div className="text-left">
-                          <span className="text-xs font-black text-blue-600 block">{member.earnings} USDT</span>
+                          <span className="text-xs font-black text-blue-600 block">{Number(member.earnings || 0).toFixed(2)} USDT</span>
                           <span className="text-[9px] text-stone-400 block font-bold">باقة: {member.vipTier || 'الباقة العادية'}</span>
                         </div>
                       </div>

@@ -44,6 +44,7 @@ import {
 import AuthPage from './components/AuthPage';
 import ProfileCenter from './components/ProfileCenter';
 import AdminPanel from './components/AdminPanel';
+import { WelcomeOverlay } from './components/WelcomeOverlay';
 import { 
   initializeDatabase, 
   isFallbackMode
@@ -336,7 +337,7 @@ export default function TaskView() {
   // Navigation / Active Views
   // 'list' -> Task Log View, 'detail' -> Task Details View
   const [currentView, setCurrentView] = useState<'list' | 'detail'>('list');
-  const [activeBottomTab, setActiveBottomTab] = useState<'home' | 'jobs' | 'rank' | 'log' | 'profile'>('log');
+  const [activeBottomTab, setActiveBottomTab] = useState<'home' | 'jobs' | 'rank' | 'log' | 'profile'>('home');
   
   // Daily Tasks Code Verification States
   const [isTasksCodeVerified, setIsTasksCodeVerified] = useState<boolean>(false);
@@ -1172,11 +1173,18 @@ export default function TaskView() {
       const newTaskIncome = Number((baseTaskIncome + rewardValue).toFixed(2));
       
       // Update in Firebase / LocalDB fallback
-      const { updateUserStats } = await import('./firebaseService');
+      const { updateUserStats, creditReferrerCommission } = await import('./firebaseService');
       await updateUserStats(currentUser.phone, {
         earnings: newEarnings,
         taskIncome: newTaskIncome
       });
+
+      // Credit 10% commission to the referrer/parent user if exists
+      try {
+        await creditReferrerCommission(currentUser.phone, rewardValue, currentUser.username);
+      } catch (commErr) {
+        console.error("Error crediting referrer commission:", commErr);
+      }
       
       // Update local React state and storage session
       const updatedUser = {
@@ -1210,9 +1218,53 @@ export default function TaskView() {
 
   if (!initDone) {
     return (
-      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center text-slate-500 font-sans p-6" dir="rtl">
-        <RefreshCw className="w-8 h-8 animate-spin text-blue-600 mb-3" />
-        <span className="text-xs font-bold text-slate-700">جاري الاتصال بقاعدة البيانات الآمنة والتحقق من التهيئة...</span>
+      <div className="min-h-screen bg-gradient-to-b from-[#F4F9FF] to-[#E2F0FF] flex flex-col items-center justify-center p-6 text-right select-none font-sans" dir="rtl">
+        <div className="w-full max-w-sm text-center space-y-8 animate-fadeIn">
+          
+          {/* Logo Visual Branding */}
+          <div className="relative mx-auto w-24 h-24 flex items-center justify-center">
+            {/* Outer animated ring */}
+            <div className="absolute inset-0 rounded-3xl bg-[#3B82F6]/10 border-2 border-[#3B82F6]/20 animate-spin-slow"></div>
+            {/* Inner pulsing container */}
+            <div className="relative w-16 h-16 bg-gradient-to-br from-[#3B82F6] to-[#1D4ED8] rounded-2xl flex items-center justify-center shadow-lg shadow-[#3B82F6]/20 animate-pulse">
+              <span className="text-white text-3xl font-black tracking-tighter select-none font-mono">OX</span>
+            </div>
+          </div>
+
+          {/* Typography Greetings */}
+          <div className="space-y-3">
+            <h1 className="text-2xl font-black text-slate-900 tracking-wide">أهلاً بك في منصة OXLO</h1>
+            <p className="text-xs font-bold text-slate-500 leading-relaxed max-w-xs mx-auto">
+              بوابة الخدمات المصغرة الذكية والمهام اليومية الرائدة لإدارة وتنمية الأرباح الرقمية بأعلى مستويات الحماية والأمان.
+            </p>
+          </div>
+
+          {/* Custom Elegant Status Indicator */}
+          <div className="bg-white/80 backdrop-blur-md rounded-2xl p-4 border border-blue-100 shadow-sm space-y-3 max-w-xs mx-auto">
+            {/* Loading Ring with Spinner */}
+            <div className="flex items-center justify-center gap-3">
+              <RefreshCw className="w-4 h-4 animate-spin text-[#3B82F6] shrink-0" />
+              <span className="text-[11px] font-black text-slate-700 animate-pulse">جاري فحص الاتصال وقاعدة البيانات...</span>
+            </div>
+            
+            {/* Loading bar progression */}
+            <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden p-0.5 border border-slate-200">
+              <div className="bg-gradient-to-r from-[#3B82F6] to-[#1D4ED8] h-full rounded-full animate-marquee" style={{ width: '60%' }}></div>
+            </div>
+            
+            <div className="flex items-center justify-between text-[9px] text-slate-400 font-bold">
+              <span>بروتوكول SSL آمن</span>
+              <span>تشفير 256-بت</span>
+            </div>
+          </div>
+
+          {/* Footer visual indicators */}
+          <div className="text-[10px] text-slate-400 font-bold space-y-1">
+            <p>© 2026 Oxlo Smart Solutions. جميع الحقوق محفوظة.</p>
+            <p className="text-[9px] text-[#3B82F6]/80">نسخة النظام v2.4.1 • الاتصال مشفر وآمن بالكامل 🔒</p>
+          </div>
+
+        </div>
       </div>
     );
   }
@@ -1997,7 +2049,7 @@ export default function TaskView() {
             <div className="mt-5 grid grid-cols-2 gap-2 text-center">
               <div className="bg-white/10 backdrop-blur-sm p-2.5 rounded-xl border border-white/10">
                 <span className="text-[9px] text-blue-150 block">رصيد الحساب</span>
-                <span className="text-sm font-black block mt-0.5">{currentUser?.earnings || 0} USDT</span>
+                <span className="text-sm font-black block mt-0.5">{Number(currentUser?.earnings || 0).toFixed(2)} USDT</span>
               </div>
               <div className="bg-white/10 backdrop-blur-sm p-2.5 rounded-xl border border-white/10">
                 <span className="text-[9px] text-blue-150 block">مهام اليوم المنجزة</span>
@@ -2258,13 +2310,13 @@ export default function TaskView() {
                           <span className="text-[9px] text-stone-400 block mt-0.5" dir="ltr">الهاتف: {member.phone.substring(0, 7)}****</span>
                         </div>
                         <div className="text-left">
-                          <span className="text-xs font-black text-blue-600 block">{member.earnings} USDT</span>
+                          <span className="text-xs font-black text-blue-600 block">{Number(member.earnings || 0).toFixed(2)} USDT</span>
                           <span className="text-[9px] text-stone-400 block font-bold">باقة: {member.vipTier || 'الباقة العادية'}</span>
                         </div>
                       </div>
                       
                       <div className="pt-2 border-t border-stone-100 flex items-center justify-between text-[10px] font-bold">
-                        <span className="text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100 font-black text-[9px]">أرباح المهام: {member.taskIncome || 0} USDT</span>
+                        <span className="text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100 font-black text-[9px]">أرباح المهام: {Number(member.taskIncome || 0).toFixed(2)} USDT</span>
                         <span className="text-stone-500">
                           عمولتك المكتسبة (%10): <strong className="text-emerald-700 font-black">{comm} USDT</strong>
                         </span>
@@ -2616,48 +2668,15 @@ export default function TaskView() {
         </div>
       )}
 
-      {/* Subscription Required Modal */}
-      {showSubscribeRequiredModal && (
-        <div className="fixed inset-0 z-50 bg-stone-950/40 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl border border-stone-200 p-6 w-full max-w-xs shadow-2xl text-center space-y-4 animate-scaleIn">
-            <div className="w-12 h-12 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center mx-auto">
-              <Lock className="w-6 h-6 stroke-[2]" />
-            </div>
-            <div>
-              <h3 className="text-sm font-black text-stone-900">⚠️ الاشتراك مطلوب أولاً</h3>
-              <p className="text-[11px] text-stone-500 mt-1.5 leading-relaxed">
-                أهلاً بك! صفحة السجل والمهام اليومية مخصصة فقط للأعضاء المشتركين في باقات <strong>VIP</strong>.
-              </p>
-              <p className="text-[11px] text-stone-500 mt-2 leading-relaxed">
-                يرجى ترقية حسابك أولاً إلى إحدى باقات VIP لتتمكن من استلام رمز المهام اليومي المعتمد والبدء بالعمل وجني الأرباح!
-              </p>
-            </div>
-
-            <div className="flex flex-col gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowSubscribeRequiredModal(false);
-                  navigateToTab('rank');
-                }}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-extrabold py-2.5 rounded-xl text-xs cursor-pointer transition-all active:scale-95 flex items-center justify-center gap-1.5"
-              >
-                <Zap className="w-4 h-4 fill-white" />
-                <span>الذهاب إلى صفحة ترقيات VIP</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowSubscribeRequiredModal(false);
-                }}
-                className="w-full bg-stone-150 hover:bg-stone-200 text-stone-700 font-extrabold py-2.5 rounded-xl text-xs cursor-pointer transition-all active:scale-95"
-              >
-                إغلاق
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Subscription Required Welcome Overlay */}
+      <WelcomeOverlay 
+        isOpen={showSubscribeRequiredModal} 
+        onClose={() => setShowSubscribeRequiredModal(false)} 
+        onNavigateToUpgrade={() => {
+          setShowSubscribeRequiredModal(false);
+          navigateToTab('rank');
+        }}
+      />
 
 
 
