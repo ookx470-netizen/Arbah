@@ -1236,53 +1236,62 @@ export default function TaskView() {
 
   if (!initDone) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-[#F4F9FF] to-[#E2F0FF] flex flex-col items-center justify-center p-6 text-right select-none font-sans" dir="rtl">
-        <div className="w-full max-w-sm text-center space-y-8 animate-fadeIn">
+      <div className="relative min-h-screen bg-gradient-to-b from-[#F0F6FF] via-[#E6F0FA] to-[#DBEAFE] flex flex-col items-center justify-center p-6 text-center select-none font-sans overflow-hidden" dir="rtl">
+        {/* Ambient Decorative Light Orbs */}
+        <div className="absolute -top-32 -left-32 w-80 h-80 bg-blue-400/25 rounded-full blur-3xl pointer-events-none animate-pulse"></div>
+        <div className="absolute -bottom-32 -right-32 w-80 h-80 bg-indigo-400/20 rounded-full blur-3xl pointer-events-none animate-pulse"></div>
+
+        <div className="relative z-10 w-full max-w-sm text-center space-y-7">
           
           {/* Logo Visual Branding */}
-          <div className="relative mx-auto w-24 h-24 flex items-center justify-center">
-            {/* Outer animated ring */}
-            <div className="absolute inset-0 rounded-3xl bg-[#3B82F6]/10 border-2 border-[#3B82F6]/20 animate-spin-slow"></div>
-            {/* Inner pulsing container */}
-            <div className="relative w-16 h-16 bg-gradient-to-br from-[#3B82F6] to-[#1D4ED8] rounded-2xl flex items-center justify-center shadow-lg shadow-[#3B82F6]/20 animate-pulse">
+          <div className="relative mx-auto w-28 h-28 flex items-center justify-center">
+            {/* Ambient Back Glow */}
+            <div className="absolute inset-2 rounded-3xl bg-blue-500/30 blur-xl"></div>
+            {/* Outer spinning ring */}
+            <div className="absolute inset-0 rounded-3xl border-2 border-dashed border-blue-500/30 animate-spin-slow"></div>
+            {/* Inner logo card */}
+            <div className="relative w-20 h-20 bg-gradient-to-br from-[#2563EB] via-[#1D4ED8] to-[#1E40AF] rounded-2xl flex items-center justify-center shadow-2xl shadow-blue-600/30 border border-white/20">
               <span className="text-white text-3xl font-black tracking-tighter select-none font-mono">OX</span>
+              {/* Subtle shine badge */}
+              <div className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-amber-400 rounded-full border-2 border-white shadow-sm"></div>
             </div>
           </div>
 
           {/* Typography Greetings */}
-          <div className="space-y-3">
-            <h1 className="text-2xl font-black text-slate-900 tracking-wide">أهلاً بك في منصة OXLO</h1>
+          <div className="space-y-2.5">
+            <h1 className="text-2xl font-black text-slate-900 tracking-tight">
+              أهلاً بك في منصة <span className="bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-800 bg-clip-text text-transparent">OXLO</span>
+            </h1>
             <p className="text-xs font-bold text-slate-500 leading-relaxed max-w-xs mx-auto">
-              بوابة الخدمات المصغرة الذكية والمهام اليومية الرائدة لإدارة وتنمية الأرباح الرقمية بأعلى مستويات الحماية والأمان.
+              بوابة الخدمات المصغرة والمهام اليومية الرائدة لإدارة وتنمية الأرباح الرقمية بمرونة وسهولة.
             </p>
           </div>
 
-          {/* Custom Elegant Status Indicator */}
-          <div className="bg-white/80 backdrop-blur-md rounded-2xl p-4 border border-blue-100 shadow-sm space-y-3 max-w-xs mx-auto">
-            {/* Loading Ring with Spinner */}
-            <div className="flex items-center justify-center gap-3">
-              <RefreshCw className="w-4 h-4 animate-spin text-[#3B82F6] shrink-0" />
-              <span className="text-[11px] font-black text-slate-700 animate-pulse">جاري فحص الاتصال وقاعدة البيانات...</span>
+          {/* Glassmorphism Status Indicator Card */}
+          <div className="bg-white/85 backdrop-blur-xl rounded-3xl p-5 border border-white/80 shadow-xl shadow-blue-900/5 space-y-3.5 max-w-xs mx-auto">
+            {/* Loading Ring Spinner */}
+            <div className="flex items-center justify-center">
+              <div className="p-2.5 rounded-2xl bg-blue-50 border border-blue-100 text-blue-600 shadow-inner">
+                <RefreshCw className="w-5 h-5 animate-spin" />
+              </div>
             </div>
             
             {/* Loading bar progression */}
-            <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden p-0.5 border border-slate-200">
+            <div className="w-full bg-slate-150/80 h-2.5 rounded-full overflow-hidden p-0.5 border border-slate-200/80 shadow-inner">
               <div 
-                className="bg-gradient-to-r from-[#3B82F6] to-[#1D4ED8] h-full rounded-full transition-all duration-500 ease-out" 
+                className="bg-gradient-to-r from-blue-600 via-indigo-500 to-blue-500 h-full rounded-full transition-all duration-500 ease-out shadow-sm" 
                 style={{ width: `${loadingProgress}%` }}
               ></div>
             </div>
             
-            <div className="flex items-center justify-between text-[9px] text-slate-400 font-bold">
+            <div className="flex items-center justify-center text-[10px] text-slate-500 font-extrabold">
               <span>نسبة التهيئة: {loadingProgress}%</span>
-              <span>تشفير 256-بت SSL 🔒</span>
             </div>
           </div>
 
-          {/* Footer visual indicators */}
-          <div className="text-[10px] text-slate-400 font-bold space-y-1">
+          {/* Footer Copyright */}
+          <div className="text-[10px] text-slate-400 font-bold">
             <p>© 2026 Oxlo Smart Solutions. جميع الحقوق محفوظة.</p>
-            <p className="text-[9px] text-[#3B82F6]/80">نسخة النظام v2.4.1 • الاتصال مشفر وآمن بالكامل 🔒</p>
           </div>
 
         </div>
