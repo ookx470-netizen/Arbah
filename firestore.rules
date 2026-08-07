@@ -44,5 +44,10 @@ service cloud.firestore {
     match /notifications/{notifId} {
       allow read, write: if true;
     }
+
+    // Group Chat Messages collection rules
+    match /group_chat_messages/{messageId} {
+      allow read, write: if true;
+    }
   }
 }

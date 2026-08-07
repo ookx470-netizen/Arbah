@@ -28,6 +28,7 @@ import {
   ArrowDownCircle, 
   ArrowUpCircle, 
   Users, 
+  BadgeCheck,
   Wallet, 
   History, 
   RefreshCw, 
@@ -182,19 +183,6 @@ export default function ProfileCenter({
 
     try {
       await sendSupportMessage(userPhone, userName, textToSend, 'user', userName);
-
-      // Auto reply check based on FAQs
-      const matchedFaq = settings.supportFaqs?.find(faq => 
-        textToSend.toLowerCase().includes(faq.question.toLowerCase()) || 
-        faq.question.toLowerCase().includes(textToSend.toLowerCase())
-      );
-
-      if (matchedFaq) {
-        setTimeout(async () => {
-          const botAgentName = settings.supportAgentName || "الدعم الفني المباشر";
-          await sendSupportMessage(userPhone, userName, matchedFaq.answer, 'admin', botAgentName);
-        }, 1200);
-      }
     } catch (err) {
       console.warn("Error sending support message:", err);
     }
@@ -569,6 +557,11 @@ export default function ProfileCenter({
                   )}
                 </div>
                 <div className="flex items-center gap-2 mt-0.5 justify-start">
+                  {currentUser.vipTier && currentUser.vipTier !== 'العضوية العادية' ? (
+                    <BadgeCheck className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                  ) : (
+                    <BadgeCheck className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                  )}
                   <p className="text-[10px] text-white/80 font-bold">{currentUser.username}</p>
                   <span className="bg-amber-500 text-stone-950 text-[9px] font-black px-2.5 py-0.5 rounded-full shadow-sm shrink-0 animate-pulse">
                     الباقة: {currentUser.vipTier || 'العادية'} ({currentUser.effectiveDays > 0 ? 'مفعلة' : 'غير مفعلة'})
@@ -1716,9 +1709,17 @@ export default function ProfileCenter({
                     className={`flex flex-col max-w-[80%] ${isMe ? 'self-end items-end text-right' : 'self-start items-start text-left'}`}
                   >
                     {/* Sender Label */}
-                    <span className="text-[9px] text-stone-400 mb-1 font-bold">
-                      {isMe ? 'أنا' : (msg.senderName || settings.supportAgentName || "الدعم")}
-                    </span>
+                    <div className="flex items-center gap-1.5 mb-1 select-none">
+                      <span className="text-[9px] text-stone-400 font-bold">
+                        {isMe ? 'أنا' : (msg.senderName || settings.supportAgentName || "الدعم")}
+                      </span>
+                      {!isMe && (
+                        <span className="bg-red-50 text-red-600 text-[8px] font-black px-1.5 py-0.5 rounded-md border border-red-100 flex items-center gap-0.5">
+                          <span>الإدارة</span>
+                          <span>🛡️</span>
+                        </span>
+                      )}
+                    </div>
 
                     {/* Chat Bubble */}
                     <div className={`p-3 rounded-2xl text-xs font-semibold leading-relaxed shadow-sm ${
@@ -1731,7 +1732,7 @@ export default function ProfileCenter({
 
                     {/* Time Label */}
                     <span className="text-[8px] text-stone-400 mt-1" dir="ltr">
-                      {new Date(msg.createdAt).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}
+                      {new Date(msg.timestamp || msg.createdAt || new Date()).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}
                     </span>
                   </div>
                 );

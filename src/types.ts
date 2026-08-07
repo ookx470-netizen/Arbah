@@ -113,6 +113,17 @@ export interface SystemSettings {
   supportAgentAvatar?: string; // الصورة الرمزية لوكيل الدعم (رابط أو base64)
   supportFaqs?: SupportFaq[]; // الأسئلة الشائعة للرد التلقائي المخصص
   tasksCode?: string; // رمز المهام اليومي المطلوب لدخول السجل
+  groupChatEnabled?: boolean; // تفعيل/إخفاء الكروب الجماعي للمشتركين من قبل الإدارة
+}
+
+export interface GroupMessage {
+  id: string;
+  userId: string;
+  username: string;
+  phone: string;
+  text: string;
+  vipTier: string;
+  timestamp: string;
 }
 
 export interface SupportFaq {

@@ -176,6 +176,7 @@ export default function AdminPanel({ adminUser, onLogout, isDarkMode, toggleDark
   const [globalNotificationInput, setGlobalNotificationInput] = useState<string>('');
   const [appDownloadUrlInput, setAppDownloadUrlInput] = useState<string>('');
   const [tasksCodeInput, setTasksCodeInput] = useState<string>('');
+  const [groupChatEnabledInput, setGroupChatEnabledInput] = useState<boolean>(true);
   const [sendingNotification, setSendingNotification] = useState<boolean>(false);
   const [showSendCodeConfirm, setShowSendCodeConfirm] = useState<boolean>(false);
 
@@ -357,6 +358,7 @@ export default function AdminPanel({ adminUser, onLogout, isDarkMode, toggleDark
       setWorkEndHour2Input(sysSettings.workEndHour2 ?? 1);
       setAppDownloadUrlInput(sysSettings.appDownloadUrl ?? '');
       setTasksCodeInput(sysSettings.tasksCode ?? '');
+      setGroupChatEnabledInput(sysSettings.groupChatEnabled ?? true);
     } catch (error) {
       console.error("Error loading admin data:", error);
       showToast("خطأ أثناء تحميل البيانات من قاعدة البيانات");
@@ -429,6 +431,7 @@ export default function AdminPanel({ adminUser, onLogout, isDarkMode, toggleDark
         workEndHour2: Number(workEndHour2Input),
         appDownloadUrl: appDownloadUrlInput.trim(),
         tasksCode: tasksCodeInput.trim(),
+        groupChatEnabled: groupChatEnabledInput,
         vipPlans: settings.vipPlans ?? [
           { id: 'plan_600', name: 'باقة 600$', price: 600, profit: 18, tasksCount: 5 },
           { id: 'plan_1200', name: 'باقة 1200$', price: 1200, profit: 38, tasksCount: 5 }
@@ -2061,6 +2064,43 @@ export default function AdminPanel({ adminUser, onLogout, isDarkMode, toggleDark
                 </div>
               </div>
               )}
+
+              {/* VIP Group Chat Enable/Disable Toggle */}
+              <div className="bg-[#070D19] p-4 rounded-xl border border-blue-900/30 mt-2 flex flex-col md:flex-row items-center justify-between gap-3 text-right">
+                <div className="flex-1 w-full">
+                  <span className="block text-xs font-extrabold text-slate-200 flex items-center gap-1.5 justify-end">
+                    <span>الكروب الجماعي للمشتركين (VIP Chat)</span>
+                    <span className={`w-2 h-2 rounded-full ${groupChatEnabledInput ? 'bg-emerald-500 animate-ping' : 'bg-rose-500'}`}></span>
+                  </span>
+                  <span className="block text-[10px] text-slate-400 mt-1 leading-relaxed">
+                    التحكم بظهور أو إخفاء كروب دردشة المشتركين بالكامل من حسابات المستخدمين. عند التعطيل، يختفي زر المحادثة.
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 w-full md:w-auto">
+                  <button
+                    onClick={() => setGroupChatEnabledInput(true)}
+                    type="button"
+                    className={`flex-1 md:flex-none px-5 py-2 rounded-xl text-xs font-bold transition-all ${
+                      groupChatEnabledInput 
+                        ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/20' 
+                        : 'bg-[#0B1528] text-slate-400 border border-blue-900/30'
+                    }`}
+                  >
+                    إظهار الكروب
+                  </button>
+                  <button
+                    onClick={() => setGroupChatEnabledInput(false)}
+                    type="button"
+                    className={`flex-1 md:flex-none px-5 py-2 rounded-xl text-xs font-bold transition-all ${
+                      !groupChatEnabledInput 
+                        ? 'bg-rose-600 text-white shadow-lg shadow-rose-900/20 font-extrabold' 
+                        : 'bg-[#0B1528] text-slate-400 border border-blue-900/30'
+                    }`}
+                  >
+                    إخفاء الكروب
+                  </button>
+                </div>
+              </div>
 
               {/* Row 4: Holiday Active Toggle & Days Selector */}
               <div className="bg-[#070D19] p-4 rounded-xl border border-blue-900/30 mt-2 space-y-4">

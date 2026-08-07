@@ -13,7 +13,7 @@ import {
 } from 'firebase/firestore';
 import { db, storage } from './firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { User, Deposit, Withdrawal, SystemSettings, Task, SupportMessage, SupportChat, SupportFaq, UserNotification } from './types';
+import { User, Deposit, Withdrawal, SystemSettings, Task, SupportMessage, SupportChat, SupportFaq, UserNotification, GroupMessage } from './types';
 
 // Password Hashing Helper (SHA-256)
 export async function hashPassword(password: string): Promise<string> {
@@ -145,7 +145,8 @@ function getLocalSettings(): SystemSettings {
         supportAgentSubtitle: (parsed.supportAgentSubtitle && !parsed.supportAgentSubtitle.includes("المالية") && !parsed.supportAgentSubtitle.includes("Mis")) ? parsed.supportAgentSubtitle : "مستشارتك المساعدة في oxlo",
         supportAgentAvatar: parsed.supportAgentAvatar ?? "",
         supportFaqs: (parsed.supportFaqs && parsed.supportFaqs.length > 4 && !parsed.supportFaqs.some((f: any) => f.question.includes("كيف يمكنني التواصل مع الدعم الفني؟"))) ? parsed.supportFaqs : defaultSupportFaqs,
-        tasksCode: parsed.tasksCode ?? ""
+        tasksCode: parsed.tasksCode ?? "",
+        groupChatEnabled: parsed.groupChatEnabled !== undefined ? Boolean(parsed.groupChatEnabled) : true
       };
     } catch (e) {
       // JSON parse error, fall through to default
@@ -191,7 +192,8 @@ function getLocalSettings(): SystemSettings {
     supportAgentSubtitle: "مستشارتك المساعدة في oxlo",
     supportAgentAvatar: "",
     supportFaqs: defaultSupportFaqs,
-    tasksCode: ""
+    tasksCode: "",
+    groupChatEnabled: true
   };
   localStorage.setItem('local_db_settings', JSON.stringify(initial));
   return initial;
@@ -818,7 +820,8 @@ export async function getSystemSettings(): Promise<SystemSettings> {
         supportAgentSubtitle: (data.supportAgentSubtitle && !data.supportAgentSubtitle.includes("المالية") && !data.supportAgentSubtitle.includes("Mis")) ? data.supportAgentSubtitle : "مستشارتك المساعدة في oxlo",
         supportAgentAvatar: data.supportAgentAvatar ?? "",
         supportFaqs: (data.supportFaqs && data.supportFaqs.length > 4 && !data.supportFaqs.some((f: any) => f.question.includes("كيف يمكنني التواصل مع الدعم الفني؟"))) ? data.supportFaqs : defaultSupportFaqs,
-        tasksCode: data.tasksCode ?? ""
+        tasksCode: data.tasksCode ?? "",
+        groupChatEnabled: data.groupChatEnabled !== undefined ? Boolean(data.groupChatEnabled) : true
       };
     }
     const def = getLocalSettings();
@@ -2117,7 +2120,8 @@ export function subscribeToSystemSettings(onUpdate: (settings: SystemSettings) =
           supportAgentSubtitle: (data.supportAgentSubtitle && !data.supportAgentSubtitle.includes("المالية") && !data.supportAgentSubtitle.includes("Mis")) ? data.supportAgentSubtitle : "مستشارتك المساعدة في oxlo",
           supportAgentAvatar: data.supportAgentAvatar ?? "",
           supportFaqs: (data.supportFaqs && data.supportFaqs.length > 4 && !data.supportFaqs.some((f: any) => f.question.includes("كيف يمكنني التواصل مع الدعم الفني؟"))) ? data.supportFaqs : defaultSupportFaqs,
-          tasksCode: data.tasksCode ?? ""
+          tasksCode: data.tasksCode ?? "",
+          groupChatEnabled: data.groupChatEnabled !== undefined ? Boolean(data.groupChatEnabled) : true
         });
       }
     }, (error) => {
@@ -2646,6 +2650,230 @@ export async function markAllNotificationsAsRead(userId: string): Promise<void> 
     console.warn("markAllNotificationsAsRead error:", e);
   }
 }
+
+// --- 11. Referral Leaderboard ---
+export interface LeaderboardEntry {
+  userId: string;
+  username: string;
+  phone: string;
+  referralCount: number;
+  vipTier: string;
+}
+
+export async function getReferralLeaderboard(): Promise<LeaderboardEntry[]> {
+  const periodIndex = Math.floor(Date.now() / (15 * 24 * 60 * 60 * 1000));
+
+  const FIRST_NAMES = ["أحمد", "محمد", "علي", "حسين", "مصطفى", "يوسف", "حسن", "عبد الله", "سجاد", "عباس", "مرتضى", "منتظر", "عمر", "خالد", "سعد", "ليث", "كرار", "أمير", "رعد", "ضياء", "مهدي", "كريم", "جعفر", "صالح", "إبراهيم", "حيدر", "باسم", "سليم", "جواد", "كمال"];
+  const LAST_NAMES = ["الجبوري", "الخفاجي", "الموسوي", "الكناني", "العبادي", "الربيعي", "التميمي", "الدليمي", "السعيدي", "الحمداني", "الأسدي", "الحسني", "الشمري", "الوائلي", "العامري", "الساعدي", "الخزعلي", "الفتلاوي", "البياتي", "العتابي", "البصراوي", "الحلفي", "الساعد", "الديواني", "الناصري"];
+  
+  function getSeededRandom(seed: number) {
+    const x = Math.sin(seed) * 10000;
+    return x - Math.floor(x);
+  }
+
+  const simulatedEntries: LeaderboardEntry[] = [];
+  const count = 20;
+
+  for (let i = 0; i < count; i++) {
+    const r1 = getSeededRandom(periodIndex * 13 + i * 29);
+    const r2 = getSeededRandom(periodIndex * 19 + i * 37);
+    const r3 = getSeededRandom(periodIndex * 23 + i * 41);
+    const r4 = getSeededRandom(periodIndex * 29 + i * 47);
+    const r5 = getSeededRandom(periodIndex * 31 + i * 53);
+
+    const firstName = FIRST_NAMES[Math.floor(r1 * FIRST_NAMES.length)];
+    const lastName = LAST_NAMES[Math.floor(r2 * LAST_NAMES.length)];
+    const username = `${firstName} ${lastName}`;
+
+    const prefixes = ["0770", "0771", "0772", "0780", "0781", "0782", "0750", "0751", "0790", "0505", "0552", "0561"];
+    const pref = prefixes[Math.floor(r3 * prefixes.length)];
+    const body = Math.floor(r4 * 900000) + 100000; // 6 digits
+    const phone = `${pref}${body}`;
+
+    // Decreasing referral counts for realistic curve (0 to 20 max)
+    const baseCount = 20 - Math.floor(i * 1.05);
+    const variance = Math.floor(r5 * 2);
+    const referralCount = Math.max(0, Math.min(20, baseCount - variance));
+
+    const tiers = ["light", "A1", "A2", "B1", "B2", "C1", "C2"];
+    let tierIdx = 0;
+    if (i < 2) {
+      tierIdx = Math.floor(r5 * 2) + 5; // C1, C2
+    } else if (i < 6) {
+      tierIdx = Math.floor(r5 * 2) + 3; // B1, B2
+    } else if (i < 12) {
+      tierIdx = Math.floor(r5 * 2) + 1; // A1, A2
+    } else {
+      tierIdx = 0; // light
+    }
+    const vipTier = tiers[Math.min(tierIdx, tiers.length - 1)];
+
+    simulatedEntries.push({
+      userId: `sim_${periodIndex}_${i}`,
+      username,
+      phone,
+      referralCount,
+      vipTier
+    });
+  }
+
+  return simulatedEntries.sort((a, b) => b.referralCount - a.referralCount);
+}
+
+// --- 12. VIP Group Chat ---
+function getLocalGroupMessages(): GroupMessage[] {
+  const saved = localStorage.getItem('local_db_group_chat');
+  if (saved) {
+    try {
+      return JSON.parse(saved);
+    } catch (e) {
+      return [];
+    }
+  }
+  return [];
+}
+
+function saveLocalGroupMessages(msgs: GroupMessage[]) {
+  localStorage.setItem('local_db_group_chat', JSON.stringify(msgs));
+}
+
+let groupChatListeners: ((msgs: GroupMessage[]) => void)[] = [];
+
+function notifyGroupChatListeners() {
+  const sorted = getLocalGroupMessages().sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+  groupChatListeners.forEach(listener => {
+    try {
+      listener(sorted);
+    } catch (e) {
+      console.warn("Error notifying group chat listener:", e);
+    }
+  });
+}
+
+export async function sendGroupMessage(
+  userId: string,
+  username: string,
+  phone: string,
+  text: string,
+  vipTier: string
+): Promise<void> {
+  const msgId = `group_msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  const timestamp = new Date().toISOString();
+  const newMsg: GroupMessage = {
+    id: msgId,
+    userId,
+    username,
+    phone,
+    text,
+    vipTier,
+    timestamp
+  };
+
+  const localMsgs = getLocalGroupMessages();
+  localMsgs.push(newMsg);
+  if (localMsgs.length > 300) {
+    localMsgs.shift();
+  }
+  saveLocalGroupMessages(localMsgs);
+  notifyGroupChatListeners();
+
+  // Trigger notification for group messages
+  try {
+    const isAdminMsg = (vipTier || '').includes('مدير') || userId === 'admin' || phone === '07712345678';
+    if (isAdminMsg) {
+      // If admin sent the message, notify all users
+      await createNotification('all', `💬 رسالة جديدة من الإدارة في دردشة VIP: "${text}"`);
+    } else {
+      // If a regular user sent the message, notify the admin (Manager)
+      await createNotification('admin', `💬 رسالة جديدة في دردشة VIP من العضو ${username}: "${text}"`);
+    }
+  } catch (errNotif) {
+    console.warn("Could not create group message notification:", errNotif);
+  }
+
+  if (useLocalStorageFallback) return;
+
+  try {
+    await setDoc(doc(db, "group_chat_messages", msgId), newMsg);
+  } catch (error) {
+    console.warn("Firestore sendGroupMessage error:", error);
+  }
+}
+
+export function subscribeToGroupMessages(
+  onUpdate: (msgs: GroupMessage[]) => void
+): () => void {
+  groupChatListeners.push(onUpdate);
+
+  const getSortedLocal = () => {
+    return getLocalGroupMessages().sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+  };
+
+  onUpdate(getSortedLocal());
+
+  if (useLocalStorageFallback) {
+    const interval = setInterval(() => {
+      onUpdate(getSortedLocal());
+    }, 2000);
+    return () => {
+      groupChatListeners = groupChatListeners.filter(l => l !== onUpdate);
+      clearInterval(interval);
+    };
+  }
+
+  try {
+    const q = collection(db, "group_chat_messages");
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const fsMsgs: GroupMessage[] = [];
+      snapshot.forEach(d => {
+        fsMsgs.push(d.data() as GroupMessage);
+      });
+
+      const localMap: Record<string, GroupMessage> = {};
+      getLocalGroupMessages().forEach(m => { localMap[m.id] = m; });
+      fsMsgs.forEach(m => { localMap[m.id] = m; });
+
+      const merged = Object.values(localMap).sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+      const finalMsgs = merged.slice(-300);
+      
+      saveLocalGroupMessages(finalMsgs);
+      onUpdate(finalMsgs);
+    }, (error) => {
+      console.warn("subscribeToGroupMessages error, falling back:", error);
+      onUpdate(getSortedLocal());
+    });
+
+    return () => {
+      groupChatListeners = groupChatListeners.filter(l => l !== onUpdate);
+      unsubscribe();
+    };
+  } catch (error) {
+    console.warn("subscribeToGroupMessages outer error, falling back:", error);
+    const interval = setInterval(() => {
+      onUpdate(getSortedLocal());
+    }, 2000);
+    return () => {
+      groupChatListeners = groupChatListeners.filter(l => l !== onUpdate);
+      clearInterval(interval);
+    };
+  }
+}
+
+export async function deleteGroupMessage(messageId: string): Promise<void> {
+  const localMsgs = getLocalGroupMessages();
+  const filtered = localMsgs.filter(m => m.id !== messageId);
+  saveLocalGroupMessages(filtered);
+  notifyGroupChatListeners();
+
+  if (useLocalStorageFallback) return;
+
+  try {
+    await deleteDoc(doc(db, "group_chat_messages", messageId));
+  } catch (error) {
+    console.warn("Firestore deleteGroupMessage error:", error);
+  }
+}
+
 
 
 

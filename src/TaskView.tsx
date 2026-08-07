@@ -39,7 +39,9 @@ import {
   X,
   Sun,
   Moon,
-  Crown
+  Crown,
+  Calculator,
+  BadgeCheck
 } from 'lucide-react';
 import AuthPage from './components/AuthPage';
 import ProfileCenter from './components/ProfileCenter';
@@ -48,8 +50,11 @@ import { WelcomeOverlay } from './components/WelcomeOverlay';
 import { LeaderBonusModal } from './components/LeaderBonusModal';
 import { 
   initializeDatabase, 
-  isFallbackMode
+  isFallbackMode,
+  getReferralLeaderboard,
+  LeaderboardEntry
 } from './firebaseService';
+import VipGroupChat from './components/VipGroupChat';
 import { User, SystemSettings, VipPlan, Task } from './types';
 import { compressBase64Image, formatHourToArabic, isHourInShift } from './utils';
 
@@ -441,6 +446,10 @@ export default function TaskView() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [profileSubView, setProfileSubView] = useState<'menu' | 'recharge' | 'withdraw' | 'team' | 'bind' | 'dep_log' | 'with_log' | 'change_pass' | 'support'>('menu');
   const [selectedPlanForUpgrade, setSelectedPlanForUpgrade] = useState<VipPlan | null>(null);
+  const [isGroupChatOpen, setIsGroupChatOpen] = useState<boolean>(false);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [isLoadingLeaderboard, setIsLoadingLeaderboard] = useState<boolean>(false);
+  const [rankSubTab, setRankSubTab] = useState<'upgrade' | 'leaderboard' | 'calculator'>('upgrade');
   const [adminMode, setAdminModeState] = useState<boolean>(() => {
     return localStorage.getItem('admin_mode_active') === 'true';
   });
@@ -499,6 +508,24 @@ export default function TaskView() {
     }
   }, [isDarkMode]);
 
+  // Load Leaderboard data dynamically
+  useEffect(() => {
+    if (activeBottomTab === 'rank' && rankSubTab === 'leaderboard') {
+      const fetchLeaderboard = async () => {
+        setIsLoadingLeaderboard(true);
+        try {
+          const data = await getReferralLeaderboard();
+          setLeaderboard(data);
+        } catch (error) {
+          console.error("Error fetching referral leaderboard:", error);
+        } finally {
+          setIsLoadingLeaderboard(false);
+        }
+      };
+      fetchLeaderboard();
+    }
+  }, [activeBottomTab, rankSubTab]);
+
   const toggleDarkMode = () => {
     setIsDarkMode(prev => !prev);
     playChimeSound();
@@ -514,6 +541,9 @@ export default function TaskView() {
   // Rotating live withdrawal alerts (Feature 2)
   const [currentAlert, setCurrentAlert] = useState<string>('');
   const [recentWithdrawals, setRecentWithdrawals] = useState<Array<{ id: string, phone: string, amount: number, time: string }>>([]);
+
+  // Interactive profit calculator selected plan
+  const [calcSelectedPlanId, setCalcSelectedPlanId] = useState<string>('plan_light');
 
   // Lucky wheel reward state (Feature 3)
   const [isSpinning, setIsSpinning] = useState(false);
@@ -1351,6 +1381,20 @@ export default function TaskView() {
         </button>
       </div>
 
+      {/* Floating VIP Group Chat Button on the bottom right */}
+      {currentUser && (currentUser.role === 'admin' || (currentUser.vipTier && currentUser.vipTier.trim() !== '' && currentUser.vipTier.trim() !== 'الباقة العادية' && currentUser.vipTier.trim() !== 'العادية' && currentUser.vipTier.trim() !== 'العضوية العادية')) && settings.groupChatEnabled !== false && (
+        <div className="fixed bottom-20 right-4 z-50 flex items-center gap-2">
+          <button
+            onClick={() => setIsGroupChatOpen(true)}
+            className="px-3.5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-2xl border-2 border-blue-500/50 transition-all active:scale-95 cursor-pointer flex items-center gap-2 text-xs font-black animate-bounce hover:animate-none shadow-blue-600/30"
+            title="الدردشة الجماعية المشتركين VIP"
+          >
+            <MessageSquare className="w-5 h-5 fill-white/10" />
+            <span className="text-[11px] font-black">دردشة VIP 💬</span>
+          </button>
+        </div>
+      )}
+
       {/* Global Notification Banner System */}
       {settings.globalNotification && (
         <div className="bg-[#070D19] text-[#F39C12] border-b border-[#F39C12]/20 px-3 py-2 flex items-center gap-2 shadow-sm relative z-40 overflow-hidden font-bold text-[11px]">
@@ -2104,6 +2148,8 @@ export default function TaskView() {
             </div>
           </div>
 
+
+
           {/* Quick Actions Card (Deposit & Withdrawal) */}
           <div className="bg-white rounded-2xl p-4 border border-stone-200/80 shadow-sm text-right mb-4">
             <h3 className="text-xs font-black text-stone-900 mb-3 flex items-center gap-1.5 justify-end">
@@ -2142,6 +2188,8 @@ export default function TaskView() {
               </button>
             </div>
           </div>
+
+
 
 
 
@@ -2228,6 +2276,7 @@ export default function TaskView() {
               <span>تحميل تطبيق الأندرويد المباشر (APK)</span>
             </a>
           </div>
+
         </div>
       )}
 
@@ -2393,63 +2442,318 @@ export default function TaskView() {
 
       {/* VIEW 5: Rank/Position Upgrade Panel */}
       {activeBottomTab === 'rank' && (
-        <div className="w-full max-w-md mx-auto px-4 pt-6 animate-fadeIn">
-          <div className="bg-white p-6 rounded-2xl border border-stone-200 shadow-sm text-center relative overflow-hidden">
-            <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Zap className="w-8 h-8 fill-blue-300 text-blue-500" />
-            </div>
-            <h2 className="text-lg font-bold text-stone-900">ترقية منصب العضوية VIP</h2>
-            <p className="text-xs text-stone-500 mt-2 leading-relaxed">
-              قم بترقية منصبك الحالي لفتح مهام يومية أكثر وبقيمة ربح ميكروي أعلى ومستقرة!
-            </p>
-            
-            <div className="mt-6 space-y-3 text-right">
-              {(() => {
-                const plansList = settings.vipPlans && settings.vipPlans.length > 0 ? settings.vipPlans : [
-                  { id: 'plan_light', name: 'light', price: 150, profit: 5, tasksCount: 5 },
-                  { id: 'plan_A1', name: 'A1', price: 300, profit: 9, tasksCount: 5 },
-                  { id: 'plan_A2', name: 'A2', price: 600, profit: 18, tasksCount: 5 },
-                  { id: 'plan_B1', name: 'B1', price: 1200, profit: 38, tasksCount: 5 },
-                  { id: 'plan_B2', name: 'B2', price: 2600, profit: 65, tasksCount: 5 },
-                  { id: 'plan_C1', name: 'C1', price: 5000, profit: 162, tasksCount: 5 },
-                  { id: 'plan_C2', name: 'C2', price: 12000, profit: 360, tasksCount: 5 },
-                  { id: 'plan_D1', name: 'D1', price: 26000, profit: 750, tasksCount: 5 },
-                  { id: 'plan_D2', name: 'D2', price: 65000, profit: 1620, tasksCount: 5 },
-                  { id: 'plan_business', name: 'business', price: 90000, profit: 2550, tasksCount: 5 }
-                ];
-                const currentUserPlan = plansList.find(p => p.name === currentUser?.vipTier);
-                const currentUserPlanPrice = currentUserPlan ? currentUserPlan.price : 0;
-
-                return plansList.map((plan) => {
-                  const isActive = currentUser?.vipTier === plan.name;
-                  const isLowerTier = plan.price < currentUserPlanPrice;
-
-                  return (
-                    <div key={plan.id} className="border border-stone-200 p-3 rounded-xl flex items-center justify-between hover:bg-slate-50/50 transition-colors">
-                      <div>
-                        <span className="font-extrabold text-xs text-stone-850 block">{plan.name}</span>
-                        <span className="text-[10px] text-stone-400 font-bold block mt-0.5">
-                          سعر الاشتراك: <strong className="text-blue-600">{plan.price}$</strong> • ربح يومي: <strong className="text-emerald-600">{plan.profit}$</strong>
-                        </span>
-                      </div>
-                      {isActive ? (
-                        <span className="bg-emerald-50 border border-emerald-150 text-emerald-600 text-[10px] px-3 py-1.5 rounded-full font-black">نشط حالياً</span>
-                      ) : isLowerTier ? (
-                        <span className="text-stone-400 text-[10px] px-3 py-1.5 rounded-full font-bold bg-stone-100">غير متاح للعودة</span>
-                      ) : (
-                        <button 
-                          onClick={() => setSelectedPlanForUpgrade(plan)}
-                          className="bg-blue-600 hover:bg-blue-700 text-white text-[10px] px-3.5 py-1.5 rounded-full font-black transition-all cursor-pointer active:scale-95"
-                        >
-                          ترقية الآن
-                        </button>
-                      )}
-                    </div>
-                  );
-                });
-              })()}
-            </div>
+        <div className="w-full max-w-md mx-auto px-4 pt-6 animate-fadeIn pb-24 text-right">
+          
+          {/* Top Segment/Sub-Tabs Selector */}
+          <div className="bg-stone-100 p-1 rounded-xl flex items-center justify-between mb-4 border border-stone-200">
+            <button
+              onClick={() => setRankSubTab('leaderboard')}
+              className={`flex-1 py-2 text-[11px] font-black rounded-lg transition-all flex items-center justify-center gap-1 ${
+                rankSubTab === 'leaderboard'
+                  ? 'bg-white text-blue-600 shadow-sm'
+                  : 'text-stone-500 hover:text-stone-700'
+              }`}
+            >
+              <span>المتصدرون 🏆</span>
+            </button>
+            <button
+              onClick={() => setRankSubTab('upgrade')}
+              className={`flex-1 py-2 text-[11px] font-black rounded-lg transition-all flex items-center justify-center gap-1 ${
+                rankSubTab === 'upgrade'
+                  ? 'bg-white text-blue-600 shadow-sm'
+                  : 'text-stone-500 hover:text-stone-700'
+              }`}
+            >
+              <span>ترقية VIP 💎</span>
+            </button>
+            <button
+              onClick={() => setRankSubTab('calculator')}
+              className={`flex-1 py-2 text-[11px] font-black rounded-lg transition-all flex items-center justify-center gap-1 ${
+                rankSubTab === 'calculator'
+                  ? 'bg-white text-blue-600 shadow-sm'
+                  : 'text-stone-500 hover:text-stone-700'
+              }`}
+            >
+              <span>حاسبة 🧮</span>
+            </button>
           </div>
+
+          {rankSubTab === 'leaderboard' ? (
+            <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-sm space-y-4 text-right">
+              <div className="text-center pb-2 border-b border-stone-100">
+                <h2 className="text-base font-black text-stone-900">قائمة متصدري الدعوات 🏆</h2>
+                <p className="text-[10px] text-stone-400 mt-1 font-bold">
+                  أكثر الأعضاء تفاعلاً ودعوة للأصدقاء لزيادة نمو وانتشار المنصة (تتجدد تلقائياً كل 15 يوم)
+                </p>
+              </div>
+
+              {isLoadingLeaderboard ? (
+                <div className="py-12 flex flex-col items-center justify-center space-y-3">
+                  <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                  <span className="text-[10px] text-stone-400 font-bold">جاري تحميل قائمة المتصدرين...</span>
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {(() => {
+                    // Combine simulated leaderboard with the actual current user dynamically
+                    let combined = [...leaderboard];
+                    
+                    const isAdmin = currentUser && (
+                      currentUser.role === 'admin' ||
+                      (currentUser.username || '').includes('مدير') ||
+                      (currentUser.username || '').includes('admin') ||
+                      (currentUser.username || '').includes('أدمن') ||
+                      (currentUser.vipTier || '').includes('مدير') ||
+                      (currentUser.vipTier || '').includes('admin')
+                    );
+
+                    if (currentUser && !isAdmin) {
+                      const userExists = combined.some(e => e.userId === currentUser.id);
+                      if (!userExists) {
+                        combined.push({
+                          userId: currentUser.id,
+                          username: currentUser.username || "أنت",
+                          phone: currentUser.phone,
+                          referralCount: teamList.length,
+                          vipTier: currentUser.vipTier || "العضوية العادية"
+                        });
+                      }
+                    }
+
+                    // Strict exclusion of general manager/admin users from appearing on leaderboard
+                    combined = combined.filter(e => {
+                      const nameLower = (e.username || '').toLowerCase();
+                      const tierLower = (e.vipTier || '').toLowerCase();
+                      return !nameLower.includes('admin') && 
+                             !nameLower.includes('أدمن') && 
+                             !nameLower.includes('مدير') && 
+                             !tierLower.includes('admin') && 
+                             !tierLower.includes('أدمن') && 
+                             !tierLower.includes('مدير');
+                    });
+
+                    // Sort descending
+                    combined.sort((a, b) => b.referralCount - a.referralCount);
+
+                    return combined.slice(0, 50).map((entry, index) => {
+                      const rankMedal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : null;
+                      // Mask phone number elegantly (e.g. 077****123)
+                      let maskedPhone = '';
+                      if (entry.phone) {
+                        const clean = entry.phone.trim();
+                        if (clean.length > 7) {
+                          maskedPhone = `${clean.substring(0, 4)}****${clean.substring(clean.length - 3)}`;
+                        } else {
+                          maskedPhone = `${clean.substring(0, 3)}***`;
+                        }
+                      }
+
+                      return (
+                        <div 
+                          key={entry.userId} 
+                          className={`p-3 border rounded-xl flex items-center justify-between transition-colors ${
+                            entry.userId === currentUser?.id 
+                              ? 'bg-blue-50/50 border-blue-200 shadow-sm' 
+                              : 'bg-white border-stone-150 hover:bg-stone-50/30'
+                          }`}
+                        >
+                          <div className="text-left">
+                            <span className="text-[9px] font-extrabold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
+                              {entry.referralCount} دعوة ناجحة
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-2.5 text-right flex-row-reverse">
+                            <div className={`w-6 h-6 flex items-center justify-center text-xs font-black rounded-full shrink-0 ${
+                              index === 0 
+                                ? 'bg-yellow-100 text-yellow-700' 
+                                : index === 1 
+                                  ? 'bg-slate-100 text-slate-700' 
+                                  : index === 2 
+                                    ? 'bg-amber-100 text-amber-700' 
+                                    : 'bg-stone-100 text-stone-600'
+                            }`}>
+                              {rankMedal || index + 1}
+                            </div>
+
+                            <div>
+                              <div className="flex items-center gap-1.5 justify-end">
+                                {entry.vipTier && entry.vipTier !== 'العضوية العادية' ? (
+                                  <BadgeCheck className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                                ) : (
+                                  <BadgeCheck className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                                )}
+                                <span className="text-xs font-extrabold text-stone-800">{entry.username}</span>
+                                {entry.userId === currentUser?.id && (
+                                  <span className="text-[8px] bg-blue-600 text-white px-1.5 py-0.5 rounded font-bold">أنت</span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1.5 justify-end mt-0.5">
+                                <span className="text-[9px] text-stone-400 font-semibold" dir="ltr">{maskedPhone}</span>
+                                <span className="text-[9px] text-stone-400 font-bold">• باقة: {entry.vipTier}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+              )}
+            </div>
+          ) : rankSubTab === 'upgrade' ? (
+            <div className="bg-white p-6 rounded-2xl border border-stone-200 shadow-sm text-center relative overflow-hidden">
+              <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Zap className="w-8 h-8 fill-blue-300 text-blue-500" />
+              </div>
+              <h2 className="text-lg font-bold text-stone-900">ترقية منصب العضوية VIP</h2>
+              <p className="text-xs text-stone-500 mt-2 leading-relaxed">
+                قم بترقية منصبك الحالي لفتح مهام يومية أكثر وبقيمة ربح ميكروي أعلى ومستقرة!
+              </p>
+              
+              <div className="mt-6 space-y-3 text-right">
+                {(() => {
+                  const plansList = settings.vipPlans && settings.vipPlans.length > 0 ? settings.vipPlans : [
+                    { id: 'plan_light', name: 'light', price: 150, profit: 5, tasksCount: 5 },
+                    { id: 'plan_A1', name: 'A1', price: 300, profit: 9, tasksCount: 5 },
+                    { id: 'plan_A2', name: 'A2', price: 600, profit: 18, tasksCount: 5 },
+                    { id: 'plan_B1', name: 'B1', price: 1200, profit: 38, tasksCount: 5 },
+                    { id: 'plan_B2', name: 'B2', price: 2600, profit: 65, tasksCount: 5 },
+                    { id: 'plan_C1', name: 'C1', price: 5000, profit: 162, tasksCount: 5 },
+                    { id: 'plan_C2', name: 'C2', price: 12000, profit: 360, tasksCount: 5 },
+                    { id: 'plan_D1', name: 'D1', price: 26000, profit: 750, tasksCount: 5 },
+                    { id: 'plan_D2', name: 'D2', price: 65000, profit: 1620, tasksCount: 5 },
+                    { id: 'plan_business', name: 'business', price: 90000, profit: 2550, tasksCount: 5 }
+                  ];
+                  const currentUserPlan = plansList.find(p => p.name === currentUser?.vipTier);
+                  const currentUserPlanPrice = currentUserPlan ? currentUserPlan.price : 0;
+
+                  return plansList.map((plan) => {
+                    const isActive = currentUser?.vipTier === plan.name;
+                    const isLowerTier = plan.price < currentUserPlanPrice;
+
+                    return (
+                      <div key={plan.id} className="border border-stone-200 p-3 rounded-xl flex items-center justify-between hover:bg-slate-50/50 transition-colors">
+                        <div>
+                          <span className="font-extrabold text-xs text-stone-850 block">{plan.name}</span>
+                          <span className="text-[10px] text-stone-400 font-bold block mt-0.5">
+                            سعر الاشتراك: <strong className="text-blue-600">{plan.price}$</strong> • ربح يومي: <strong className="text-emerald-600">{plan.profit}$</strong>
+                          </span>
+                        </div>
+                        {isActive ? (
+                          <span className="bg-emerald-50 border border-emerald-150 text-emerald-600 text-[10px] px-3 py-1.5 rounded-full font-black">نشط حالياً</span>
+                        ) : isLowerTier ? (
+                          <span className="text-stone-400 text-[10px] px-3 py-1.5 rounded-full font-bold bg-stone-100">غير متاح للعودة</span>
+                        ) : (
+                          <button 
+                            onClick={() => setSelectedPlanForUpgrade(plan)}
+                            className="bg-blue-600 hover:bg-blue-700 text-white text-[10px] px-3.5 py-1.5 rounded-full font-black transition-all cursor-pointer active:scale-95"
+                          >
+                            ترقية الآن
+                          </button>
+                        )}
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+            </div>
+          ) : rankSubTab === 'calculator' ? (
+            (() => {
+              const calcPlans = settings.vipPlans && settings.vipPlans.length > 0 ? settings.vipPlans : [
+                { id: 'plan_light', name: 'light', price: 150, profit: 5, tasksCount: 5 },
+                { id: 'plan_a1', name: 'A1', price: 300, profit: 9, tasksCount: 5 },
+                { id: 'plan_a2', name: 'A2', price: 600, profit: 18, tasksCount: 5 },
+                { id: 'plan_b1', name: 'B1', price: 1200, profit: 38, tasksCount: 5 },
+                { id: 'plan_b2', name: 'B2', price: 2600, profit: 65, tasksCount: 5 },
+                { id: 'plan_c1', name: 'C1', price: 5000, profit: 162, tasksCount: 5 },
+                { id: 'plan_c2', name: 'C2', price: 12000, profit: 360, tasksCount: 5 },
+                { id: 'plan_d1', name: 'D1', price: 26000, profit: 750, tasksCount: 5 },
+                { id: 'plan_d2', name: 'D2', price: 65000, profit: 1620, tasksCount: 5 },
+                { id: 'plan_business', name: 'business', price: 90000, profit: 2550, tasksCount: 5 }
+              ];
+              const currentSelected = calcPlans.find(p => p.id === calcSelectedPlanId) || calcPlans[0];
+              
+              // Friday & Saturday are weekends (5 working days / week, 22 working days / month, 260 working days / year)
+              const daily = currentSelected.profit;
+              const weekly = daily * 5;
+              const monthly = daily * 22;
+              const annual = daily * 260;
+
+              return (
+                <div className="bg-white rounded-2xl p-4 border border-stone-200/80 shadow-sm text-right">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-[9px] bg-blue-50 text-blue-600 border border-blue-100 px-2 py-0.5 rounded-full font-black">
+                      خطط ذكية ⚡
+                    </span>
+                    <h3 className="text-xs font-black text-stone-900 flex items-center gap-1.5">
+                      <span>حاسبة الأرباح التفاعلية</span>
+                      <Calculator className="w-4 h-4 text-blue-500" />
+                    </h3>
+                  </div>
+
+                  <p className="text-[10px] text-stone-400 font-bold mb-3 leading-relaxed">
+                    احسب أرباحك المتوقعة بناءً على فئة الـ VIP الخاصة بك. يرجى الملاحظة أن يومي الجمعة والسبت عطلة رسمية للمنصة ولا يتم احتساب مهام خلالها.
+                  </p>
+
+                  {/* Custom Styled Select Dropdown */}
+                  <div className="mb-4">
+                    <label className="block text-[10px] font-bold text-stone-500 mb-1.5">اختر فئة الـ VIP:</label>
+                    <select
+                      value={calcSelectedPlanId}
+                      onChange={(e) => {
+                        setCalcSelectedPlanId(e.target.value);
+                        playChimeSound();
+                      }}
+                      className="w-full bg-stone-50 border border-stone-200 text-stone-800 text-xs font-black rounded-xl p-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 text-right cursor-pointer"
+                    >
+                      {calcPlans.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} - سعر الاشتراك: ${p.price} (ربح يومي: ${p.profit})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Weekend Notice Badge */}
+                  <div className="bg-amber-50 border border-amber-150 rounded-xl p-2.5 text-right mb-4 flex items-start gap-2">
+                    <div className="text-amber-500 text-xs shrink-0 mt-0.5">⚠️</div>
+                    <p className="text-[9px] text-amber-850 font-bold leading-relaxed">
+                      تنويه: يومي <strong>الجمعة والسبت عطلة أسبوعية</strong> للمنصة؛ لذا تم احتساب الأرباح الأسبوعية على أساس 5 أيام عمل، والأرباح الشهرية على أساس 22 يوم عمل لضمان دقة العمليات وحساباتك.
+                    </p>
+                  </div>
+
+                  {/* Calculation Cards Grid */}
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div className="bg-stone-50 border border-stone-150 p-2.5 rounded-xl text-center">
+                      <span className="text-[8px] text-stone-400 font-bold block">سعر باقة {currentSelected.name}</span>
+                      <span className="text-sm font-black text-stone-800 block mt-0.5">${currentSelected.price}</span>
+                    </div>
+
+                    <div className="bg-stone-50 border border-stone-150 p-2.5 rounded-xl text-center">
+                      <span className="text-[8px] text-stone-400 font-bold block">الربح اليومي المباشر</span>
+                      <span className="text-sm font-black text-emerald-600 block mt-0.5">${daily}</span>
+                    </div>
+
+                    <div className="bg-stone-50 border border-stone-150 p-2.5 rounded-xl text-center">
+                      <span className="text-[8px] text-stone-400 font-bold block">الربح الأسبوعي (5 أيام عمل)</span>
+                      <span className="text-sm font-black text-blue-600 block mt-0.5">${weekly}</span>
+                    </div>
+
+                    <div className="bg-stone-50 border border-stone-150 p-2.5 rounded-xl text-center">
+                      <span className="text-[8px] text-stone-400 font-bold block">الربح الشهري (22 يوم عمل)</span>
+                      <span className="text-sm font-black text-indigo-600 block mt-0.5">${monthly}</span>
+                    </div>
+                  </div>
+
+                  <div className="bg-gradient-to-r from-blue-50 to-indigo-50/70 border border-blue-100 p-2.5 rounded-xl text-center mt-3">
+                    <span className="text-[8px] text-blue-600 font-bold block">إجمالي الربح السنوي المتوقع (260 يوم عمل)</span>
+                    <span className="text-base font-black text-indigo-700 block mt-0.5">${annual.toLocaleString('en-US')}</span>
+                  </div>
+                </div>
+              );
+            })()
+          ) : null}
 
           {/* Elegant subscription confirmation overlay inside rank view */}
           {selectedPlanForUpgrade && (
@@ -2745,6 +3049,13 @@ export default function TaskView() {
         onClose={() => setShowLeaderBonusModal(false)}
         inviteCode={currentUser?.inviteCode || ''}
         isDarkMode={isDarkMode}
+      />
+
+      {/* Real-time VIP Group Chat modal overlay */}
+      <VipGroupChat 
+        currentUser={currentUser}
+        isOpen={isGroupChatOpen}
+        onClose={() => setIsGroupChatOpen(false)}
       />
 
 
