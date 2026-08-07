@@ -30,7 +30,6 @@ import {
   Users, 
   Wallet, 
   History, 
-  Sparkles, 
   RefreshCw, 
   QrCode, 
   LogOut,
@@ -118,6 +117,7 @@ export default function ProfileCenter({
   const [copiedText, setCopiedText] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [showBlockWithdrawalModal, setShowBlockWithdrawalModal] = useState<boolean>(false);
 
   // Form states
   const [selectedNetwork, setSelectedNetwork] = useState<'BEP20' | 'TRC20' | 'POLYGON'>('BEP20');
@@ -289,6 +289,10 @@ export default function ProfileCenter({
   }, [activeSubView, currentUser.inviteCode]);
 
   const showToast = (msg: string) => {
+    if (msg.includes("تعليق ميزة السحب") || msg.includes("سحب الأرباح") || msg.includes("VIP (B1)")) {
+      setShowBlockWithdrawalModal(true);
+      return;
+    }
     setToastMsg(msg);
     setTimeout(() => setToastMsg(null), 3000);
   };
@@ -393,6 +397,11 @@ export default function ProfileCenter({
       return;
     }
 
+    if (currentUser.isWithdrawalBlocked) {
+      showToast("🔒 نأسف لإعلامك بأنه قد تم تعليق ميزة السحب مؤقتاً لحسابك لدواعي الأمان والتحقق من جودة النشاط. لتفعيل السحب التلقائي مجدداً ومواصلة العمل وجني الأرباح بشكل طبيعي، يرجى دعوة (2) من المشتركين الجدد والنشطين على الأقل للترقية فئة VIP (B1) باستخدام رابط الإحالة الخاص بك. نشكر تفهمكم وحرصكم على استدامة المجتمع الرقمي للمنصة.");
+      return;
+    }
+
     // Dynamic minimum withdrawal validation set by admin
     const minWith = settings.minWithdrawal ?? 10;
     if (amount < minWith) {
@@ -446,9 +455,86 @@ export default function ProfileCenter({
     <div className="w-full max-w-md mx-auto text-stone-800" dir="rtl">
       {/* Toast */}
       {toastMsg && (
-        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50 bg-stone-900/90 backdrop-blur-md text-white px-5 py-3 rounded-full shadow-xl text-xs font-bold flex items-center gap-2 animate-fadeIn border border-white/10">
-          <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
-          <span>{toastMsg}</span>
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 bg-stone-900/95 backdrop-blur-md text-white px-4 py-3 rounded-2xl shadow-2xl text-xs font-bold flex items-start gap-2.5 animate-fadeIn border border-white/10 max-w-[90vw] w-max md:max-w-sm" dir="rtl">
+          <Bell className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+          <span className="leading-relaxed text-right">{toastMsg}</span>
+        </div>
+      )}
+
+      {/* Blocked Withdrawal Detailed Modal Notice */}
+      {showBlockWithdrawalModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn" dir="rtl">
+          <div className="bg-white rounded-3xl border border-red-100 shadow-2xl max-w-sm w-full overflow-hidden animate-scaleUp">
+            
+            {/* Header: Warm warning tone */}
+            <div className="bg-gradient-to-br from-red-500 via-rose-600 to-red-700 p-6 text-white text-center relative">
+              <button 
+                onClick={() => setShowBlockWithdrawalModal(false)}
+                className="absolute top-4 right-4 p-1.5 rounded-full bg-white/10 hover:bg-white/20 transition-all cursor-pointer text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+              
+              <div className="w-14 h-14 bg-white/10 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-inner border border-white/15">
+                <Lock className="w-7 h-7 text-amber-300 animate-pulse" />
+              </div>
+              
+              <h3 className="text-sm font-extrabold tracking-wide">تعليق ميزة السحب مؤقتاً</h3>
+              <p className="text-[9px] text-red-100 font-bold mt-1">إشعار أمني وهام بخصوص حسابك الشخصي</p>
+            </div>
+
+            {/* Content Body */}
+            <div className="p-5 space-y-4">
+              
+              <p className="text-[11px] text-slate-600 leading-relaxed text-right font-medium">
+                نأسف لإعلامك بأنه قد تم تعليق ميزة السحب مؤقتاً لحسابك لدواعي الأمان والتحقق من جودة النشاط وضمان استدامة المجتمع الرقمي للمنصة.
+              </p>
+
+              {/* Requirement highlights */}
+              <div className="bg-amber-50/75 border border-amber-100 rounded-2xl p-3.5 space-y-2">
+                <span className="text-[10px] font-black text-amber-800 flex items-center gap-1.5">
+                  <Award className="w-4 h-4 text-amber-500" />
+                  الشرط المطلوب لإعادة التفعيل:
+                </span>
+                <p className="text-[10px] text-slate-700 leading-relaxed font-bold text-right">
+                  يرجى دعوة <span className="text-red-600 font-black text-[11px] underline">(2) من المشتركين الجدد والنشطين</span> على الأقل للترقية إلى فئة <span className="bg-indigo-100 text-indigo-800 px-1.5 py-0.5 rounded-md font-extrabold text-[9px]">VIP (B1)</span> باستخدام رابط أو كود الإحالة الخاص بك.
+                </p>
+              </div>
+
+              {/* Benefits details */}
+              <p className="text-[9px] text-slate-500 leading-relaxed text-right">
+                💡 فور قيام المشتركين الجدد بالتسجيل والترقية، سيتم إعادة تشغيل نظام السحب التلقائي لحسابك مباشرةً لمواصلة جني الأرباح وسحبها بشكل طبيعي وآمن.
+              </p>
+
+              {/* Invitation Info Box */}
+              <div className="border border-slate-100 bg-slate-50/55 rounded-2xl p-3 space-y-2">
+                <div className="flex justify-between items-center text-[10px]">
+                  <span className="font-bold text-slate-500">كود الدعوة الخاص بك:</span>
+                  <span className="font-black text-indigo-600 tracking-wider font-mono">{currentUser.inviteCode}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleCopy(currentUser.inviteCode);
+                  }}
+                  className="w-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 py-2 rounded-xl text-[10px] font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 border border-indigo-150 active:scale-[0.98]"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>نسخ كود الدعوة الحصري</span>
+                </button>
+              </div>
+
+              {/* Action Close Buttons */}
+              <button
+                type="button"
+                onClick={() => setShowBlockWithdrawalModal(false)}
+                className="w-full bg-slate-900 hover:bg-slate-800 text-white font-extrabold py-2.5 rounded-xl transition-all cursor-pointer text-center text-[11px] shadow-md active:scale-[0.98]"
+              >
+                حسناً، فهمت وموافق
+              </button>
+
+            </div>
+          </div>
         </div>
       )}
 

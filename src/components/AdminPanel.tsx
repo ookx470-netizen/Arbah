@@ -233,6 +233,7 @@ export default function AdminPanel({ adminUser, onLogout, isDarkMode, toggleDark
   const [editPhoneInput, setEditPhoneInput] = useState<string>('');
   const [editPasswordInput, setEditPasswordInput] = useState<string>('');
   const [editVipTierInput, setEditVipTierInput] = useState<string>('');
+  const [editWithdrawalBlocked, setEditWithdrawalBlocked] = useState<boolean>(false);
 
   // States for Manual Withdrawal modal
   const [selectedUserForWithdrawal, setSelectedUserForWithdrawal] = useState<User | null>(null);
@@ -570,7 +571,8 @@ export default function AdminPanel({ adminUser, onLogout, isDarkMode, toggleDark
         vipTier: editVipTierInput,
         earnings: Number(editEarnings),
         taskIncome: Number(editTaskIncome),
-        effectiveDays: Number(editEffectiveDays)
+        effectiveDays: Number(editEffectiveDays),
+        isWithdrawalBlocked: editWithdrawalBlocked
       });
       showToast("تم تحديث كافة بيانات العضو بنجاح! جاري التحديث تلقائياً...");
       setSelectedUserForEdit(null);
@@ -1409,6 +1411,15 @@ export default function AdminPanel({ adminUser, onLogout, isDarkMode, toggleDark
                                   ● غير فعال
                                 </span>
                               )}
+                              {u.isWithdrawalBlocked ? (
+                                <span className="bg-red-100 text-red-800 border border-red-200 px-1.5 py-0.5 rounded text-[8px] font-black inline-block">
+                                  🔒 السحب معطل
+                                </span>
+                              ) : (
+                                <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 px-1.5 py-0.5 rounded text-[8px] font-black inline-block">
+                                  ✅ السحب مفعّل
+                                </span>
+                              )}
                             </div>
                           </td>
                           <td className="p-3">
@@ -1481,6 +1492,7 @@ export default function AdminPanel({ adminUser, onLogout, isDarkMode, toggleDark
                                     setEditEarnings(u.earnings);
                                     setEditTaskIncome(u.taskIncome);
                                     setEditEffectiveDays(u.effectiveDays);
+                                    setEditWithdrawalBlocked(!!u.isWithdrawalBlocked);
                                   }}
                                   className="px-2 py-1 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded text-[10px] font-bold transition-all cursor-pointer flex items-center justify-center gap-1"
                                 >
@@ -3370,6 +3382,43 @@ export default function AdminPanel({ adminUser, onLogout, isDarkMode, toggleDark
                     className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold text-center text-slate-800 focus:outline-none"
                   />
                 </div>
+              </div>
+
+              {/* Withdrawal Block Setting */}
+              <div className="p-3 bg-red-50/50 border border-red-200/60 rounded-xl space-y-2">
+                <span className="block text-[10px] text-red-800 font-extrabold flex items-center gap-1.5">
+                  <ShieldAlert className="w-4 h-4 text-red-600" />
+                  حالة سحب الأرباح لهذا العضو:
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditWithdrawalBlocked(false)}
+                    className={`flex-1 py-2 px-3 rounded-lg border font-bold text-[11px] transition-all cursor-pointer text-center ${
+                      !editWithdrawalBlocked
+                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm font-extrabold'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    السحب مفعّل وطبيعي (مسموح)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditWithdrawalBlocked(true)}
+                    className={`flex-1 py-2 px-3 rounded-lg border font-bold text-[11px] transition-all cursor-pointer text-center ${
+                      editWithdrawalBlocked
+                        ? 'bg-rose-600 text-white border-rose-600 shadow-sm font-extrabold'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    وقف/حظر السحب للعضو 🔒
+                  </button>
+                </div>
+                {editWithdrawalBlocked && (
+                  <p className="text-[10px] text-rose-700 font-bold bg-white p-2 rounded-lg border border-rose-150 leading-relaxed text-right">
+                    ⚠️ عند حظر السحب، لن يتمكن هذا العضو من تقديم أي طلبات سحب، وسيظهر له تنبيه يطالبه بجلب (2) من المشتركين الجدد والنشطين على الأقل في فئة VIP (B1) ليستعيد ميزة السحب التلقائي لديه.
+                  </p>
+                )}
               </div>
 
               {/* Buttons action layout */}
