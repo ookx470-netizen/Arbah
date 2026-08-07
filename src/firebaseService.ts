@@ -1019,6 +1019,9 @@ export async function createWithdrawal(
     if (!users[phone]) {
       throw new Error("المستخدم غير موجود");
     }
+    if (users[phone].isWithdrawalBlocked) {
+      throw new Error("🔒 نأسف لإعلامك بأنه قد تم تعليق ميزة السحب مؤقتاً لحسابك لدواعي الأمان والتحقق من جودة النشاط. لتفعيل السحب التلقائي مجدداً ومواصلة العمل وجني الأرباح بشكل طبيعي، يرجى دعوة (2) من المشتركين الجدد والنشطين على الأقل للترقية فئة VIP (B1) باستخدام رابط الإحالة الخاص بك. نشكر تفهمكم وحرصكم على استدامة المجتمع الرقمي للمنصة.");
+    }
     if (users[phone].earnings < amount) {
       throw new Error("رصيد الأرباح غير كافٍ لإجراء هذا السحب!");
     }
@@ -1054,6 +1057,9 @@ export async function createWithdrawal(
       throw new Error("المستخدم غير موجود");
     }
     const userData = userSnap.data() as User;
+    if (userData.isWithdrawalBlocked) {
+      throw new Error("🔒 نأسف لإعلامك بأنه قد تم تعليق ميزة السحب مؤقتاً لحسابك لدواعي الأمان والتحقق من جودة النشاط. لتفعيل السحب التلقائي مجدداً ومواصلة العمل وجني الأرباح بشكل طبيعي، يرجى دعوة (2) من المشتركين الجدد والنشطين على الأقل للترقية فئة VIP (B1) باستخدام رابط الإحالة الخاص بك. نشكر تفهمكم وحرصكم على استدامة المجتمع الرقمي للمنصة.");
+    }
     if (userData.earnings < amount) {
       throw new Error("رصيد الأرباح غير كافٍ لإجراء هذا السحب!");
     }
@@ -1396,7 +1402,9 @@ export function subscribeToAllWithdrawals(callback: (withdrawals: Withdrawal[]) 
 export async function deleteUserByAdmin(phone: string): Promise<void> {
   const cleanPhone = phone.trim();
   
-  // Always clear from local storage user cache and task cache first
+  // --- 1. Clear Local Storage caches for the deleted user completely ---
+  
+  // Clear User local cache
   const users = getLocalUsers();
   Object.keys(users).forEach(k => {
     if (k === cleanPhone || users[k]?.phone === cleanPhone) {
@@ -1405,6 +1413,7 @@ export async function deleteUserByAdmin(phone: string): Promise<void> {
   });
   saveLocalUsers(users);
 
+  // Clear Tasks cache keys
   try {
     localStorage.removeItem(`micro_tasks_data_${cleanPhone}`);
     localStorage.removeItem('micro_tasks_data');
@@ -1412,24 +1421,126 @@ export async function deleteUserByAdmin(phone: string): Promise<void> {
     console.warn("Error removing task local cache on user delete:", e);
   }
 
+  // Clear Deposits local cache
+  try {
+    const deposits = getLocalDeposits();
+    let depositsChanged = false;
+    Object.keys(deposits).forEach(id => {
+      if (deposits[id]?.phone === cleanPhone) {
+        delete deposits[id];
+        depositsChanged = true;
+      }
+    });
+    if (depositsChanged) {
+      saveLocalDeposits(deposits);
+    }
+  } catch (e) {
+    console.warn("Error removing deposits local cache on user delete:", e);
+  }
+
+  // Clear Withdrawals local cache
+  try {
+    const withdrawals = getLocalWithdrawals();
+    let withdrawalsChanged = false;
+    Object.keys(withdrawals).forEach(id => {
+      if (withdrawals[id]?.phone === cleanPhone) {
+        delete withdrawals[id];
+        withdrawalsChanged = true;
+      }
+    });
+    if (withdrawalsChanged) {
+      saveLocalWithdrawals(withdrawals);
+    }
+  } catch (e) {
+    console.warn("Error removing withdrawals local cache on user delete:", e);
+  }
+
+  // Clear Support Chats local cache
+  try {
+    const localChats = JSON.parse(localStorage.getItem('local_db_support_chats') || '{}');
+    if (localChats[cleanPhone]) {
+      delete localChats[cleanPhone];
+      localStorage.setItem('local_db_support_chats', JSON.stringify(localChats));
+    }
+    localStorage.removeItem(`local_chat_msg_${cleanPhone}`);
+  } catch (e) {
+    console.warn("Error removing support chat local cache on user delete:", e);
+  }
+
+  // Clear private Notifications local cache (excluding 'all' and 'broadcast')
+  try {
+    const notifications = getLocalNotifications();
+    let notificationsChanged = false;
+    Object.keys(notifications).forEach(id => {
+      const n = notifications[id];
+      if (n && n.userId !== 'all' && n.userId !== 'broadcast' && matchesUser(n.userId, cleanPhone)) {
+        delete notifications[id];
+        notificationsChanged = true;
+      }
+    });
+    if (notificationsChanged) {
+      saveLocalNotifications(notifications);
+    }
+  } catch (e) {
+    console.warn("Error removing notifications local cache on user delete:", e);
+  }
+
   if (useLocalStorageFallback) {
     return;
   }
 
+  // --- 2. Clear Firestore Database records for the deleted user completely ---
   try {
-    // 1. Delete user doc
-    await deleteDoc(doc(db, "users", cleanPhone));
+    const deletePromises: Promise<void>[] = [];
 
-    // 2. Delete all tasks associated with this user from Firestore
+    // A. Delete user doc
+    deletePromises.push(deleteDoc(doc(db, "users", cleanPhone)));
+
+    // B. Delete all tasks associated with this user
     const qTasks = query(collection(db, "tasks"), where("userId", "==", cleanPhone));
     const tasksSnap = await getDocs(qTasks);
-    const deletePromises: Promise<void>[] = [];
     tasksSnap.forEach(tDoc => {
       deletePromises.push(deleteDoc(doc(db, "tasks", tDoc.id)));
     });
-    await Promise.all(deletePromises);
 
-    console.log("Successfully deleted user and user tasks from Firestore:", cleanPhone);
+    // C. Delete all deposits associated with this user
+    const qDeposits = query(collection(db, "deposits"), where("phone", "==", cleanPhone));
+    const depositsSnap = await getDocs(qDeposits);
+    depositsSnap.forEach(dDoc => {
+      deletePromises.push(deleteDoc(doc(db, "deposits", dDoc.id)));
+    });
+
+    // D. Delete all withdrawals associated with this user
+    const qWithdrawals = query(collection(db, "withdrawals"), where("phone", "==", cleanPhone));
+    const withdrawalsSnap = await getDocs(qWithdrawals);
+    withdrawalsSnap.forEach(wDoc => {
+      deletePromises.push(deleteDoc(doc(db, "withdrawals", wDoc.id)));
+    });
+
+    // E. Delete all support chat messages & support chat document
+    try {
+      const messagesCol = collection(db, "support_chats", cleanPhone, "messages");
+      const msgsSnap = await getDocs(messagesCol);
+      msgsSnap.forEach(mDoc => {
+        deletePromises.push(deleteDoc(doc(db, "support_chats", cleanPhone, "messages", mDoc.id)));
+      });
+      deletePromises.push(deleteDoc(doc(db, "support_chats", cleanPhone)));
+    } catch (chatError) {
+      console.warn("Error queuing support chat/messages delete:", chatError);
+    }
+
+    // F. Delete all private notifications associated with this user
+    const qNotifs = query(collection(db, "notifications"));
+    const notifsSnap = await getDocs(qNotifs);
+    notifsSnap.forEach(nDoc => {
+      const data = nDoc.data() as UserNotification;
+      if (data && data.userId !== 'all' && data.userId !== 'broadcast' && matchesUser(data.userId, cleanPhone)) {
+        deletePromises.push(deleteDoc(doc(db, "notifications", nDoc.id)));
+      }
+    });
+
+    await Promise.all(deletePromises);
+    console.log("Successfully completed final deletion of user data from Firestore:", cleanPhone);
   } catch (error) {
     console.warn("Firestore deleteUserByAdmin error, falling back:", error);
     setFallbackMode(true);

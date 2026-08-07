@@ -23,6 +23,7 @@ export interface User {
   lastLogoutAt?: string; // تاريخ ووقت آخر تسجيل خروج
   lastActiveAt?: string; // تاريخ ووقت آخر تواجد أو نشاط للمستخدم
   isOnline?: boolean; // حالة الاتصال الحالية للمستخدم (داخل الموقع أم لا)
+  isWithdrawalBlocked?: boolean; // حظر سحب الأرباح للمستخدم
 }
 
 export interface UserNotification {

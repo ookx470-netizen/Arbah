@@ -16,7 +16,6 @@ import {
   Lightbulb, 
   ChevronLeft, 
   ChevronRight,
-  Sparkles,
   RefreshCw,
   Clock,
   ShieldCheck,
@@ -39,12 +38,14 @@ import {
   Send,
   X,
   Sun,
-  Moon
+  Moon,
+  Crown
 } from 'lucide-react';
 import AuthPage from './components/AuthPage';
 import ProfileCenter from './components/ProfileCenter';
 import AdminPanel from './components/AdminPanel';
 import { WelcomeOverlay } from './components/WelcomeOverlay';
+import { LeaderBonusModal } from './components/LeaderBonusModal';
 import { 
   initializeDatabase, 
   isFallbackMode
@@ -347,6 +348,7 @@ export default function TaskView() {
   const [pendingTabSwitch, setPendingTabSwitch] = useState<'log' | null>(null);
   const [pendingListTab, setPendingListTab] = useState<'withdrawn' | 'in_progress' | 'completed' | 'rejected' | null>(null);
   const [showSubscribeRequiredModal, setShowSubscribeRequiredModal] = useState<boolean>(false);
+  const [showLeaderBonusModal, setShowLeaderBonusModal] = useState<boolean>(false);
 
   const [homeCategoryTab, setHomeCategoryTab] = useState<'youtube' | 'facebook'>('youtube');
   const [activeListTab, setActiveListTab] = useState<'withdrawn' | 'in_progress' | 'completed' | 'rejected'>('in_progress');
@@ -1379,7 +1381,7 @@ export default function TaskView() {
           >
             {t.type === 'success' && <Check className="w-4 h-4 text-emerald-400 shrink-0 stroke-[3]" />}
             {t.type === 'error' && <span className="text-rose-400 font-extrabold shrink-0 text-sm">⚠️</span>}
-            {t.type === 'info' && <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />}
+            {t.type === 'info' && <Bell className="w-4 h-4 text-amber-400 shrink-0" />}
             
             <div className="flex-1 text-right" dir="rtl">
               <span className="leading-relaxed">{t.message}</span>
@@ -1424,7 +1426,7 @@ export default function TaskView() {
           {/* Section 1: Available Daily Tasks (Merged Here) */}
           <div className="mb-4 text-right flex items-center justify-between border-b border-stone-200 pb-2">
             <h3 className="text-xs font-black text-stone-900 flex items-center gap-1.5 justify-start">
-              <Sparkles className="w-4 h-4 text-blue-600 fill-blue-100 animate-pulse" />
+              <Zap className="w-4 h-4 text-blue-600 fill-blue-100 animate-pulse" />
               <span>المهام اليومية المتاحة</span>
             </h3>
           </div>
@@ -2146,7 +2148,7 @@ export default function TaskView() {
           {/* Site Announcement Box */}
           {settings.globalNotification && (
             <div className="bg-amber-50 border border-amber-200/80 rounded-xl p-3 mb-4 flex items-start gap-2.5 text-right">
-              <Sparkles className="w-4 h-4 text-amber-500 fill-amber-300 shrink-0 mt-0.5" />
+              <Bell className="w-4 h-4 text-amber-500 fill-amber-300 shrink-0 mt-0.5" />
               <div>
                 <span className="text-[10px] font-bold text-amber-800 block">إشعار المنصة العام</span>
                 <p className="text-[10px] text-amber-700/95 font-semibold mt-1 leading-relaxed">
@@ -2155,6 +2157,35 @@ export default function TaskView() {
               </div>
             </div>
           )}
+
+          {/* Become a Leader Program Card */}
+          <div className="bg-gradient-to-br from-amber-500 via-yellow-600 to-amber-700 rounded-2xl p-4 text-white text-right space-y-2 shadow-lg mb-4 relative overflow-hidden border border-amber-400/20">
+            <div className="absolute -left-4 -top-4 w-16 h-16 bg-white/10 rounded-full blur-xl" />
+            <div className="absolute -right-4 -bottom-4 w-20 h-20 bg-amber-400/20 rounded-full blur-2xl" />
+            
+            <div className="flex items-center gap-2 justify-end relative z-10">
+              <span className="text-[9px] bg-white/20 text-white px-2 py-0.5 rounded-full font-black animate-pulse">مكافآت قيادية 🏆</span>
+              <span className="text-xs font-black flex items-center gap-1.5">
+                برنامج رواتب قادة المنصة
+                <Crown className="w-4 h-4 text-amber-200 fill-amber-200" />
+              </span>
+            </div>
+            
+            <p className="text-[10px] text-amber-50 font-bold leading-relaxed relative z-10">
+              احصل على رواتب دورية ثابتة تبدأ من <span className="underline font-black text-amber-100">$15</span> وتصل إلى <span className="underline font-black text-amber-100">$100 كل 10 أيام</span> عند بناء فريقك المتميز!
+            </p>
+            
+            <button
+              onClick={() => {
+                setShowLeaderBonusModal(true);
+                playChimeSound();
+              }}
+              className="w-full mt-2 relative z-10 bg-white text-amber-800 hover:bg-amber-50 py-2.5 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 shadow-md active:scale-[0.98] cursor-pointer"
+            >
+              <Crown className="w-4 h-4 text-amber-600 fill-amber-500" />
+              <span>كيف تصبح قائد؟ (برنامج الرواتب بالتفصيل)</span>
+            </button>
+          </div>
 
           {/* Direct Technical Support Trigger Card */}
           <div className="bg-white rounded-2xl p-5 border border-stone-200/80 shadow-sm text-center mb-4">
@@ -2706,6 +2737,14 @@ export default function TaskView() {
           setShowSubscribeRequiredModal(false);
           navigateToTab('rank');
         }}
+      />
+
+      {/* Leader Bonus details and rewards Modal */}
+      <LeaderBonusModal
+        isOpen={showLeaderBonusModal}
+        onClose={() => setShowLeaderBonusModal(false)}
+        inviteCode={currentUser?.inviteCode || ''}
+        isDarkMode={isDarkMode}
       />
 
 
