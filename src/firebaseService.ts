@@ -238,7 +238,7 @@ function generateInviteCode(): string {
 
 // Migration helper: copies data from old cached named DB into the new online default DB
 export async function migrateOldCachedDataToNewDb() {
-  const isMigrated = localStorage.getItem('old_db_migrated_done_v2');
+  const isMigrated = localStorage.getItem('oxlo_premium_migration_done_v1');
   if (isMigrated === 'true') {
     return;
   }
@@ -272,7 +272,7 @@ export async function migrateOldCachedDataToNewDb() {
       }
     }
 
-    localStorage.setItem('old_db_migrated_done_v2', 'true');
+    localStorage.setItem('oxlo_premium_migration_done_v1', 'true');
     console.log("Successfully completed offline database migration!");
   } catch (error: any) {
     console.error("Critical error in database migration process:", error.message);
