@@ -43,19 +43,10 @@ try {
   console.warn(e);
 }
 let useLocalStorageFallback = false;
-let bypassFallback = false;
+let bypassFallback = true;
 
 function checkForQuotaExceeded(error: any) {
-  if (error && (
-    error.code === 'resource-exhausted' || 
-    (error.message && error.message.includes('Quota exceeded') && !error.message.includes('timeout'))
-  )) {
-    if (!useLocalStorageFallback) {
-      console.error("⚠️ [CRITICAL] Firebase Quota Exceeded! Switching the entire application to local fallback mode in-memory.");
-      useLocalStorageFallback = true;
-      window.dispatchEvent(new CustomEvent('firestore-quota-exceeded'));
-    }
-  }
+  // Direct online Firestore mode enabled
 }
 
 // Helper to force timeout on hanging Firestore promises
