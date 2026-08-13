@@ -12,7 +12,7 @@ import {
   onSnapshot,
   writeBatch
 } from 'firebase/firestore';
-import { db, storage } from './firebase';
+import { db, oldDb, storage } from './firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { User, Deposit, Withdrawal, SystemSettings, Task, SupportMessage, SupportChat, SupportFaq, UserNotification } from './types';
 
@@ -236,8 +236,56 @@ function generateInviteCode(): string {
   return result;
 }
 
+// Migration helper: copies data from old cached named DB into the new online default DB
+export async function migrateOldCachedDataToNewDb() {
+  const isMigrated = localStorage.getItem('old_db_migrated_done_v2');
+  if (isMigrated === 'true') {
+    return;
+  }
+
+  try {
+    const collectionsToMigrate = [
+      "users",
+      "settings",
+      "deposits",
+      "withdrawals",
+      "tasks",
+      "support_chats",
+      "support_messages",
+      "support_faqs",
+      "notifications"
+    ];
+
+    for (const colName of collectionsToMigrate) {
+      try {
+        const snapshot = await getDocs(collection(oldDb, colName));
+        if (!snapshot.empty) {
+          console.log(`Found ${snapshot.size} documents in old cached collection: ${colName}. Migrating...`);
+          for (const docSnap of snapshot.docs) {
+            const data = docSnap.data();
+            const newDocRef = doc(db, colName, docSnap.id);
+            await setDoc(newDocRef, data, { merge: true });
+          }
+        }
+      } catch (err: any) {
+        console.warn(`Error migrating collection ${colName}:`, err.message);
+      }
+    }
+
+    localStorage.setItem('old_db_migrated_done_v2', 'true');
+    console.log("Successfully completed offline database migration!");
+  } catch (error: any) {
+    console.error("Critical error in database migration process:", error.message);
+  }
+}
+
 // Check and Initialize Admin & System Settings if not exist
 export async function initializeDatabase() {
+  // Always trigger the migration process first asynchronously
+  migrateOldCachedDataToNewDb().catch(err => {
+    console.warn("Migration trigger error:", err);
+  });
+
   try {
     // 1. Initialize Admin
     const adminPhone = "07712345678";
