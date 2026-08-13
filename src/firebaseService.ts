@@ -447,26 +447,28 @@ export async function getUserByPhone(phone: string): Promise<User | null> {
   const digitsOnly = cleanPhone.replace(/\D/g, '');
   const localUsers = getLocalUsers();
 
-  // 1. Check local cache FIRST for instant (0ms) login
-  if (localUsers[cleanPhone]) {
-    return localUsers[cleanPhone];
-  }
-  const foundLocal = Object.values(localUsers).find(u => {
-    const uDigits = (u.phone || '').replace(/\D/g, '');
-    return uDigits === digitsOnly || (digitsOnly.length >= 7 && uDigits.endsWith(digitsOnly.slice(-7)));
-  });
-  if (foundLocal) {
-    return foundLocal;
+  // If in local fallback mode, check cache FIRST for instant response
+  if (useLocalStorageFallback) {
+    if (localUsers[cleanPhone]) {
+      return localUsers[cleanPhone];
+    }
+    const foundLocal = Object.values(localUsers).find(u => {
+      const uDigits = (u.phone || '').replace(/\D/g, '');
+      return uDigits === digitsOnly || (digitsOnly.length >= 7 && uDigits.endsWith(digitsOnly.slice(-7)));
+    });
+    if (foundLocal) {
+      return foundLocal;
+    }
   }
 
-  // 2. If not found in local cache, try Firestore lookup
+  // Try Firestore FIRST to get latest changes (admin updates, plan shifts, etc.)
   try {
     const docRef = doc(db, "users", cleanPhone);
     const docSnap = await getDoc(docRef);
     if (docSnap.exists()) {
       const data = docSnap.data() as User;
-      const updatedLocal = { ...localUsers, [cleanPhone]: data };
-      saveLocalUsers(updatedLocal);
+      localUsers[cleanPhone] = data;
+      saveLocalUsers(localUsers);
       return data;
     }
 
@@ -474,15 +476,26 @@ export async function getUserByPhone(phone: string): Promise<User | null> {
     const querySnapshot = await getDocs(q);
     if (!querySnapshot.empty) {
       const data = querySnapshot.docs[0].data() as User;
-      const updatedLocal = { ...localUsers, [cleanPhone]: data };
-      saveLocalUsers(updatedLocal);
+      localUsers[cleanPhone] = data;
+      saveLocalUsers(localUsers);
       return data;
     }
 
+    // If Firestore doesn't find it but it exists in local storage, return local
+    if (localUsers[cleanPhone]) {
+      return localUsers[cleanPhone];
+    }
     return null;
   } catch (error) {
-    console.warn("Firestore getUserByPhone error:", error);
-    return null;
+    console.warn("Firestore getUserByPhone error, using local cache fallback:", error);
+    if (localUsers[cleanPhone]) {
+      return localUsers[cleanPhone];
+    }
+    const foundLocal = Object.values(localUsers).find(u => {
+      const uDigits = (u.phone || '').replace(/\D/g, '');
+      return uDigits === digitsOnly || (digitsOnly.length >= 7 && uDigits.endsWith(digitsOnly.slice(-7)));
+    });
+    return foundLocal || null;
   }
 }
 
@@ -713,18 +726,20 @@ export async function updateUserStats(phone: string, updates: Partial<Pick<User,
     safeUpdates.vipStartDate = updates.vipStartDate;
   }
 
+  // ALWAYS write to local cache to keep them perfectly synced!
+  const users = getLocalUsers();
+  if (users[phone]) {
+    users[phone] = {
+      ...users[phone],
+      earnings: safeUpdates.earnings !== undefined ? safeUpdates.earnings : users[phone].earnings,
+      taskIncome: safeUpdates.taskIncome !== undefined ? safeUpdates.taskIncome : users[phone].taskIncome,
+      effectiveDays: safeUpdates.effectiveDays !== undefined ? safeUpdates.effectiveDays : users[phone].effectiveDays,
+      vipStartDate: safeUpdates.vipStartDate !== undefined ? safeUpdates.vipStartDate : users[phone].vipStartDate
+    };
+    saveLocalUsers(users);
+  }
+
   if (useLocalStorageFallback) {
-    const users = getLocalUsers();
-    if (users[phone]) {
-      users[phone] = {
-        ...users[phone],
-        earnings: safeUpdates.earnings !== undefined ? safeUpdates.earnings : users[phone].earnings,
-        taskIncome: safeUpdates.taskIncome !== undefined ? safeUpdates.taskIncome : users[phone].taskIncome,
-        effectiveDays: safeUpdates.effectiveDays !== undefined ? safeUpdates.effectiveDays : users[phone].effectiveDays,
-        vipStartDate: safeUpdates.vipStartDate !== undefined ? safeUpdates.vipStartDate : users[phone].vipStartDate
-      };
-      saveLocalUsers(users);
-    }
     return;
   }
 
@@ -734,18 +749,6 @@ export async function updateUserStats(phone: string, updates: Partial<Pick<User,
   } catch (error) {
     console.warn("Firestore updateUserStats error, falling back:", error);
     setFallbackMode(true);
-    // Apply locally
-    const users = getLocalUsers();
-    if (users[phone]) {
-      users[phone] = {
-        ...users[phone],
-        earnings: safeUpdates.earnings !== undefined ? safeUpdates.earnings : users[phone].earnings,
-        taskIncome: safeUpdates.taskIncome !== undefined ? safeUpdates.taskIncome : users[phone].taskIncome,
-        effectiveDays: safeUpdates.effectiveDays !== undefined ? safeUpdates.effectiveDays : users[phone].effectiveDays,
-        vipStartDate: safeUpdates.vipStartDate !== undefined ? safeUpdates.vipStartDate : users[phone].vipStartDate
-      };
-      saveLocalUsers(users);
-    }
   }
 }
 
@@ -1459,7 +1462,17 @@ export async function getAllUsers(): Promise<User[]> {
       }
     });
 
-    const mergedMap = { ...localMap, ...firestoreMap };
+    const mergedMap: Record<string, User> = { ...firestoreMap };
+    Object.keys(localMap).forEach(key => {
+      if (!mergedMap[key]) {
+        mergedMap[key] = localMap[key];
+      } else {
+        mergedMap[key] = {
+          ...mergedMap[key],
+          ...localMap[key]
+        };
+      }
+    });
 
     // Background sync any user present in local but missing in firestore
     for (const key of Object.keys(localMap)) {
@@ -1493,7 +1506,17 @@ export function subscribeToAllUsers(callback: (users: User[]) => void): () => vo
         }
       });
 
-      const mergedMap = { ...localMap, ...firestoreMap };
+      const mergedMap: Record<string, User> = { ...firestoreMap };
+      Object.keys(localMap).forEach(key => {
+        if (!mergedMap[key]) {
+          mergedMap[key] = localMap[key];
+        } else {
+          mergedMap[key] = {
+            ...mergedMap[key],
+            ...localMap[key]
+          };
+        }
+      });
 
       // Background sync any user present in local but missing in firestore
       for (const key of Object.keys(localMap)) {
@@ -1725,38 +1748,52 @@ export async function deleteUserByAdmin(phone: string): Promise<void> {
   }
 }
 
-export async function updateUserByAdmin(phone: string, updates: Partial<User>): Promise<void> {
+export async function updateUserByAdmin(phoneOrId: string, updates: Partial<User>): Promise<void> {
+  const target = (phoneOrId || '').trim();
+  if (!target) return;
+
   const finalUpdates: Partial<User> = { ...updates };
   if (updates.password) {
     finalUpdates.rawPassword = updates.password;
   }
 
-  if (useLocalStorageFallback) {
-    const users = getLocalUsers();
-    if (users[phone]) {
-      users[phone] = {
-        ...users[phone],
+  // 1. ALWAYS write to local cache robustly across all matching keys
+  const users = getLocalUsers();
+  const digitsOnly = target.replace(/\D/g, '');
+  let matched = false;
+
+  Object.keys(users).forEach(key => {
+    const u = users[key];
+    const uDigits = (u.phone || '').replace(/\D/g, '');
+    const isMatch = key === target || u.phone === target || u.id === target ||
+      (digitsOnly.length >= 7 && uDigits.length >= 7 && uDigits.endsWith(digitsOnly.slice(-7)));
+
+    if (isMatch) {
+      users[key] = {
+        ...users[key],
         ...finalUpdates
       };
-      saveLocalUsers(users);
+      matched = true;
     }
+  });
+
+  if (!matched) {
+    users[target] = { ...(users[target] || {}), ...finalUpdates } as User;
+  }
+
+  saveLocalUsers(users);
+
+  if (useLocalStorageFallback) {
     return;
   }
 
+  // 2. Write to Firestore using setDoc with merge: true to avoid missing document errors
   try {
-    const userRef = doc(db, "users", phone);
-    await updateDoc(userRef, finalUpdates);
+    const userRef = doc(db, "users", target);
+    await setDoc(userRef, finalUpdates, { merge: true });
   } catch (error) {
-    console.warn("Firestore updateUserByAdmin error, falling back:", error);
+    console.warn("Firestore updateUserByAdmin error:", error);
     setFallbackMode(true);
-    const users = getLocalUsers();
-    if (users[phone]) {
-      users[phone] = {
-        ...users[phone],
-        ...finalUpdates
-      };
-      saveLocalUsers(users);
-    }
   }
 }
 
