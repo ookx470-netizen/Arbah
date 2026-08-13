@@ -36,17 +36,36 @@ export async function hashPassword(password: string): Promise<string> {
 }
 
 // Let's keep a state flag for Local Storage fallback mode
-// Clear any sticky offline fallback immediately to cure and reconnect stuck/old phones to the online Firestore database!
+let useLocalStorageFallback = false;
+// Clear sticky offline fallback on load to automatically heal and reconnect to Firestore when Blaze plan is active or quota resets!
 try {
   localStorage.removeItem('oxlo_quota_fallback_active');
 } catch (e) {
   console.warn(e);
 }
-let useLocalStorageFallback = false;
-let bypassFallback = true;
+let bypassFallback = false;
 
 function checkForQuotaExceeded(error: any) {
-  // Direct online Firestore mode enabled
+  if (!error) return;
+  const errMsg = error.message || String(error);
+  if (
+    errMsg.includes('Quota exceeded') ||
+    errMsg.includes('quota') ||
+    errMsg.includes('Quota limit exceeded') ||
+    errMsg.includes('RESOURCE_EXHAUSTED') ||
+    errMsg.includes('quota-exceeded')
+  ) {
+    if (!useLocalStorageFallback) {
+      console.warn("⚠️ Firebase Quota Limit Exceeded detected! Activating Local Storage Fallback Mode.");
+      useLocalStorageFallback = true;
+      try {
+        localStorage.setItem('oxlo_quota_fallback_active', 'true');
+      } catch (e) {}
+      try {
+        window.dispatchEvent(new Event('quota_fallback_activated'));
+      } catch (e) {}
+    }
+  }
 }
 
 // Helper to force timeout on hanging Firestore promises
