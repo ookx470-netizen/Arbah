@@ -123,7 +123,7 @@ function getLocalSettings(): SystemSettings {
         globalNotification: parsed.globalNotification ?? "مرحباً بكم في منصتنا الميكروية الجديدة! ابدأ بالعمل اليوم وزد أرباحك.",
         withdrawLockActive: parsed.withdrawLockActive ?? false,
         withdrawLockDays: parsed.withdrawLockDays ?? [5],
-        withdrawRatesInfo: parsed.withdrawRatesInfo ?? "رسوم معالجة السحب 0% - سعر الصرف مستقر",
+        withdrawRatesInfo: parsed.withdrawRatesInfo ?? "رسوم معالجة السحب 15% - سعر الصرف مستقر",
         rechargeNotice: parsed.rechargeNotice ?? "يرجى تحويل المبلغ المحدد فقط وتصوير إثبات التحويل لضمان سرعة معالجة شحن حسابك.",
         rechargeNotice2: parsed.rechargeNotice2 ?? "",
         withdrawNotice: parsed.withdrawNotice ?? "تنبيه: يتم معالجة طلبات السحب خلال 24 ساعة كحد أقصى.",
@@ -170,7 +170,7 @@ function getLocalSettings(): SystemSettings {
     globalNotification: "مرحباً بكم في منصتنا الميكروية الجديدة! ابدأ بالعمل اليوم وزد أرباحك.",
     withdrawLockActive: false,
     withdrawLockDays: [5],
-    withdrawRatesInfo: "رسوم معالجة السحب 0% - سعر الصرف مستقر",
+    withdrawRatesInfo: "رسوم معالجة السحب 15% - سعر الصرف مستقر",
     rechargeNotice: "يرجى تحويل المبلغ المحدد فقط وتصوير إثبات التحويل لضمان سرعة معالجة شحن حسابك.",
     rechargeNotice2: "",
     withdrawNotice: "تنبيه: يتم معالجة طلبات السحب خلال 24 ساعة كحد أقصى.",
@@ -237,11 +237,13 @@ function generateInviteCode(): string {
 }
 
 // Migration helper: copies data from old cached named DB into the new online default DB
-export async function migrateOldCachedDataToNewDb() {
+export async function migrateOldCachedDataToNewDb(force: boolean = false) {
   const isMigrated = localStorage.getItem('oxlo_premium_migration_done_v1');
-  if (isMigrated === 'true') {
-    return;
+  if (isMigrated === 'true' && !force) {
+    return { success: true, counts: {}, alreadyDone: true };
   }
+
+  const report: Record<string, number> = {};
 
   try {
     const collectionsToMigrate = [
@@ -261,21 +263,29 @@ export async function migrateOldCachedDataToNewDb() {
         const snapshot = await getDocs(collection(oldDb, colName));
         if (!snapshot.empty) {
           console.log(`Found ${snapshot.size} documents in old cached collection: ${colName}. Migrating...`);
+          let copiedCount = 0;
           for (const docSnap of snapshot.docs) {
             const data = docSnap.data();
             const newDocRef = doc(db, colName, docSnap.id);
             await setDoc(newDocRef, data, { merge: true });
+            copiedCount++;
           }
+          report[colName] = copiedCount;
+        } else {
+          report[colName] = 0;
         }
       } catch (err: any) {
         console.warn(`Error migrating collection ${colName}:`, err.message);
+        report[colName] = -1; // Flag as error
       }
     }
 
     localStorage.setItem('oxlo_premium_migration_done_v1', 'true');
-    console.log("Successfully completed offline database migration!");
+    console.log("Successfully completed database migration!", report);
+    return { success: true, counts: report, alreadyDone: false };
   } catch (error: any) {
     console.error("Critical error in database migration process:", error.message);
+    return { success: false, error: error.message, counts: report };
   }
 }
 
@@ -870,7 +880,7 @@ export async function getSystemSettings(): Promise<SystemSettings> {
         globalNotification: data.globalNotification ?? "مرحباً بكم في منصتنا الميكروية الجديدة! ابدأ بالعمل اليوم وزد أرباحك.",
         withdrawLockActive: Boolean(data.withdrawLockActive ?? false),
         withdrawLockDays: data.withdrawLockDays ?? [5],
-        withdrawRatesInfo: data.withdrawRatesInfo ?? "رسوم معالجة السحب 0% - سعر الصرف مستقر",
+        withdrawRatesInfo: data.withdrawRatesInfo ?? "رسوم معالجة السحب 15% - سعر الصرف مستقر",
         rechargeNotice: data.rechargeNotice ?? "يرجى تحويل المبلغ المحدد فقط وتصوير إثبات التحويل لضمان سرعة معالجة شحن حسابك.",
         rechargeNotice2: data.rechargeNotice2 ?? "",
         withdrawNotice: data.withdrawNotice ?? "تنبيه: يتم معالجة طلبات السحب خلال 24 ساعة كحد أقصى.",
@@ -2206,7 +2216,7 @@ export function subscribeToSystemSettings(onUpdate: (settings: SystemSettings) =
           globalNotification: data.globalNotification ?? "مرحباً بكم في منصتنا الميكروية الجديدة! ابدأ بالعمل اليوم وزد أرباحك.",
           withdrawLockActive: Boolean(data.withdrawLockActive ?? false),
           withdrawLockDays: data.withdrawLockDays ?? [5],
-          withdrawRatesInfo: data.withdrawRatesInfo ?? "رسوم معالجة السحب 0% - سعر الصرف مستقر",
+          withdrawRatesInfo: data.withdrawRatesInfo ?? "رسوم معالجة السحب 15% - سعر الصرف مستقر",
           rechargeNotice: data.rechargeNotice ?? "يرجى تحويل المبلغ المحدد فقط وتصوير إثبات التحويل لضمان سرعة معالجة شحن حسابك.",
           rechargeNotice2: data.rechargeNotice2 ?? "",
           withdrawNotice: data.withdrawNotice ?? "تنبيه: يتم معالجة طلبات السحب خلال 24 ساعة كحد أقصى.",
