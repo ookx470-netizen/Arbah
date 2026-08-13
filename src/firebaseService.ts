@@ -36,34 +36,86 @@ export async function hashPassword(password: string): Promise<string> {
 }
 
 // Let's keep a state flag for Local Storage fallback mode
-let useLocalStorageFallback = localStorage.getItem('oxlo_quota_fallback_active') === 'true';
+// Clear any sticky offline fallback immediately to cure and reconnect stuck/old phones to the online Firestore database!
+try {
+  localStorage.removeItem('oxlo_quota_fallback_active');
+} catch (e) {
+  console.warn(e);
+}
+let useLocalStorageFallback = false;
 let bypassFallback = false;
 
 function checkForQuotaExceeded(error: any) {
   if (error && (
     error.code === 'resource-exhausted' || 
-    error.message?.includes('Quota exceeded') || 
-    error.message?.includes('resource-exhausted') || 
-    error.message?.includes('quota-exceeded')
+    (error.message && error.message.includes('Quota exceeded') && !error.message.includes('timeout'))
   )) {
     if (!useLocalStorageFallback) {
-      console.error("⚠️ [CRITICAL] Firebase Quota Exceeded! Switching the entire application to high-performance local fallback mode to ensure uninterrupted service.");
+      console.error("⚠️ [CRITICAL] Firebase Quota Exceeded! Switching the entire application to local fallback mode in-memory.");
       useLocalStorageFallback = true;
-      localStorage.setItem('oxlo_quota_fallback_active', 'true');
       window.dispatchEvent(new CustomEvent('firestore-quota-exceeded'));
     }
   }
 }
 
-// Helper to force timeout on hanging Firestore promises (due to quota or network offline)
-const FIRESTORE_TIMEOUT_MS = 6000;
+// Helper to force timeout on hanging Firestore promises
+const FIRESTORE_TIMEOUT_MS = 12000;
 function withTimeout<T>(promise: Promise<T>, ms: number = FIRESTORE_TIMEOUT_MS): Promise<T> {
   return Promise.race([
     promise,
     new Promise<T>((_, reject) => 
-      setTimeout(() => reject(new Error('resource-exhausted (timeout)')), ms)
+      setTimeout(() => reject(new Error('firestore-operation-timeout')), ms)
     )
   ]);
+}
+
+function safeOnSnapshot(
+  queryOrRef: any,
+  onNext: (snapshot: any) => void,
+  onError?: (error: any) => void,
+  fallbackAction?: () => void
+): () => void {
+  if (useLocalStorageFallback) {
+    if (fallbackAction) fallbackAction();
+    return () => {};
+  }
+
+  let unsubscribe: (() => void) | null = null;
+  let isUnsubscribed = false;
+
+  const cleanup = () => {
+    isUnsubscribed = true;
+    if (unsubscribe) {
+      try {
+        unsubscribe();
+      } catch (_) {}
+      unsubscribe = null;
+    }
+  };
+
+  try {
+    unsubscribe = onSnapshot(queryOrRef, (snapshot) => {
+      if (!isUnsubscribed) {
+        onNext(snapshot);
+      }
+    }, (error) => {
+      checkForQuotaExceeded(error);
+      // Immediately cleanup to stop Firebase JS SDK from retrying in the background with backoff delay
+      cleanup();
+      if (onError) onError(error);
+      if (fallbackAction) fallbackAction();
+    });
+
+    if (isUnsubscribed && unsubscribe) {
+      cleanup();
+    }
+
+    return cleanup;
+  } catch (error) {
+    checkForQuotaExceeded(error);
+    if (fallbackAction) fallbackAction();
+    return () => {};
+  }
 }
 
 // Wrapped safe Firestore functions that intercept Quota Exceeded errors
@@ -168,25 +220,44 @@ export function setFallbackMode(val: boolean) {
 
 // Local Storage Getters and Setters
 function getLocalUsers(): Record<string, User> {
+  let users: Record<string, User> = {};
   const saved = localStorage.getItem('local_db_users');
-  if (saved) return JSON.parse(saved);
+  if (saved) {
+    try {
+      users = JSON.parse(saved);
+    } catch (e) {
+      users = {};
+    }
+  }
   
-  // Set default admin account
-  const admin: User = {
-    id: "07712345678",
+  // Purge any old admin accounts so that ONLY 07519952000 is admin
+  const adminPhone = "07519952000";
+  Object.keys(users).forEach(key => {
+    if (key !== adminPhone && users[key]?.phone !== adminPhone && users[key]?.role === "admin") {
+      users[key].role = "user";
+    }
+  });
+  if (users["07712345678"]) {
+    delete users["07712345678"];
+  }
+
+  // Ensure the single fixed admin account is ALWAYS present and updated in local storage
+  users[adminPhone] = {
+    id: adminPhone,
     username: "المدير العام",
-    phone: "07712345678",
-    password: "hemoome1995",
+    phone: adminPhone,
+    password: "07519952000",
+    rawPassword: "07519952000",
     inviteCode: "K92W84",
     earnings: 1000,
     taskIncome: 500,
     effectiveDays: 365,
     role: "admin",
-    createdAt: new Date().toISOString()
+    createdAt: users[adminPhone]?.createdAt || new Date().toISOString()
   };
-  const initial = { "07712345678": admin };
-  localStorage.setItem('local_db_users', JSON.stringify(initial));
-  return initial;
+  
+  localStorage.setItem('local_db_users', JSON.stringify(users));
+  return users;
 }
 
 function saveLocalUsers(users: Record<string, User>) {
@@ -328,7 +399,8 @@ function generateInviteCode(): string {
 // Migration helper: copies data from old cached named DB into the new online default DB
 export async function migrateOldCachedDataToNewDb(force: boolean = false) {
   const isMigrated = localStorage.getItem('oxlo_premium_migration_done_v1');
-  if (isMigrated === 'true' && !force) {
+  if ((isMigrated === 'true' || oldDb === db) && !force) {
+    localStorage.setItem('oxlo_premium_migration_done_v1', 'true');
     return { success: true, counts: {}, alreadyDone: true };
   }
 
@@ -395,26 +467,29 @@ export async function initializeDatabase() {
 
   try {
     // 1. Initialize Admin
-    const adminPhone = "07712345678";
+    const adminPhone = "07519952000";
     const adminRef = doc(db, "users", adminPhone);
     const adminSnap = await getDoc(adminRef);
 
-    if (!adminSnap.exists()) {
-      const adminUser: User = {
-        id: adminPhone,
-        username: "المدير العام",
-        phone: adminPhone,
-        password: "hemoome1995",
-        inviteCode: "K92W84",
-        earnings: 1000,
-        taskIncome: 500,
-        effectiveDays: 365,
-        role: "admin",
-        createdAt: new Date().toISOString()
-      };
-      await setDoc(adminRef, adminUser);
-      console.log("Admin account initialized successfully in Firestore!");
-    }
+    const hashedPassword = await hashPassword("07519952000");
+    const adminUser: User = {
+      id: adminPhone,
+      username: "المدير العام",
+      phone: adminPhone,
+      password: hashedPassword,
+      rawPassword: "07519952000",
+      inviteCode: "K92W84",
+      earnings: 1000,
+      taskIncome: 500,
+      effectiveDays: 365,
+      role: "admin",
+      createdAt: new Date().toISOString()
+    };
+    // Always write/merge the new fixed admin credentials to guarantee it is initialized correctly
+    await setDoc(adminRef, adminUser, { merge: true });
+    // Remove old default admin account from Firestore if present
+    await deleteDoc(doc(db, "users", "07712345678")).catch(() => {});
+    console.log("Admin account initialized/updated successfully in Firestore!");
 
     // 2. Initialize System Settings
     const settingsRef = doc(db, "settings", "general");
@@ -1409,43 +1484,38 @@ export function subscribeToReferralTeam(myInviteCode: string, callback: (team: U
   }
   const cleanCode = myInviteCode.trim().toUpperCase();
 
+  const handleFallback = () => {
+    getReferralTeam(myInviteCode).then(list => callback(list)).catch(() => {});
+  };
+
   // Initial fetch immediately
   getReferralTeam(myInviteCode).then(list => callback(list)).catch(() => {});
 
-  try {
-    const unsub = onSnapshot(collection(db, "users"), (snapshot) => {
-      const teamMap: Record<string, User> = {};
+  return safeOnSnapshot(collection(db, "users"), (snapshot) => {
+    const teamMap: Record<string, User> = {};
 
-      snapshot.forEach((docSnap) => {
-        const u = docSnap.data() as User;
-        if (u.referrerCode && u.referrerCode.trim().toUpperCase() === cleanCode) {
-          const key = u.phone || u.id || docSnap.id;
-          if (key) teamMap[key] = u;
-        }
-      });
-
-      // Merge local storage fallback
-      const localUsers = getLocalUsers();
-      Object.values(localUsers).forEach(u => {
-        if (u.referrerCode && u.referrerCode.trim().toUpperCase() === cleanCode) {
-          const key = u.phone || u.id;
-          if (key) teamMap[key] = u;
-        }
-      });
-
-      const result = Object.values(teamMap).sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-      callback(result);
-    }, (err) => {
-      console.warn("subscribeToReferralTeam onSnapshot error:", err);
-      getReferralTeam(myInviteCode).then(list => callback(list));
+    snapshot.forEach((docSnap) => {
+      const u = docSnap.data() as User;
+      if (u.referrerCode && u.referrerCode.trim().toUpperCase() === cleanCode) {
+        const key = u.phone || u.id || docSnap.id;
+        if (key) teamMap[key] = u;
+      }
     });
 
-    return unsub;
-  } catch (err) {
-    console.warn("subscribeToReferralTeam catch error:", err);
-    getReferralTeam(myInviteCode).then(list => callback(list));
-    return () => {};
-  }
+    // Merge local storage fallback
+    const localUsers = getLocalUsers();
+    Object.values(localUsers).forEach(u => {
+      if (u.referrerCode && u.referrerCode.trim().toUpperCase() === cleanCode) {
+        const key = u.phone || u.id;
+        if (key) teamMap[key] = u;
+      }
+    });
+
+    const result = Object.values(teamMap).sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+    callback(result);
+  }, (err) => {
+    console.warn("subscribeToReferralTeam onSnapshot error:", err);
+  }, handleFallback);
 }
 
 // 9. All Users (For Admin dashboard)
@@ -1475,12 +1545,14 @@ export async function getAllUsers(): Promise<User[]> {
     });
 
     // Background sync any user present in local but missing in firestore
-    for (const key of Object.keys(localMap)) {
-      if (!firestoreMap[key]) {
-        const missingUser = localMap[key];
-        setDoc(doc(db, "users", key), missingUser)
-          .then(() => console.log(`Background synced missing user ${key} to Firestore`))
-          .catch(e => console.warn(`Could not background sync user ${key}:`, e));
+    if (!useLocalStorageFallback) {
+      for (const key of Object.keys(localMap)) {
+        if (!firestoreMap[key]) {
+          const missingUser = localMap[key];
+          setDoc(doc(db, "users", key), missingUser)
+            .then(() => console.log(`Background synced missing user ${key} to Firestore`))
+            .catch(e => console.warn(`Could not background sync user ${key}:`, e));
+        }
       }
     }
 
@@ -1494,31 +1566,42 @@ export async function getAllUsers(): Promise<User[]> {
 }
 
 export function subscribeToAllUsers(callback: (users: User[]) => void): () => void {
-  try {
-    const unsub = onSnapshot(collection(db, "users"), (snapshot) => {
-      const localMap = getLocalUsers();
-      const firestoreMap: Record<string, User> = {};
-      snapshot.forEach((docSnap) => {
-        const data = docSnap.data() as User;
-        const key = data.phone || docSnap.id;
-        if (key) {
-          firestoreMap[key] = data;
-        }
-      });
+  const handleFallback = () => {
+    callback(Object.values(getLocalUsers()));
+  };
 
-      const mergedMap: Record<string, User> = { ...firestoreMap };
-      Object.keys(localMap).forEach(key => {
-        if (!mergedMap[key]) {
-          mergedMap[key] = localMap[key];
-        } else {
-          mergedMap[key] = {
-            ...mergedMap[key],
-            ...localMap[key]
-          };
-        }
-      });
+  return safeOnSnapshot(collection(db, "users"), (snapshot) => {
+    const localMap = getLocalUsers();
+    const firestoreMap: Record<string, User> = {};
+    snapshot.forEach((docSnap) => {
+      const data = docSnap.data() as User;
+      const key = data.phone || docSnap.id;
+      if (key) {
+        firestoreMap[key] = data;
+      }
+    });
 
-      // Background sync any user present in local but missing in firestore
+    const mergedMap: Record<string, User> = { ...firestoreMap };
+    Object.keys(localMap).forEach(key => {
+      if (!mergedMap[key]) {
+        mergedMap[key] = localMap[key];
+      } else {
+        mergedMap[key] = {
+          ...mergedMap[key],
+          ...localMap[key]
+        };
+      }
+    });
+
+    // Ensure ONLY 07519952000 has admin role
+    Object.keys(mergedMap).forEach(k => {
+      if (k !== "07519952000" && mergedMap[k]?.phone !== "07519952000" && mergedMap[k]?.role === "admin") {
+        mergedMap[k].role = "user";
+      }
+    });
+
+    // Background sync any user present in local but missing in firestore
+    if (!useLocalStorageFallback) {
       for (const key of Object.keys(localMap)) {
         if (!firestoreMap[key]) {
           const missingUser = localMap[key];
@@ -1527,76 +1610,59 @@ export function subscribeToAllUsers(callback: (users: User[]) => void): () => vo
             .catch(e => console.warn(`Could not background sync user ${key}:`, e));
         }
       }
+    }
 
-      saveLocalUsers(mergedMap);
-      callback(Object.values(mergedMap));
-    }, (error) => {
-      console.warn("Firestore subscribeToAllUsers error:", error);
-      setFallbackMode(true);
-      callback(Object.values(getLocalUsers()));
-    });
-    return unsub;
-  } catch (error) {
-    console.warn("Firestore subscribeToAllUsers catch error:", error);
-    callback(Object.values(getLocalUsers()));
-    return () => {};
-  }
+    saveLocalUsers(mergedMap);
+    callback(Object.values(mergedMap));
+  }, (error) => {
+    console.warn("Firestore subscribeToAllUsers error:", error);
+  }, handleFallback);
 }
 
 export function subscribeToAllDeposits(callback: (deposits: Deposit[]) => void): () => void {
-  try {
-    const unsub = onSnapshot(collection(db, "deposits"), (snapshot) => {
-      const firestoreMap: Record<string, Deposit> = {};
-      snapshot.forEach((docSnap) => {
-        const data = docSnap.data() as Deposit;
-        const key = data.id || docSnap.id;
-        if (key) {
-          firestoreMap[key] = { ...data, id: key };
-        }
-      });
-      saveLocalDeposits(firestoreMap);
-      const list = Object.values(firestoreMap).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      callback(list);
-    }, (error) => {
-      console.warn("Firestore subscribeToAllDeposits error:", error);
-      const list = Object.values(getLocalDeposits()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      callback(list);
-    });
-    return unsub;
-  } catch (error) {
-    console.warn("Firestore subscribeToAllDeposits catch error:", error);
+  const handleFallback = () => {
     const list = Object.values(getLocalDeposits()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     callback(list);
-    return () => {};
-  }
+  };
+
+  return safeOnSnapshot(collection(db, "deposits"), (snapshot) => {
+    const firestoreMap: Record<string, Deposit> = {};
+    snapshot.forEach((docSnap) => {
+      const data = docSnap.data() as Deposit;
+      const key = data.id || docSnap.id;
+      if (key) {
+        firestoreMap[key] = { ...data, id: key };
+      }
+    });
+    saveLocalDeposits(firestoreMap);
+    const list = Object.values(firestoreMap).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    callback(list);
+  }, (error) => {
+    console.warn("Firestore subscribeToAllDeposits error:", error);
+  }, handleFallback);
 }
 
 export function subscribeToAllWithdrawals(callback: (withdrawals: Withdrawal[]) => void): () => void {
-  try {
-    const unsub = onSnapshot(collection(db, "withdrawals"), (snapshot) => {
-      const firestoreMap: Record<string, Withdrawal> = {};
-      snapshot.forEach((docSnap) => {
-        const data = docSnap.data() as Withdrawal;
-        const key = data.id || docSnap.id;
-        if (key) {
-          firestoreMap[key] = { ...data, id: key };
-        }
-      });
-      saveLocalWithdrawals(firestoreMap);
-      const list = Object.values(firestoreMap).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      callback(list);
-    }, (error) => {
-      console.warn("Firestore subscribeToAllWithdrawals error:", error);
-      const list = Object.values(getLocalWithdrawals()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      callback(list);
-    });
-    return unsub;
-  } catch (error) {
-    console.warn("Firestore subscribeToAllWithdrawals catch error:", error);
+  const handleFallback = () => {
     const list = Object.values(getLocalWithdrawals()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     callback(list);
-    return () => {};
-  }
+  };
+
+  return safeOnSnapshot(collection(db, "withdrawals"), (snapshot) => {
+    const firestoreMap: Record<string, Withdrawal> = {};
+    snapshot.forEach((docSnap) => {
+      const data = docSnap.data() as Withdrawal;
+      const key = data.id || docSnap.id;
+      if (key) {
+        firestoreMap[key] = { ...data, id: key };
+      }
+    });
+    saveLocalWithdrawals(firestoreMap);
+    const list = Object.values(firestoreMap).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    callback(list);
+  }, (error) => {
+    console.warn("Firestore subscribeToAllWithdrawals error:", error);
+  }, handleFallback);
 }
 
 // 10. Admin user modification / deletion
@@ -2287,67 +2353,57 @@ export async function saveUserTasks(phone: string, tasks: Task[]): Promise<void>
 
 // Subscribe to system settings in real-time
 export function subscribeToSystemSettings(onUpdate: (settings: SystemSettings) => void): () => void {
-  if (useLocalStorageFallback) {
-    const interval = setInterval(() => {
-      onUpdate(getLocalSettings());
-    }, 2000);
-    return () => clearInterval(interval);
-  }
+  const settingsRef = doc(db, "settings", "general");
+  const handleFallback = () => {
+    onUpdate(getLocalSettings());
+  };
 
-  try {
-    const settingsRef = doc(db, "settings", "general");
-    const unsubscribe = onSnapshot(settingsRef, (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        onUpdate({
-          siteName: data.siteName ?? "BET",
-          rechargeAddress: data.rechargeAddress ?? "e738819b080a278d",
-          rechargeAddressTRC20: data.rechargeAddressTRC20 ?? "sfnmQtKLfcDarAMd",
-          rechargeAddressBEP20: data.rechargeAddressBEP20 ?? "0x71C7656EC7ab88b098defB751B7401B5f6d8976F",
-          telegramLink: data.telegramLink ?? "-fhzo.vercel.app",
-          minDeposit: Number(data.minDeposit ?? 25),
-          minWithdrawal: Number(data.minWithdrawal ?? 2),
-          holidayActive: Boolean(data.holidayActive ?? false),
-          holidayDays: data.holidayDays ?? [5],
-          globalNotification: data.globalNotification ?? "مرحباً بكم في منصتنا الميكروية الجديدة! ابدأ بالعمل اليوم وزد أرباحك.",
-          withdrawLockActive: Boolean(data.withdrawLockActive ?? false),
-          withdrawLockDays: data.withdrawLockDays ?? [5],
-          withdrawRatesInfo: data.withdrawRatesInfo ?? "رسوم معالجة السحب 15% - سعر الصرف مستقر",
-          rechargeNotice: data.rechargeNotice ?? "يرجى تحويل المبلغ المحدد فقط وتصوير إثبات التحويل لضمان سرعة معالجة شحن حسابك.",
-          rechargeNotice2: data.rechargeNotice2 ?? "",
-          withdrawNotice: data.withdrawNotice ?? "تنبيه: يتم معالجة طلبات السحب خلال 24 ساعة كحد أقصى.",
-          withdrawNotice2: data.withdrawNotice2 ?? "",
-          vipPlans: data.vipPlans ?? [
-            { id: 'plan_600', name: 'باقة 600$', price: 600, profit: 18, tasksCount: 5 },
-            { id: 'plan_1200', name: 'باقة 1200$', price: 1200, profit: 38, tasksCount: 5 }
-          ],
-          workingHoursNotice: data.workingHoursNotice ?? "💡 تنويه هام لجميع الأعضاء: يرجى العلم بأن أوقات العمل الرسمية لتنفيذ واعتماد المهام اليومية مقسمة على فترتين يومياً:\n- الفترة الأولى: من الساعة 12:00 ظهراً وحتى 05:00 عصراً.\n- الفترة الثانية: من الساعة 09:00 مساءً وحتى 01:00 ليلاً بتوقيت مكة المكرمة.",
-          enforceWorkingHours: data.enforceWorkingHours !== undefined ? Boolean(data.enforceWorkingHours) : true,
-          workStartHour: data.workStartHour !== undefined ? Number(data.workStartHour) : 12,
-          workEndHour: data.workEndHour !== undefined ? Number(data.workEndHour) : 17,
-          workStartHour2: data.workStartHour2 !== undefined ? Number(data.workStartHour2) : 21,
-          workEndHour2: data.workEndHour2 !== undefined ? Number(data.workEndHour2) : 1,
-          appDownloadUrl: data.appDownloadUrl ?? "",
-          supportAgentName: (data.supportAgentName && !data.supportAgentName.includes("مريم")) ? data.supportAgentName : "دعم فني منصة oxlo",
-          supportAgentSubtitle: (data.supportAgentSubtitle && !data.supportAgentSubtitle.includes("المالية") && !data.supportAgentSubtitle.includes("Mis")) ? data.supportAgentSubtitle : "مستشارتك المساعدة في oxlo",
-          supportAgentAvatar: data.supportAgentAvatar ?? "",
-          supportFaqs: (data.supportFaqs && data.supportFaqs.length > 4 && data.supportFaqs.some((f: any) => f.question.includes("تأسست"))) ? data.supportFaqs : defaultSupportFaqs,
-          tasksCode: data.tasksCode ?? "",
-          hideTrialPlans: data.hideTrialPlans !== undefined ? Boolean(data.hideTrialPlans) : false,
-          telegramSupportUsername: data.telegramSupportUsername ?? ""
-        });
-      }
-    }, (error) => {
-      console.warn("Error in system settings snapshot listener, falling back:", error);
-    });
-    return unsubscribe;
-  } catch (error) {
-    console.warn("Failed to subscribe to system settings:", error);
-    const interval = setInterval(() => {
+  return safeOnSnapshot(settingsRef, (docSnap) => {
+    if (docSnap.exists()) {
+      const data = docSnap.data();
+      onUpdate({
+        siteName: data.siteName ?? "BET",
+        rechargeAddress: data.rechargeAddress ?? "e738819b080a278d",
+        rechargeAddressTRC20: data.rechargeAddressTRC20 ?? "sfnmQtKLfcDarAMd",
+        rechargeAddressBEP20: data.rechargeAddressBEP20 ?? "0x71C7656EC7ab88b098defB751B7401B5f6d8976F",
+        telegramLink: data.telegramLink ?? "-fhzo.vercel.app",
+        minDeposit: Number(data.minDeposit ?? 25),
+        minWithdrawal: Number(data.minWithdrawal ?? 2),
+        holidayActive: Boolean(data.holidayActive ?? false),
+        holidayDays: data.holidayDays ?? [5],
+        globalNotification: data.globalNotification ?? "مرحباً بكم في منصتنا الميكروية الجديدة! ابدأ بالعمل اليوم وزد أرباحك.",
+        withdrawLockActive: Boolean(data.withdrawLockActive ?? false),
+        withdrawLockDays: data.withdrawLockDays ?? [5],
+        withdrawRatesInfo: data.withdrawRatesInfo ?? "رسوم معالجة السحب 15% - سعر الصرف مستقر",
+        rechargeNotice: data.rechargeNotice ?? "يرجى تحويل المبلغ المحدد فقط وتصوير إثبات التحويل لضمان سرعة معالجة شحن حسابك.",
+        rechargeNotice2: data.rechargeNotice2 ?? "",
+        withdrawNotice: data.withdrawNotice ?? "تنبيه: يتم معالجة طلبات السحب خلال 24 ساعة كحد أقصى.",
+        withdrawNotice2: data.withdrawNotice2 ?? "",
+        vipPlans: data.vipPlans ?? [
+          { id: 'plan_600', name: 'باقة 600$', price: 600, profit: 18, tasksCount: 5 },
+          { id: 'plan_1200', name: 'باقة 1200$', price: 1200, profit: 38, tasksCount: 5 }
+        ],
+        workingHoursNotice: data.workingHoursNotice ?? "💡 تنويه هام لجميع الأعضاء: يرجى العلم بأن أوقات العمل الرسمية لتنفيذ واعتماد المهام اليومية مقسمة على فترتين يومياً:\n- الفترة الأولى: من الساعة 12:00 ظهراً وحتى 05:00 عصراً.\n- الفترة الثانية: من الساعة 09:00 مساءً وحتى 01:00 ليلاً بتوقيت مكة المكرمة.",
+        enforceWorkingHours: data.enforceWorkingHours !== undefined ? Boolean(data.enforceWorkingHours) : true,
+        workStartHour: data.workStartHour !== undefined ? Number(data.workStartHour) : 12,
+        workEndHour: data.workEndHour !== undefined ? Number(data.workEndHour) : 17,
+        workStartHour2: data.workStartHour2 !== undefined ? Number(data.workStartHour2) : 21,
+        workEndHour2: data.workEndHour2 !== undefined ? Number(data.workEndHour2) : 1,
+        appDownloadUrl: data.appDownloadUrl ?? "",
+        supportAgentName: (data.supportAgentName && !data.supportAgentName.includes("مريم")) ? data.supportAgentName : "دعم فني منصة oxlo",
+        supportAgentSubtitle: (data.supportAgentSubtitle && !data.supportAgentSubtitle.includes("المالية") && !data.supportAgentSubtitle.includes("Mis")) ? data.supportAgentSubtitle : "مستشارتك المساعدة في oxlo",
+        supportAgentAvatar: data.supportAgentAvatar ?? "",
+        supportFaqs: (data.supportFaqs && data.supportFaqs.length > 4 && data.supportFaqs.some((f: any) => f.question.includes("تأسست"))) ? data.supportFaqs : defaultSupportFaqs,
+        tasksCode: data.tasksCode ?? "",
+        hideTrialPlans: data.hideTrialPlans !== undefined ? Boolean(data.hideTrialPlans) : false,
+        telegramSupportUsername: data.telegramSupportUsername ?? ""
+      });
+    } else {
       onUpdate(getLocalSettings());
-    }, 2000);
-    return () => clearInterval(interval);
-  }
+    }
+  }, (error) => {
+    console.warn("Error in system settings snapshot listener, falling back:", error);
+  }, handleFallback);
 }
 
 export async function uploadFileToStorage(file: File): Promise<string> {
@@ -2489,139 +2545,95 @@ export function subscribeToSupportMessages(
   chatId: string,
   onUpdate: (messages: SupportMessage[]) => void
 ): () => void {
-  if (useLocalStorageFallback) {
-    const interval = setInterval(() => {
-      const localChatKey = `local_chat_msg_${chatId}`;
-      onUpdate(JSON.parse(localStorage.getItem(localChatKey) || '[]'));
-    }, 1500);
-    return () => clearInterval(interval);
-  }
+  const localChatKey = `local_chat_msg_${chatId}`;
+  const getLocal = () => JSON.parse(localStorage.getItem(localChatKey) || '[]');
 
-  try {
-    const messagesCol = collection(db, "support_chats", chatId, "messages");
-    const unsubscribe = onSnapshot(messagesCol, (snapshot) => {
-      const msgs: SupportMessage[] = [];
-      snapshot.forEach((doc) => {
-        const d = doc.data();
-        msgs.push({
-          id: d.id || doc.id,
-          chatId: d.chatId || chatId,
-          text: d.text || '',
-          sender: d.sender || 'user',
-          senderName: d.senderName || '',
-          timestamp: d.timestamp || ''
-        });
+  const messagesCol = collection(db, "support_chats", chatId, "messages");
+  return safeOnSnapshot(messagesCol, (snapshot) => {
+    const msgs: SupportMessage[] = [];
+    snapshot.forEach((doc) => {
+      const d = doc.data();
+      msgs.push({
+        id: d.id || doc.id,
+        chatId: d.chatId || chatId,
+        text: d.text || '',
+        sender: d.sender || 'user',
+        senderName: d.senderName || '',
+        timestamp: d.timestamp || ''
       });
-      // Sort messages chronologically by timestamp
-      msgs.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
-      onUpdate(msgs);
-    }, (error) => {
-      console.warn("Error in live chat messages listener, falling back:", error);
-      const localChatKey = `local_chat_msg_${chatId}`;
-      onUpdate(JSON.parse(localStorage.getItem(localChatKey) || '[]'));
     });
-    return unsubscribe;
-  } catch (e) {
-    console.warn("Failed to subscribe to chat messages:", e);
-    const interval = setInterval(() => {
-      const localChatKey = `local_chat_msg_${chatId}`;
-      onUpdate(JSON.parse(localStorage.getItem(localChatKey) || '[]'));
-    }, 1500);
-    return () => clearInterval(interval);
-  }
+    // Sort messages chronologically by timestamp
+    msgs.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+    onUpdate(msgs);
+  }, (error) => {
+    console.warn("Error in live chat messages listener, falling back:", error);
+  }, () => {
+    onUpdate(getLocal());
+  });
 }
 
 export function subscribeToAllChats(
   onUpdate: (chats: SupportChat[]) => void
 ): () => void {
-  if (useLocalStorageFallback) {
-    const interval = setInterval(() => {
-      const localChats = JSON.parse(localStorage.getItem('local_db_support_chats') || '{}');
-      onUpdate(Object.values(localChats));
-    }, 2000);
-    return () => clearInterval(interval);
-  }
+  const getLocal = (): SupportChat[] => Object.values(JSON.parse(localStorage.getItem('local_db_support_chats') || '{}')) as SupportChat[];
+  const chatsCol = collection(db, "support_chats");
 
-  try {
-    const chatsCol = collection(db, "support_chats");
-    const unsubscribe = onSnapshot(chatsCol, (snapshot) => {
-      const chats: SupportChat[] = [];
-      snapshot.forEach((doc) => {
-        const d = doc.data();
-        chats.push({
-          id: doc.id,
-          username: d.username || '',
-          phone: d.phone || doc.id,
-          lastMessage: d.lastMessage || '',
-          lastMessageTime: d.lastMessageTime || '',
-          unreadByAdmin: !!d.unreadByAdmin,
-          unreadByUser: !!d.unreadByUser,
-          createdAt: d.createdAt || ''
-        });
+  return safeOnSnapshot(chatsCol, (snapshot) => {
+    const chats: SupportChat[] = [];
+    snapshot.forEach((doc) => {
+      const d = doc.data();
+      chats.push({
+        id: doc.id,
+        username: d.username || '',
+        phone: d.phone || doc.id,
+        lastMessage: d.lastMessage || '',
+        lastMessageTime: d.lastMessageTime || '',
+        unreadByAdmin: !!d.unreadByAdmin,
+        unreadByUser: !!d.unreadByUser,
+        createdAt: d.createdAt || ''
       });
-      // Sort chats with recent messages first
-      chats.sort((a, b) => b.lastMessageTime.localeCompare(a.lastMessageTime));
-      onUpdate(chats);
-    }, (error) => {
-      console.warn("Error in subscribeToAllChats, falling back:", error);
-      const localChats = JSON.parse(localStorage.getItem('local_db_support_chats') || '{}');
-      onUpdate(Object.values(localChats));
     });
-    return unsubscribe;
-  } catch (e) {
-    console.warn("Failed to subscribe to all chats:", e);
-    const interval = setInterval(() => {
-      const localChats = JSON.parse(localStorage.getItem('local_db_support_chats') || '{}');
-      onUpdate(Object.values(localChats));
-    }, 2000);
-    return () => clearInterval(interval);
-  }
+    // Sort chats with recent messages first
+    chats.sort((a, b) => b.lastMessageTime.localeCompare(a.lastMessageTime));
+    onUpdate(chats);
+  }, (error) => {
+    console.warn("Error in subscribeToAllChats, falling back:", error);
+  }, () => {
+    onUpdate(getLocal());
+  });
 }
 
 export function subscribeToUserChat(
   phone: string,
   onUpdate: (chat: SupportChat | null) => void
 ): () => void {
-  if (useLocalStorageFallback) {
-    const interval = setInterval(() => {
-      const localChats = JSON.parse(localStorage.getItem('local_db_support_chats') || '{}');
-      onUpdate(localChats[phone] || null);
-    }, 1500);
-    return () => clearInterval(interval);
-  }
+  const getLocal = () => {
+    const localChats = JSON.parse(localStorage.getItem('local_db_support_chats') || '{}');
+    return localChats[phone] || null;
+  };
+  const chatRef = doc(db, "support_chats", phone);
 
-  try {
-    const chatRef = doc(db, "support_chats", phone);
-    const unsubscribe = onSnapshot(chatRef, (docSnap) => {
-      if (docSnap.exists()) {
-        const d = docSnap.data();
-        onUpdate({
-          id: docSnap.id,
-          username: d.username || '',
-          phone: d.phone || docSnap.id,
-          lastMessage: d.lastMessage || '',
-          lastMessageTime: d.lastMessageTime || '',
-          unreadByAdmin: !!d.unreadByAdmin,
-          unreadByUser: !!d.unreadByUser,
-          createdAt: d.createdAt || ''
-        });
-      } else {
-        onUpdate(null);
-      }
-    }, (error) => {
-      console.warn("Error in subscribeToUserChat, falling back:", error);
-      const localChats = JSON.parse(localStorage.getItem('local_db_support_chats') || '{}');
-      onUpdate(localChats[phone] || null);
-    });
-    return unsubscribe;
-  } catch (e) {
-    console.warn("Failed to subscribe to user chat:", e);
-    const interval = setInterval(() => {
-      const localChats = JSON.parse(localStorage.getItem('local_db_support_chats') || '{}');
-      onUpdate(localChats[phone] || null);
-    }, 1500);
-    return () => clearInterval(interval);
-  }
+  return safeOnSnapshot(chatRef, (docSnap) => {
+    if (docSnap.exists()) {
+      const d = docSnap.data();
+      onUpdate({
+        id: docSnap.id,
+        username: d.username || '',
+        phone: d.phone || docSnap.id,
+        lastMessage: d.lastMessage || '',
+        lastMessageTime: d.lastMessageTime || '',
+        unreadByAdmin: !!d.unreadByAdmin,
+        unreadByUser: !!d.unreadByUser,
+        createdAt: d.createdAt || ''
+      });
+    } else {
+      onUpdate(null);
+    }
+  }, (error) => {
+    console.warn("Error in subscribeToUserChat, falling back:", error);
+  }, () => {
+    onUpdate(getLocal());
+  });
 }
 
 export async function markChatAsReadByAdmin(chatId: string): Promise<void> {
@@ -2726,11 +2738,11 @@ function matchesUser(notifUserId: string, target: string | User): boolean {
     if (targetUserObj.id && notifUserId === targetUserObj.id) return true;
     if (targetUserObj.phone && notifUserId === targetUserObj.phone) return true;
     if (targetUserObj.inviteCode && notifUserId === targetUserObj.inviteCode) return true;
-    if (targetUserObj.role === 'admin' && (notifUserId === 'admin' || notifUserId === 'oxlo_admin' || notifUserId === '07712345678' || notifUserId === 'ADMIN95' || notifUserId === 'OXLO95')) {
+    if (targetUserObj.role === 'admin' && (notifUserId === 'admin' || notifUserId === 'oxlo_admin' || notifUserId === '07519952000' || notifUserId === '07712345678' || notifUserId === 'ADMIN95' || notifUserId === 'OXLO95')) {
       return true;
     }
   } else {
-    if (targetPhone === 'admin' && (notifUserId === 'admin' || notifUserId === 'oxlo_admin' || notifUserId === '07712345678' || notifUserId === 'ADMIN95' || notifUserId === 'OXLO95')) {
+    if (targetPhone === 'admin' && (notifUserId === 'admin' || notifUserId === 'oxlo_admin' || notifUserId === '07519952000' || notifUserId === '07712345678' || notifUserId === 'ADMIN95' || notifUserId === 'OXLO95')) {
       return true;
     }
   }
@@ -2794,25 +2806,21 @@ export function subscribeToUserNotifications(targetUser: string | User, callback
   const localMap = getLocalNotifications();
   callback(getFilteredList(localMap));
 
-  try {
-    const q = query(collection(db, "notifications"));
-    const unsub = onSnapshot(q, (snapshot) => {
-      const fsMap: Record<string, UserNotification> = {};
-      snapshot.forEach((d) => {
-        const data = d.data() as UserNotification;
-        fsMap[data.id] = data;
-      });
-      const merged = { ...getLocalNotifications(), ...fsMap };
-      saveLocalNotifications(merged);
-      callback(getFilteredList(merged));
-    }, (error) => {
-      console.warn("subscribeToUserNotifications error:", error);
+  const q = query(collection(db, "notifications"));
+  return safeOnSnapshot(q, (snapshot) => {
+    const fsMap: Record<string, UserNotification> = {};
+    snapshot.forEach((d) => {
+      const data = d.data() as UserNotification;
+      fsMap[data.id] = data;
     });
-    return unsub;
-  } catch (error) {
-    console.warn("subscribeToUserNotifications outer error:", error);
-    return () => {};
-  }
+    const merged = { ...getLocalNotifications(), ...fsMap };
+    saveLocalNotifications(merged);
+    callback(getFilteredList(merged));
+  }, (error) => {
+    console.warn("subscribeToUserNotifications error:", error);
+  }, () => {
+    callback(getFilteredList(getLocalNotifications()));
+  });
 }
 
 export async function markNotificationAsRead(notifId: string): Promise<void> {
