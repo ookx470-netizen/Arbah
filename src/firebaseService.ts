@@ -1550,35 +1550,17 @@ export async function getAllUsers(): Promise<User[]> {
       }
     });
 
-    const mergedMap: Record<string, User> = { ...firestoreMap };
-    Object.keys(localMap).forEach(key => {
-      if (!mergedMap[key]) {
-        mergedMap[key] = localMap[key];
-      } else {
-        mergedMap[key] = {
-          ...mergedMap[key],
-          ...localMap[key]
-        };
-      }
-    });
+    const mergedMap: Record<string, User> = { ...firestoreMap, ...localMap };
 
-    // Background sync any user present in local but missing in firestore
-    if (!useLocalStorageFallback) {
-      for (const key of Object.keys(localMap)) {
-        if (!firestoreMap[key]) {
-          const missingUser = localMap[key];
-          setDoc(doc(db, "users", key), missingUser)
-            .then(() => console.log(`Background synced missing user ${key} to Firestore`))
-            .catch(e => console.warn(`Could not background sync user ${key}:`, e));
-        }
-      }
+    // Push/sync all local users to Firestore so Incognito and other browsers share them instantly
+    for (const key of Object.keys(localMap)) {
+      setDoc(doc(db, "users", key), localMap[key], { merge: true }).catch(() => {});
     }
 
     saveLocalUsers(mergedMap);
     return Object.values(mergedMap);
   } catch (error: any) {
     console.warn("Firestore getAllUsers error, falling back to local storage:", error);
-    setFallbackMode(true);
     return Object.values(localMap);
   }
 }
@@ -1599,17 +1581,7 @@ export function subscribeToAllUsers(callback: (users: User[]) => void): () => vo
       }
     });
 
-    const mergedMap: Record<string, User> = { ...firestoreMap };
-    Object.keys(localMap).forEach(key => {
-      if (!mergedMap[key]) {
-        mergedMap[key] = localMap[key];
-      } else {
-        mergedMap[key] = {
-          ...mergedMap[key],
-          ...localMap[key]
-        };
-      }
-    });
+    const mergedMap: Record<string, User> = { ...firestoreMap, ...localMap };
 
     // Ensure ONLY 07519952000 has admin role
     Object.keys(mergedMap).forEach(k => {
@@ -1618,16 +1590,9 @@ export function subscribeToAllUsers(callback: (users: User[]) => void): () => vo
       }
     });
 
-    // Background sync any user present in local but missing in firestore
-    if (!useLocalStorageFallback) {
-      for (const key of Object.keys(localMap)) {
-        if (!firestoreMap[key]) {
-          const missingUser = localMap[key];
-          setDoc(doc(db, "users", key), missingUser)
-            .then(() => console.log(`Background synced missing user ${key} to Firestore`))
-            .catch(e => console.warn(`Could not background sync user ${key}:`, e));
-        }
-      }
+    // Push/sync all local users to Firestore
+    for (const key of Object.keys(localMap)) {
+      setDoc(doc(db, "users", key), localMap[key], { merge: true }).catch(() => {});
     }
 
     saveLocalUsers(mergedMap);
