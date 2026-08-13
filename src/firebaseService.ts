@@ -482,30 +482,39 @@ export async function initializeDatabase() {
 
     // Sync any local storage users to Firestore so they are globally shared across normal and incognito browsers
     const localUsers = getLocalUsers();
-    for (const phoneKey of Object.keys(localUsers)) {
-      const u = localUsers[phoneKey];
-      if (u && phoneKey) {
-        setDoc(doc(db, "users", phoneKey), u, { merge: true }).catch(() => {});
-      }
-    }
+    await Promise.all(
+      Object.keys(localUsers).map(phoneKey => {
+        const u = localUsers[phoneKey];
+        if (u && phoneKey) {
+          return setDoc(doc(db, "users", phoneKey), u, { merge: true }).catch(() => {});
+        }
+        return Promise.resolve();
+      })
+    );
 
     // Sync local deposits to Firestore
     const localDeposits = getLocalDeposits();
-    for (const depId of Object.keys(localDeposits)) {
-      const d = localDeposits[depId];
-      if (d && depId) {
-        setDoc(doc(db, "deposits", depId), d, { merge: true }).catch(() => {});
-      }
-    }
+    await Promise.all(
+      Object.keys(localDeposits).map(depId => {
+        const d = localDeposits[depId];
+        if (d && depId) {
+          return setDoc(doc(db, "deposits", depId), d, { merge: true }).catch(() => {});
+        }
+        return Promise.resolve();
+      })
+    );
 
     // Sync local withdrawals to Firestore
     const localWithdrawals = getLocalWithdrawals();
-    for (const withId of Object.keys(localWithdrawals)) {
-      const w = localWithdrawals[withId];
-      if (w && withId) {
-        setDoc(doc(db, "withdrawals", withId), w, { merge: true }).catch(() => {});
-      }
-    }
+    await Promise.all(
+      Object.keys(localWithdrawals).map(withId => {
+        const w = localWithdrawals[withId];
+        if (w && withId) {
+          return setDoc(doc(db, "withdrawals", withId), w, { merge: true }).catch(() => {});
+        }
+        return Promise.resolve();
+      })
+    );
 
     console.log("Admin account and local data synchronized successfully with shared Firestore database!");
 
@@ -1553,9 +1562,14 @@ export async function getAllUsers(): Promise<User[]> {
     const mergedMap: Record<string, User> = { ...firestoreMap, ...localMap };
 
     // Push/sync all local users to Firestore so Incognito and other browsers share them instantly
-    for (const key of Object.keys(localMap)) {
-      setDoc(doc(db, "users", key), localMap[key], { merge: true }).catch(() => {});
-    }
+    await Promise.all(
+      Object.keys(localMap).map(key => {
+        if (!firestoreMap[key]) {
+          return setDoc(doc(db, "users", key), localMap[key], { merge: true }).catch(() => {});
+        }
+        return Promise.resolve();
+      })
+    );
 
     saveLocalUsers(mergedMap);
     return Object.values(mergedMap);
@@ -1591,9 +1605,14 @@ export function subscribeToAllUsers(callback: (users: User[]) => void): () => vo
     });
 
     // Push/sync all local users to Firestore
-    for (const key of Object.keys(localMap)) {
-      setDoc(doc(db, "users", key), localMap[key], { merge: true }).catch(() => {});
-    }
+    Promise.all(
+      Object.keys(localMap).map(key => {
+        if (!firestoreMap[key]) {
+          return setDoc(doc(db, "users", key), localMap[key], { merge: true }).catch(() => {});
+        }
+        return Promise.resolve();
+      })
+    ).catch(() => {});
 
     saveLocalUsers(mergedMap);
     callback(Object.values(mergedMap));
