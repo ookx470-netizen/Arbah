@@ -32,7 +32,6 @@ import {
   sendSupportMessage,
   markChatAsReadByAdmin
 } from '../firebaseService';
-import { onSnapshot, doc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { User, Deposit, Withdrawal, SystemSettings, VipPlan, UserNotification, SupportChat, SupportMessage } from '../types';
 import { formatHourToArabic, calculateRemainingEffectiveDays } from '../utils';
@@ -1800,7 +1799,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                     required
                     value={adminPhoneInput}
                     onChange={(e) => setAdminPhoneInput(e.target.value)}
-                    placeholder="مثال: 07712345678"
+                    placeholder="مثال: 07519952000"
                     className="w-full px-3 py-2.5 bg-[#070D19] border border-blue-900/50 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-[#F39C12] text-center font-mono"
                     dir="ltr"
                   />
