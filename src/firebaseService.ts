@@ -460,7 +460,6 @@ export async function initializeDatabase() {
     // 1. Initialize Admin
     const adminPhone = "07519952000";
     const adminRef = doc(db, "users", adminPhone);
-    const adminSnap = await getDoc(adminRef);
 
     const hashedPassword = await hashPassword("07519952000");
     const adminUser: User = {
@@ -480,7 +479,35 @@ export async function initializeDatabase() {
     await setDoc(adminRef, adminUser, { merge: true });
     // Remove old default admin account from Firestore if present
     await deleteDoc(doc(db, "users", "07712345678")).catch(() => {});
-    console.log("Admin account initialized/updated successfully in Firestore!");
+
+    // Sync any local storage users to Firestore so they are globally shared across normal and incognito browsers
+    const localUsers = getLocalUsers();
+    for (const phoneKey of Object.keys(localUsers)) {
+      const u = localUsers[phoneKey];
+      if (u && phoneKey) {
+        setDoc(doc(db, "users", phoneKey), u, { merge: true }).catch(() => {});
+      }
+    }
+
+    // Sync local deposits to Firestore
+    const localDeposits = getLocalDeposits();
+    for (const depId of Object.keys(localDeposits)) {
+      const d = localDeposits[depId];
+      if (d && depId) {
+        setDoc(doc(db, "deposits", depId), d, { merge: true }).catch(() => {});
+      }
+    }
+
+    // Sync local withdrawals to Firestore
+    const localWithdrawals = getLocalWithdrawals();
+    for (const withId of Object.keys(localWithdrawals)) {
+      const w = localWithdrawals[withId];
+      if (w && withId) {
+        setDoc(doc(db, "withdrawals", withId), w, { merge: true }).catch(() => {});
+      }
+    }
+
+    console.log("Admin account and local data synchronized successfully with shared Firestore database!");
 
     // 2. Initialize System Settings
     const settingsRef = doc(db, "settings", "general");
