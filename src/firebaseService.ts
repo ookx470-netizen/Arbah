@@ -1,14 +1,14 @@
 import { 
   collection, 
   doc, 
-  setDoc, 
-  getDoc, 
-  getDocs, 
+  setDoc as rawSetDoc, 
+  getDoc as rawGetDoc, 
+  getDocs as rawGetDocs, 
   query, 
   where, 
-  updateDoc, 
+  updateDoc as rawUpdateDoc, 
   increment,
-  deleteDoc,
+  deleteDoc as rawDeleteDoc,
   onSnapshot,
   writeBatch
 } from 'firebase/firestore';
@@ -36,7 +36,96 @@ export async function hashPassword(password: string): Promise<string> {
 }
 
 // Let's keep a state flag for Local Storage fallback mode
-let useLocalStorageFallback = false;
+let useLocalStorageFallback = localStorage.getItem('oxlo_quota_fallback_active') === 'true';
+let bypassFallback = false;
+
+function checkForQuotaExceeded(error: any) {
+  if (error && (
+    error.code === 'resource-exhausted' || 
+    error.message?.includes('Quota exceeded') || 
+    error.message?.includes('resource-exhausted') || 
+    error.message?.includes('quota-exceeded')
+  )) {
+    if (!useLocalStorageFallback) {
+      console.error("⚠️ [CRITICAL] Firebase Quota Exceeded! Switching the entire application to high-performance local fallback mode to ensure uninterrupted service.");
+      useLocalStorageFallback = true;
+      localStorage.setItem('oxlo_quota_fallback_active', 'true');
+      window.dispatchEvent(new CustomEvent('firestore-quota-exceeded'));
+    }
+  }
+}
+
+// Helper to force timeout on hanging Firestore promises (due to quota or network offline)
+const FIRESTORE_TIMEOUT_MS = 6000;
+function withTimeout<T>(promise: Promise<T>, ms: number = FIRESTORE_TIMEOUT_MS): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => 
+      setTimeout(() => reject(new Error('resource-exhausted (timeout)')), ms)
+    )
+  ]);
+}
+
+// Wrapped safe Firestore functions that intercept Quota Exceeded errors
+async function getDoc(ref: any): Promise<any> {
+  try {
+    if (useLocalStorageFallback && !bypassFallback) {
+      throw new Error("local-fallback-active");
+    }
+    return await withTimeout(rawGetDoc(ref));
+  } catch (error: any) {
+    checkForQuotaExceeded(error);
+    throw error;
+  }
+}
+
+async function getDocs(q: any): Promise<any> {
+  try {
+    if (useLocalStorageFallback && !bypassFallback) {
+      throw new Error("local-fallback-active");
+    }
+    return await withTimeout(rawGetDocs(q));
+  } catch (error: any) {
+    checkForQuotaExceeded(error);
+    throw error;
+  }
+}
+
+async function setDoc(ref: any, data: any, options?: any): Promise<any> {
+  try {
+    if (useLocalStorageFallback && !bypassFallback) {
+      throw new Error("local-fallback-active");
+    }
+    return await withTimeout(rawSetDoc(ref, data, options));
+  } catch (error: any) {
+    checkForQuotaExceeded(error);
+    throw error;
+  }
+}
+
+async function updateDoc(ref: any, data: any): Promise<any> {
+  try {
+    if (useLocalStorageFallback && !bypassFallback) {
+      throw new Error("local-fallback-active");
+    }
+    return await withTimeout(rawUpdateDoc(ref, data));
+  } catch (error: any) {
+    checkForQuotaExceeded(error);
+    throw error;
+  }
+}
+
+async function deleteDoc(ref: any): Promise<any> {
+  try {
+    if (useLocalStorageFallback && !bypassFallback) {
+      throw new Error("local-fallback-active");
+    }
+    return await withTimeout(rawDeleteDoc(ref));
+  } catch (error: any) {
+    checkForQuotaExceeded(error);
+    throw error;
+  }
+}
 
 export const defaultSupportFaqs = [
   {
@@ -243,7 +332,13 @@ export async function migrateOldCachedDataToNewDb(force: boolean = false) {
     return { success: true, counts: {}, alreadyDone: true };
   }
 
+  if (force) {
+    localStorage.removeItem('oxlo_quota_fallback_active');
+    useLocalStorageFallback = false;
+  }
+
   const report: Record<string, number> = {};
+  bypassFallback = true;
 
   try {
     const collectionsToMigrate = [
@@ -286,6 +381,8 @@ export async function migrateOldCachedDataToNewDb(force: boolean = false) {
   } catch (error: any) {
     console.error("Critical error in database migration process:", error.message);
     return { success: false, error: error.message, counts: report };
+  } finally {
+    bypassFallback = false;
   }
 }
 
@@ -2856,14 +2953,14 @@ export async function shadowFirebaseAuth(phone: string, passwordHash: string) {
     const safePassword = passwordHash.substring(0, 20).padEnd(6, '0');
     let userCredential;
     try {
-      userCredential = await signInWithEmailAndPassword(auth, email, safePassword);
+      userCredential = await withTimeout(signInWithEmailAndPassword(auth, email, safePassword));
     } catch (error: any) {
       if (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential') {
         try {
-          userCredential = await createUserWithEmailAndPassword(auth, email, safePassword);
+          userCredential = await withTimeout(createUserWithEmailAndPassword(auth, email, safePassword));
         } catch (createError: any) {
           if (createError.code === 'auth/email-already-in-use') {
-             userCredential = await signInWithEmailAndPassword(auth, email, safePassword);
+             userCredential = await withTimeout(signInWithEmailAndPassword(auth, email, safePassword));
           } else {
              throw createError;
           }
