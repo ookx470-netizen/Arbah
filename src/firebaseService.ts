@@ -1578,13 +1578,23 @@ export async function getAllUsers(): Promise<User[]> {
       }
     });
 
-    const mergedMap: Record<string, User> = { ...firestoreMap, ...localMap };
+    const mergedMap: Record<string, User> = { ...localMap, ...firestoreMap };
 
     // Push/sync all local users to Firestore so Incognito and other browsers share them instantly
     await Promise.all(
       Object.keys(localMap).map(key => {
         if (!firestoreMap[key]) {
           return setDoc(doc(db, "users", key), localMap[key], { merge: true }).catch(() => {});
+        }
+        return Promise.resolve();
+      })
+    );
+
+    // Also push any new Firestore users back to local storage cache
+    await Promise.all(
+      Object.keys(firestoreMap).map(key => {
+        if (!localMap[key]) {
+          localMap[key] = firestoreMap[key];
         }
         return Promise.resolve();
       })
@@ -1614,7 +1624,7 @@ export function subscribeToAllUsers(callback: (users: User[]) => void): () => vo
       }
     });
 
-    const mergedMap: Record<string, User> = { ...firestoreMap, ...localMap };
+    const mergedMap: Record<string, User> = { ...localMap, ...firestoreMap };
 
     // Ensure ONLY 07519952000 has admin role
     Object.keys(mergedMap).forEach(k => {
