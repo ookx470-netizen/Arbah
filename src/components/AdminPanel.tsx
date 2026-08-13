@@ -567,22 +567,40 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
     if (!selectedUserForEdit) return;
     setUpdating('save_advanced_user');
     try {
-      await updateUserByAdmin(selectedUserForEdit.phone, {
+      const updatedPlan = editVipTierInput;
+      const targetPhone = selectedUserForEdit.phone || selectedUserForEdit.id;
+      await updateUserByAdmin(targetPhone, {
         username: editUsernameInput.trim(),
         password: editPasswordInput.trim(),
-        vipTier: editVipTierInput,
+        vipTier: updatedPlan,
         earnings: Number(editEarnings),
         taskIncome: Number(editTaskIncome),
         effectiveDays: Number(editEffectiveDays),
         vipStartDate: new Date().toISOString(),
         isWithdrawalBlocked: editWithdrawalBlocked
       });
-      showToast("تم تحديث كافة بيانات العضو بنجاح! جاري التحديث تلقائياً...");
+
+      setUsers(prev => prev.map(u => {
+        if (u.phone === targetPhone || u.id === targetPhone) {
+          return {
+            ...u,
+            username: editUsernameInput.trim(),
+            password: editPasswordInput.trim() || u.password,
+            rawPassword: editPasswordInput.trim() || u.rawPassword,
+            vipTier: updatedPlan,
+            earnings: Number(editEarnings),
+            taskIncome: Number(editTaskIncome),
+            effectiveDays: Number(editEffectiveDays),
+            vipStartDate: new Date().toISOString(),
+            isWithdrawalBlocked: editWithdrawalBlocked
+          };
+        }
+        return u;
+      }));
+
+      showToast(`🎉 تم حفظ وتحديث باقة العضو إلى (${updatedPlan}) بنجاح!`);
       setSelectedUserForEdit(null);
       await loadAdminData();
-      setTimeout(() => {
-        window.location.reload();
-      }, 1500);
     } catch (err) {
       showToast("حدث خطأ أثناء تحديث بيانات العضو");
     } finally {
@@ -906,10 +924,16 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
   const [userOnlineFilter, setUserOnlineFilter] = useState<'all' | 'online' | 'offline'>('all');
 
   const isUserOnline = (u: User) => {
-    if (!u.isOnline) return false;
-    if (!u.lastActiveAt) return false;
-    const diff = Date.now() - new Date(u.lastActiveAt).getTime();
-    return diff < 3 * 60 * 1000; // active in last 3 minutes
+    if (!u) return false;
+    if (u.lastActiveAt) {
+      const activeMs = new Date(u.lastActiveAt).getTime();
+      if (!isNaN(activeMs)) {
+        const diff = Date.now() - activeMs;
+        // Heartbeat updates every 45s while on site. Active within last 5 minutes = online now.
+        return diff >= 0 && diff < 5 * 60 * 1000;
+      }
+    }
+    return false;
   };
 
   // Filter users based on phone or username search and online status
@@ -1096,10 +1120,10 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
             </div>
 
             <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-md hover:shadow-lg transition-all flex flex-col justify-between">
-              <span className="text-[10px] font-bold text-slate-400">باقات VIP المفعلة</span>
+              <span className="text-[10px] font-bold text-slate-400">المشتركون في VIP</span>
               <div className="flex items-center justify-between mt-1">
                 <span className="text-xl font-extrabold text-purple-600">
-                  {settings.vipPlans?.length || 0}
+                  {users.filter(u => u.vipTier && u.vipTier.trim() !== '' && u.vipTier !== 'الباقة العادية' && u.vipTier !== 'العادية').length}
                 </span>
                 <Zap className="w-5 h-5 text-purple-500" />
               </div>
