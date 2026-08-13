@@ -466,16 +466,6 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
       return;
     }
 
-    const subscribedUsers = users.filter(u => {
-      const tier = (u.vipTier || '').trim();
-      return tier !== '' && tier !== 'الباقة العادية' && tier !== 'العادية';
-    });
-
-    if (subscribedUsers.length === 0) {
-      showToast("⚠️ لا يوجد أي أعضاء مشتركين في باقة VIP حالياً لإرسال الرمز لهم.");
-      return;
-    }
-
     if (!confirmed) {
       setShowSendCodeConfirm(true);
       return;
@@ -483,17 +473,16 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
 
     setShowSendCodeConfirm(false);
     setSendingNotification(true);
-    let successCount = 0;
     try {
       const msg = `🔑 رمز المهام اليومي الجديد لفتح السجل الخاص بك هو: ${code}`;
-      for (const user of subscribedUsers) {
-        await createNotification(user.phone, msg);
-        successCount++;
-      }
-      showToast(`🎉 تم إرسال الرمز اليومي بنجاح إلى جرس إشعارات ${successCount} عضو مشترك في VIP!`);
+      
+      // Send a single broadcast notification to all users instantly
+      await createNotification('broadcast', msg);
+      
+      showToast(`🎉 تم إرسال الرمز اليومي بنجاح إلى جرس إشعارات جميع المستخدمين! 📢`);
     } catch (err) {
-      console.error("Error sending daily code to subscribers:", err);
-      showToast("⚠️ حدث خطأ أثناء إرسال الإشعارات للأعضاء.");
+      console.error("Error sending daily code to all users:", err);
+      showToast("⚠️ حدث خطأ أثناء إرسال الإشعار.");
     } finally {
       setSendingNotification(false);
     }
@@ -2504,7 +2493,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                         showSendCodeConfirm ? (
                           <div className="mt-3 bg-blue-950/40 border border-blue-800/40 p-2.5 rounded-xl flex flex-col gap-2 animate-fadeIn text-center">
                             <span className="text-[10px] text-teal-300 font-extrabold leading-relaxed">
-                              هل أنت متأكد من إرسال رمز المهام اليومي ({tasksCodeInput.trim()}) إلى جرس إشعارات المشتركين VIP؟
+                              هل أنت متأكد من إرسال رمز المهام اليومي ({tasksCodeInput.trim()}) إلى جرس إشعارات جميع المستخدمين؟
                             </span>
                             <div className="flex gap-2 justify-center">
                               <button
@@ -2537,7 +2526,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                             ) : (
                               <Bell className="w-3.5 h-3.5" />
                             )}
-                            <span>📢 إرسال الرمز الحالي إلى جرس إشعارات المشتركين فقط</span>
+                            <span>📢 إرسال الرمز الحالي إلى جرس إشعارات جميع المستخدمين 🚀</span>
                           </button>
                         )
                       )}
