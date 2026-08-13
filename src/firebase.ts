@@ -14,15 +14,8 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 
-// ⚠️ DATABASE SELECTION / خيارات قاعدة البيانات:
-// To use the unlimited default database with Blaze plan (highly recommended):
-// لتشغيل قاعدة البيانات الافتراضية المفتوحة وبلا أي حدود بعد الترحيل:
-export const db = getFirestore(app);
-
-// To use the limited custom database (currently capped at 50,000 reads/day):
-// لتشغيل قاعدة البيانات المخصصة الحالية (التي تقفل عند 50 ألف قراءة):
-// export const db = getFirestore(app, "ai-studio-imagegallery-a44d0f4b-f3bd-412d-9cdd-d5863b832b78");
-
+// Initialize the provisioned Firestore database
+export const db = getFirestore(app, "ai-studio-imagegallery-a44d0f4b-f3bd-412d-9cdd-d5863b832b78");
 export const oldDb = db;
 
 export const storage = getStorage(app);

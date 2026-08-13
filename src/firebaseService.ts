@@ -36,36 +36,17 @@ export async function hashPassword(password: string): Promise<string> {
 }
 
 // Let's keep a state flag for Local Storage fallback mode
-let useLocalStorageFallback = false;
-// Clear sticky offline fallback on load to automatically heal and reconnect to Firestore when Blaze plan is active or quota resets!
+// Clear any sticky offline fallback immediately to cure and reconnect stuck/old phones to the online Firestore database!
 try {
   localStorage.removeItem('oxlo_quota_fallback_active');
 } catch (e) {
   console.warn(e);
 }
-let bypassFallback = false;
+let useLocalStorageFallback = false;
+let bypassFallback = true;
 
 function checkForQuotaExceeded(error: any) {
-  if (!error) return;
-  const errMsg = error.message || String(error);
-  if (
-    errMsg.includes('Quota exceeded') ||
-    errMsg.includes('quota') ||
-    errMsg.includes('Quota limit exceeded') ||
-    errMsg.includes('RESOURCE_EXHAUSTED') ||
-    errMsg.includes('quota-exceeded')
-  ) {
-    if (!useLocalStorageFallback) {
-      console.warn("⚠️ Firebase Quota Limit Exceeded detected! Activating Local Storage Fallback Mode.");
-      useLocalStorageFallback = true;
-      try {
-        localStorage.setItem('oxlo_quota_fallback_active', 'true');
-      } catch (e) {}
-      try {
-        window.dispatchEvent(new Event('quota_fallback_activated'));
-      } catch (e) {}
-    }
-  }
+  // Direct online Firestore mode enabled
 }
 
 // Helper to force timeout on hanging Firestore promises
@@ -1578,23 +1559,13 @@ export async function getAllUsers(): Promise<User[]> {
       }
     });
 
-    const mergedMap: Record<string, User> = { ...localMap, ...firestoreMap };
+    const mergedMap: Record<string, User> = { ...firestoreMap, ...localMap };
 
     // Push/sync all local users to Firestore so Incognito and other browsers share them instantly
     await Promise.all(
       Object.keys(localMap).map(key => {
         if (!firestoreMap[key]) {
           return setDoc(doc(db, "users", key), localMap[key], { merge: true }).catch(() => {});
-        }
-        return Promise.resolve();
-      })
-    );
-
-    // Also push any new Firestore users back to local storage cache
-    await Promise.all(
-      Object.keys(firestoreMap).map(key => {
-        if (!localMap[key]) {
-          localMap[key] = firestoreMap[key];
         }
         return Promise.resolve();
       })
@@ -1624,7 +1595,7 @@ export function subscribeToAllUsers(callback: (users: User[]) => void): () => vo
       }
     });
 
-    const mergedMap: Record<string, User> = { ...localMap, ...firestoreMap };
+    const mergedMap: Record<string, User> = { ...firestoreMap, ...localMap };
 
     // Ensure ONLY 07519952000 has admin role
     Object.keys(mergedMap).forEach(k => {
