@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getUserByPhone, registerUser, getSystemSettings, hashPassword, recordUserLogin, shadowFirebaseAuth, migrateOldCachedDataToNewDb } from '../firebaseService';
+import { getUserByPhone, registerUser, getSystemSettings, hashPassword, recordUserLogin, shadowFirebaseAuth } from '../firebaseService';
 import { User } from '../types';
 import { ShieldCheck, Phone, Lock, User as UserIcon, Award, RefreshCw, CheckCircle2, AlertTriangle, XCircle, Sun, Moon } from 'lucide-react';
 import { COUNTRY_LIST, CountryInfo } from '../utils/phoneValidation';
@@ -22,29 +22,6 @@ export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
   const [globalNotification, setGlobalNotification] = useState<string>(settings?.globalNotification ?? '');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
-
-  const [migrationLoading, setMigrationLoading] = useState<boolean>(false);
-  const [migrationReport, setMigrationReport] = useState<any>(null);
-
-  const handleManualMigration = async () => {
-    setMigrationLoading(true);
-    setErrorMsg(null);
-    setSuccessMsg(null);
-    try {
-      const result = await migrateOldCachedDataToNewDb(true); // force migration online
-      if (result && result.success) {
-        setMigrationReport(result.counts);
-        const userCount = result.counts?.users || 0;
-        setSuccessMsg(`🎉 تم نقل ومزامنة البيانات بنجاح! تم العثور على ونقل ${userCount} مستخدم من قاعدة البيانات السابقة إلى مشروعك الجديد.`);
-      } else {
-        setErrorMsg(`⚠️ فشل نقل البيانات: ${result?.error || 'حدث خطأ أثناء الاتصال بقاعدة البيانات القديمة.'}`);
-      }
-    } catch (err: any) {
-      setErrorMsg(`⚠️ فشل نقل البيانات: ${err.message}`);
-    } finally {
-      setMigrationLoading(false);
-    }
-  };
 
   // Handle settings updates from prop
   useEffect(() => {
@@ -154,12 +131,10 @@ export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
           throw new Error("كلمة المرور غير صحيحة!");
         }
 
-        await shadowFirebaseAuth(user.phone, user.password || user.id);
+        shadowFirebaseAuth(user.phone, user.password || user.id).catch(e => console.warn(e));
         recordUserLogin(user.phone || user.id).catch(e => console.warn(e));
-        setSuccessMsg("تم تسجيل الدخول بنجاح! جاري توجيهك...");
-        setTimeout(() => {
-          onLoginSuccess(user!);
-        }, 1000);
+        setSuccessMsg("تم تسجيل الدخول بنجاح!");
+        onLoginSuccess(user);
 
       } else {
         if (!fullName.trim()) {
@@ -179,12 +154,10 @@ export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
           inviteCode.trim()
         );
 
-        await shadowFirebaseAuth(registeredUser.phone, registeredUser.password || registeredUser.id);
+        shadowFirebaseAuth(registeredUser.phone, registeredUser.password || registeredUser.id).catch(e => console.warn(e));
         
-        setSuccessMsg(`🎉 تم إنشاء حسابك بنجاح! كود الدعوة الخاص بك هو (${registeredUser.inviteCode}). جاري التوجيه التلقائي...`);
-        setTimeout(() => {
-          onLoginSuccess(registeredUser);
-        }, 1200);
+        setSuccessMsg(`🎉 تم إنشاء حسابك بنجاح! كود الدعوة الخاص بك هو (${registeredUser.inviteCode}).`);
+        onLoginSuccess(registeredUser);
       }
     } catch (err: any) {
       setErrorMsg(err.message || "حدث خطأ غير متوقع. الرجاء المحاولة لاحقاً.");
@@ -462,52 +435,6 @@ export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
                 <span>لديك حساب بالفعل؟ <strong className="text-blue-600 underline">تسجيل الدخول</strong></span>
               )}
             </button>
-          </div>
-
-          {/* Manual Data Migration Assistant (Admin/Support feature) */}
-          <div className="mt-4 pt-4 border-t border-slate-100 space-y-3">
-            <p className="text-[10px] text-slate-400 font-black text-center">
-              هل تواجه مشكلة في تسجيل الدخول للحسابات السابقة؟
-            </p>
-            <button
-              type="button"
-              disabled={migrationLoading}
-              onClick={handleManualMigration}
-              className="w-full py-3 px-4 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-2xl font-black text-[10px] flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50 cursor-pointer border border-blue-200/50"
-            >
-              {migrationLoading ? (
-                <>
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-600" />
-                  <span>جاري استرداد ونقل المستخدمين (52+)...</span>
-                </>
-              ) : (
-                <>
-                  <RefreshCw className="w-3.5 h-3.5 text-blue-600" />
-                  <span>مزامنة واستعادة كافة البيانات والمستخدمين الآن 🔄</span>
-                </>
-              )}
-            </button>
-            {migrationReport && (
-              <div className="bg-slate-50 border border-slate-100 rounded-2xl p-3 text-right space-y-1.5">
-                <p className="text-[9px] font-black text-slate-500 text-center border-b border-slate-200/50 pb-1.5">
-                  📊 تقرير النقل والمزامنة المباشر:
-                </p>
-                <div className="grid grid-cols-2 gap-2 text-[9px] font-black text-slate-600">
-                  <div className="bg-white p-1.5 rounded-lg border border-slate-100 text-center">
-                    الحسابات: <strong className="text-emerald-600">{migrationReport.users ?? 0}</strong>
-                  </div>
-                  <div className="bg-white p-1.5 rounded-lg border border-slate-100 text-center">
-                    الطلبات: <strong className="text-blue-600">{migrationReport.deposits ?? 0}</strong>
-                  </div>
-                  <div className="bg-white p-1.5 rounded-lg border border-slate-100 text-center">
-                    السحوبات: <strong className="text-indigo-600">{migrationReport.withdrawals ?? 0}</strong>
-                  </div>
-                  <div className="bg-white p-1.5 rounded-lg border border-slate-100 text-center">
-                    المهام: <strong className="text-amber-600">{migrationReport.tasks ?? 0}</strong>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         </div>
       </div>

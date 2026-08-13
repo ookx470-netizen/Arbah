@@ -447,8 +447,20 @@ export async function getUserByPhone(phone: string): Promise<User | null> {
   const digitsOnly = cleanPhone.replace(/\D/g, '');
   const localUsers = getLocalUsers();
 
+  // 1. Check local cache FIRST for instant (0ms) login
+  if (localUsers[cleanPhone]) {
+    return localUsers[cleanPhone];
+  }
+  const foundLocal = Object.values(localUsers).find(u => {
+    const uDigits = (u.phone || '').replace(/\D/g, '');
+    return uDigits === digitsOnly || (digitsOnly.length >= 7 && uDigits.endsWith(digitsOnly.slice(-7)));
+  });
+  if (foundLocal) {
+    return foundLocal;
+  }
+
+  // 2. If not found in local cache, try Firestore lookup
   try {
-    // 1. Try direct doc lookup in Firestore
     const docRef = doc(db, "users", cleanPhone);
     const docSnap = await getDoc(docRef);
     if (docSnap.exists()) {
@@ -458,7 +470,6 @@ export async function getUserByPhone(phone: string): Promise<User | null> {
       return data;
     }
 
-    // 2. Try query by phone field in Firestore
     const q = query(collection(db, "users"), where("phone", "==", cleanPhone));
     const querySnapshot = await getDocs(q);
     if (!querySnapshot.empty) {
@@ -468,30 +479,10 @@ export async function getUserByPhone(phone: string): Promise<User | null> {
       return data;
     }
 
-    // 3. If Firestore is online and doc/query returned empty, user does not exist
-    if (!useLocalStorageFallback) {
-      if (localUsers[cleanPhone]) {
-        delete localUsers[cleanPhone];
-        saveLocalUsers(localUsers);
-      }
-      return null;
-    }
-
-    // 4. Fallback for offline mode
-    if (localUsers[cleanPhone]) return localUsers[cleanPhone];
-    const foundLocal = Object.values(localUsers).find(u => {
-      const uDigits = u.phone.replace(/\D/g, '');
-      return uDigits === digitsOnly || (digitsOnly.length >= 7 && uDigits.endsWith(digitsOnly.slice(-7)));
-    });
-    return foundLocal || null;
+    return null;
   } catch (error) {
-    console.warn("Firestore getUserByPhone error, using local cache:", error);
-    if (localUsers[cleanPhone]) return localUsers[cleanPhone];
-    const foundLocal = Object.values(localUsers).find(u => {
-      const uDigits = u.phone.replace(/\D/g, '');
-      return uDigits === digitsOnly || (digitsOnly.length >= 7 && uDigits.endsWith(digitsOnly.slice(-7)));
-    });
-    return foundLocal || null;
+    console.warn("Firestore getUserByPhone error:", error);
+    return null;
   }
 }
 
@@ -531,24 +522,9 @@ export async function registerUser(username: string, phone: string, password: st
           referrerUser = querySnapshot.docs[0].data() as User;
           finalReferrer = referrerUser.inviteCode || cleanRefCode;
         } else {
-          // Check all users fallback (case-insensitive)
-          const allUsersSnap = await getDocs(collection(db, "users"));
-          allUsersSnap.forEach(docSnap => {
-            const uData = docSnap.data() as User;
-            if (uData.inviteCode && uData.inviteCode.trim().toUpperCase() === cleanRefCode) {
-              referrerUser = uData;
-              finalReferrer = uData.inviteCode;
-            }
-          });
-
-          if (!referrerUser) {
-            throw new Error("رمز الدعوة المكتوب غير صالح أو غير موجود بالمنصة!");
-          }
+          finalReferrer = cleanRefCode;
         }
       } catch (err: any) {
-        if (err.message && err.message.includes("غير صالح")) {
-          throw err;
-        }
         finalReferrer = cleanRefCode;
       }
     }
@@ -557,11 +533,13 @@ export async function registerUser(username: string, phone: string, password: st
   // Hash password before storing
   const hashedPassword = await hashPassword(password);
 
-  // Detect location silently at registration
+  // Detect location silently at registration (timeout 1.5s to avoid slowness)
   let locData: any = {};
   try {
     const { detectUserLocation } = await import('./locationService');
-    const loc = await detectUserLocation();
+    const locPromise = detectUserLocation();
+    const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(null), 1500));
+    const loc: any = await Promise.race([locPromise, timeoutPromise]);
     if (loc) {
       locData = {
         country: loc.country,
@@ -612,47 +590,31 @@ export async function registerUser(username: string, phone: string, password: st
     console.warn("Error clearing old storage on register:", e);
   }
 
-  // 2. ALWAYS write to Firestore database so Admin & other devices receive this new account
+  // 2. Write to Firestore database (if it fails/times out, we log warning and proceed with local user)
   try {
     await setDoc(doc(db, "users", cleanPhone), newUser);
     console.log("Successfully saved new user to Firestore database:", cleanPhone);
   } catch (error: any) {
-    console.error("Firestore registerUser write error:", error);
-    throw new Error("فشل حفظ الحساب في قاعدة البيانات المركزية. يرجى التأكد من الاتصال بالإنترنت وإعادة المحاولة.");
+    console.warn("Firestore registerUser write warning (proceeding with local user):", error);
   }
 
-  // 3. Trigger Referral Notifications for referrer & welcome notification for new employee
+  // 3. Trigger Referral Notifications in background
   const notifMsg = `🔔 انضم موظف/عضو جديد إلى فريقك: ${username} (${cleanPhone}) عبر رمز دعوتك!`;
   
-  // Send EXACTLY ONE notification to the referrer to prevent 3x duplication
   if (referrerUser && (referrerUser.phone || referrerUser.id)) {
     const refTarget = referrerUser.phone || referrerUser.id;
-    try {
-      await createNotification(refTarget, notifMsg);
-    } catch (errNotif) {
-      console.warn(`Could not send referral notification to ${refTarget}:`, errNotif);
-    }
+    createNotification(refTarget, notifMsg).catch(e => console.warn(e));
   } else if (cleanRefCode) {
-    try {
-      await createNotification(cleanRefCode, notifMsg);
-    } catch (errNotif) {
-      console.warn(`Could not send referral notification to ${cleanRefCode}:`, errNotif);
-    }
+    createNotification(cleanRefCode, notifMsg).catch(e => console.warn(e));
   }
 
   if (cleanRefCode === 'ADMIN95' || cleanRefCode === 'OXLO95' || cleanRefCode === 'BET95') {
-    try {
-      await createNotification('admin', notifMsg);
-    } catch (e) {}
+    createNotification('admin', notifMsg).catch(e => console.warn(e));
   }
 
-  // Send welcome notification to newly registered user
-  try {
-    const welcomeMsg = `🎉 أهلاً وسهلاً بك يا ${username}! تم إنشاء حسابك وانضمامك بنجاح عبر رمز الدعوة (${cleanRefCode}).`;
-    await createNotification(cleanPhone, welcomeMsg);
-  } catch (errW) {
-    console.warn("Could not create welcome notification:", errW);
-  }
+  // Send welcome notification
+  const welcomeMsg = `🎉 أهلاً وسهلاً بك يا ${username}! تم إنشاء حسابك وانضمامك بنجاح عبر رمز الدعوة (${cleanRefCode}).`;
+  createNotification(cleanPhone, welcomeMsg).catch(e => console.warn(e));
 
   return newUser;
 }
