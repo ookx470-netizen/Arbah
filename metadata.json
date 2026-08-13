@@ -1,0 +1,6 @@
+{
+  "name": "المركز الشخصي للمهام والأرباح",
+  "description": "منصة لإتمام المهام اليومية، شحن وسحب الأرباح عبر USDT Polygon، مع نظام فريق، وربط محفظة، ولوحة تحكم للإدارة.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

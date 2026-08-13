@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OXLO - المنصة الرقمية الرسمية</title>
+    <meta name="description" content="منصة OXLO الرسمية للمهام والأرباح الرقمية" />
+    <style>
+      /* Prevent text selection and image dragging */
+      body {
+        -webkit-user-select: none;
+        -ms-user-select: none;
+        user-select: none;
+        -webkit-touch-callout: none;
+      }
+      img {
+        pointer-events: none;
+      }
+    </style>
+    <script>
+      // Prevent Right Click
+      document.addEventListener('contextmenu', event => event.preventDefault());
+      
+      // Prevent F12, Ctrl+Shift+I, Ctrl+Shift+J, Ctrl+U
+      document.onkeydown = function(e) {
+        if (e.keyCode == 123) { return false; }
+        if (e.ctrlKey && e.shiftKey && e.keyCode == 73) { return false; }
+        if (e.ctrlKey && e.shiftKey && e.keyCode == 74) { return false; }
+        if (e.ctrlKey && e.keyCode == 85) { return false; }
+      };
+      
+      // Prevent console opening via debugger loop
+      setInterval(function() {
+        var before = new Date().getTime();
+        debugger;
+        var after = new Date().getTime();
+        if (after - before > 100) {
+           document.body.innerHTML = "تم إيقاف النظام لأسباب أمنية.";
+        }
+      }, 100);
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
