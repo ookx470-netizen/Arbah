@@ -16,6 +16,21 @@ import { db, oldDb, storage } from './firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { User, Deposit, Withdrawal, SystemSettings, Task, SupportMessage, SupportChat, SupportFaq, UserNotification } from './types';
 
+// Safe global mock for localStorage when running on Node.js Server-side
+if (typeof window === 'undefined') {
+  if (typeof global !== 'undefined' && !('localStorage' in global)) {
+    const store = new Map<string, string>();
+    (global as any).localStorage = {
+      getItem: (key: string) => store.get(key) || null,
+      setItem: (key: string, value: string) => { store.set(key, value); },
+      removeItem: (key: string) => { store.delete(key); },
+      clear: () => { store.clear(); },
+      key: (index: number) => null,
+      length: 0
+    };
+  }
+}
+
 // Password Hashing Helper (SHA-256)
 export async function hashPassword(password: string): Promise<string> {
   if (!password) return '';
@@ -45,15 +60,23 @@ try {
 }
 let bypassFallback = false;
 
+let lastFirestoreError = "";
+
+export function getLastFirestoreError(): string {
+  return lastFirestoreError;
+}
+
 function checkForQuotaExceeded(error: any) {
   if (!error) return;
+  console.error("🔴 Firestore Operation Error occurred:", error);
   const errMsg = error.message || String(error);
+  lastFirestoreError = errMsg;
+  const errCode = error.code || '';
   if (
     errMsg.includes('Quota exceeded') ||
-    errMsg.includes('quota') ||
     errMsg.includes('Quota limit exceeded') ||
     errMsg.includes('RESOURCE_EXHAUSTED') ||
-    errMsg.includes('quota-exceeded')
+    errCode === 'resource-exhausted'
   ) {
     if (!useLocalStorageFallback) {
       console.warn("⚠️ Firebase Quota Limit Exceeded detected! Activating Local Storage Fallback Mode.");
@@ -68,8 +91,8 @@ function checkForQuotaExceeded(error: any) {
   }
 }
 
-// Helper to force timeout on hanging Firestore promises (fast 1500ms timeout for snappy performance)
-const FIRESTORE_TIMEOUT_MS = 1500;
+// Helper to force timeout on hanging Firestore promises (15000ms for stable and robust loading)
+const FIRESTORE_TIMEOUT_MS = 15000;
 function withTimeout<T>(promise: Promise<T>, ms: number = FIRESTORE_TIMEOUT_MS): Promise<T> {
   return Promise.race([
     promise,

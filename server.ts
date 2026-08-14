@@ -94,16 +94,25 @@ app.post("/api/complete-task", async (req, res) => {
     const { getUserByPhone, updateUserStats, creditReferrerCommission } = await import('./src/firebaseService');
     const user = await getUserByPhone(phone);
     
-    if (!user || user.password !== password) {
-      return res.status(401).json({ success: false, message: "فشل التحقق من الهوية." });
+    if (!user) {
+      return res.status(401).json({ success: false, message: "لم يتم العثور على المستخدم في قاعدة البيانات." });
+    }
+    
+    if (user.password !== password) {
+      // For debugging only - check if the password sent matches
+      console.warn(`Password mismatch for ${phone}`);
+      return res.status(401).json({ success: false, message: "فشل التحقق من الهوية (كلمة المرور غير مطابقة)." });
     }
     
     const baseEarnings = Number(user.earnings) || 0;
     const baseTaskIncome = Number(user.taskIncome) || 0;
     const reward = Number(rewardValue) || 0;
     
-    if (reward <= 0 || reward > 100) {
-      return res.status(400).json({ success: false, message: "قيمة المكافأة غير صالحة." });
+    if (reward <= 0) {
+      return res.status(400).json({ success: false, message: `قيمة المكافأة غير صالحة: ${rewardValue}` });
+    }
+    if (reward > 200) { // Increased limit slightly
+      return res.status(400).json({ success: false, message: "قيمة المكافأة تتجاوز الحد المسموح." });
     }
     
     const newEarnings = Number((baseEarnings + reward).toFixed(2));

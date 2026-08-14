@@ -25,6 +25,7 @@ const app = initializeApp(firebaseConfig);
 
 // To use the custom database containing all production data (86+ users, deposits, withdrawals):
 // تشغيل قاعدة البيانات المخصصة التي تحتوي على كافة البيانات الفعلية للأعضاء:
+// Last Sync: 2026-08-14 11:32
 export const db = getFirestore(app, "ai-studio-imagegallery-a44d0f4b-f3bd-412d-9cdd-d5863b832b78");
 
 export const oldDb = db;

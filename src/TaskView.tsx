@@ -1468,8 +1468,8 @@ export default function TaskView() {
       setActiveListTab('completed');
     } catch (err: any) {
       console.error("Error confirming task and updating earnings:", err);
-      const errorMessage = err.message || "حدث خطأ غير معروف";
-      triggerNotification(`حدث خطأ أثناء تحديث الرصيد: ${errorMessage}`);
+      const errorMessage = err.message || "فشل غير معروف";
+      triggerNotification(`🔴 فشل تحديث الرصيد (v2): ${errorMessage}`);
     } finally {
       setIsSubmittingTask(false);
     }
