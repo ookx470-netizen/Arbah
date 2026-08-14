@@ -30,7 +30,8 @@ import {
   subscribeToAllChats,
   subscribeToSupportMessages,
   sendSupportMessage,
-  markChatAsReadByAdmin
+  markChatAsReadByAdmin,
+  recordUserActivity
 } from '../firebaseService';
 import { db } from '../firebase';
 import { User, Deposit, Withdrawal, SystemSettings, VipPlan, UserNotification, SupportChat, SupportMessage } from '../types';
@@ -373,6 +374,14 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
   useEffect(() => {
     loadAdminData();
 
+    if (adminUser?.phone) {
+      recordUserActivity(adminUser.phone).catch(e => console.warn(e));
+      const heartbeatInterval = setInterval(() => {
+        recordUserActivity(adminUser.phone).catch(e => console.warn(e));
+      }, 45000);
+      return () => clearInterval(heartbeatInterval);
+    }
+
     // Subscribe to live updates so new registrations or actions from any device appear instantly
     const unsubUsers = subscribeToAllUsers((updatedUsers) => {
       setUsers(updatedUsers);
@@ -389,7 +398,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
       unsubDepos();
       unsubWiths();
     };
-  }, []);
+  }, [adminUser?.phone]);
 
 
 
@@ -924,12 +933,14 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
 
   const isUserOnline = (u: User) => {
     if (!u) return false;
+    if (adminUser && u.phone === adminUser.phone) return true;
+    if (u.isOnline === true) return true;
     if (u.lastActiveAt) {
       const activeMs = new Date(u.lastActiveAt).getTime();
       if (!isNaN(activeMs)) {
         const diff = Date.now() - activeMs;
-        // Heartbeat updates every 45s while on site. Active within last 5 minutes = online now.
-        return diff >= 0 && diff < 5 * 60 * 1000;
+        // Active within last 15 minutes = online now
+        return diff >= 0 && diff < 15 * 60 * 1000;
       }
     }
     return false;

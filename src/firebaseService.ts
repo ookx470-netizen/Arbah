@@ -36,17 +36,36 @@ export async function hashPassword(password: string): Promise<string> {
 }
 
 // Let's keep a state flag for Local Storage fallback mode
-// Clear any sticky offline fallback immediately to cure and reconnect stuck/old phones to the online Firestore database!
+let useLocalStorageFallback = false;
+// Clear sticky offline fallback on load to automatically heal and reconnect to Firestore when Blaze plan is active or quota resets!
 try {
   localStorage.removeItem('oxlo_quota_fallback_active');
 } catch (e) {
   console.warn(e);
 }
-let useLocalStorageFallback = false;
-let bypassFallback = true;
+let bypassFallback = false;
 
 function checkForQuotaExceeded(error: any) {
-  // Direct online Firestore mode enabled
+  if (!error) return;
+  const errMsg = error.message || String(error);
+  if (
+    errMsg.includes('Quota exceeded') ||
+    errMsg.includes('quota') ||
+    errMsg.includes('Quota limit exceeded') ||
+    errMsg.includes('RESOURCE_EXHAUSTED') ||
+    errMsg.includes('quota-exceeded')
+  ) {
+    if (!useLocalStorageFallback) {
+      console.warn("⚠️ Firebase Quota Limit Exceeded detected! Activating Local Storage Fallback Mode.");
+      useLocalStorageFallback = true;
+      try {
+        localStorage.setItem('oxlo_quota_fallback_active', 'true');
+      } catch (e) {}
+      try {
+        window.dispatchEvent(new Event('quota_fallback_activated'));
+      } catch (e) {}
+    }
+  }
 }
 
 // Helper to force timeout on hanging Firestore promises
@@ -173,31 +192,27 @@ async function deleteDoc(ref: any): Promise<any> {
 export const defaultSupportFaqs = [
   {
     question: "متى تأسست المنصة؟",
-    answer: "تأسست منصة oxlo في تاريخ 2026/05/03 لتكون المنصة الرائدة في المهام الرقمية وأرباح USDT."
+    answer: "تأسست منصة oxlo في هنكاريا بتاريخ 2026/05/03، ودخلت رسمياً إلى العراق وسوريا في تاريخ 2026/07/08."
   },
   {
-    question: "ما هي منصة oxlo وكيف تعمل؟",
-    answer: "منصة oxlo هي منصة ذكية لتأدية المهام المصغرة اليومية لزيادة الدخل. تتيح للمشتركين تحقيق أرباح يومية مستقرة من خلال تنفيذ مهام الاشتراك والإعجاب والمتابعة عبر يوتيوب أو فيسبوك وتأكيدها بلقطة شاشة."
+    question: "📊 جدول اشتراكات وأرباح منصة Oxlo",
+    answer: "تفاصيل مستويات الاشتراك والتكلفة والربح اليومي بالدولار الأمريكي ($):\n• مستوى A: التكلفة $150 | الربح اليومي $4\n• مستوى B1: التكلفة $300 | الربح اليومي $9\n• مستوى B2: التكلفة $600 | الربح اليومي $25\n• مستوى C1: التكلفة $1,200 | الربح اليومي $45\n• مستوى C2: التكلفة $2,600 | الربح اليومي $90\n• مستوى D1: التكلفة $6,000 | الربح اليومي $162\n• مستوى F2: التكلفة $13,000 | الربح اليومي $360\n• مستوى E1: التكلفة $28,000 | الربح اليومي $750\n• مستوى E2: التكلفة $60,000 | الربح اليومي $1,620\n• مستوى Business: التكلفة $100,000 | الربح اليومي $2,550"
   },
   {
-    question: "ما هي باقات VIP والأرباح اليومية؟",
-    answer: "الباقات المتاحة في oxlo:\n• A1: اشتراك $50 / ربح يومي $2 USDT\n• A2: اشتراك $100 / ربح يومي $4 USDT\n• B1: اشتراك $300 / ربح يومي $9 USDT\n• B2: اشتراك $600 / ربح يومي $22 USDT\n• C1: اشتراك $1200 / ربح يومي $45 USDT"
+    question: "⏰ أوقات العمل الرسمية والشحن والسحب",
+    answer: "أوقات العمل الرسمية لتنفيذ المهام واعتماد الأرباح ومعالجة الشحن والسحب (بتوقيت مكة المكرمة):\n• الفترة الأولى: من 02:00 ظهراً إلى 05:00 عصراً.\n• الفترة الثانية: من 09:00 مساءً إلى 12:00 ليلاً.\n• رسوم السحب: 15%.\n• شحن الرصيد ومتابعة الإحالات متاحان باستمرار."
   },
   {
-    question: "كيف يمكنني شحن حسابي وترقية VIP؟",
-    answer: "يمكنك شحن رصيدك بالذهاب إلى 'المركز الشخصي' ثم 'شحن الحساب' والنسخ لعنوان المحفظة (USDT POLYGON أو TRC20 أو BEP20) وإرسال المبلغ (25 USDT كحد أدنى). بعد التحويل، أرفق لقطة شاشة الإيصال والهاش ليعتمدها المدير. لتفعيل الـ VIP، انتقل لتبويب 'المنصب' واشترك في الباقة المناسبة."
+    question: "🤝 برنامج التوظيف وعمولات الإحالة (10%)",
+    answer: "ادع أصدقاءك لتنفيذ المهام اليومية واحصل على عمولات مجزية وفورية تصل إلى 10% من دخل مهام كل عضو تدعوه!\n1. انسخ كود ورابط الدعوة من قسم التوظيف داخل المنصة.\n2. شارك الكود مع أصدقائك عبر وسائل التواصل الاجتماعي.\n3. يتم احتساب نسبة الربح الثابتة (10%) تلقائياً وتضاف إلى رصيد عمولاتك اليومية وفوراً."
   },
   {
-    question: "ما هي أوقات العمل والعطلات الرسمية؟",
-    answer: "أوقات تنفيذ واعتماد المهام اليومية:\n• الفترة الأولى: 02:00 ظهراً حتى 05:00 عصراً.\n• الفترة الثانية: 09:00 مساءً حتى 12:00 منتصف الليل (بتوقيت مكة/العراق).\nالعطلة الأسبوعية: الجمعة والسبت عطلة رسمية (لا توجد مهام إطلاقاً)، بينما شحن الرصيد متاح 24/7."
+    question: "🏆 جدول مكافآت ورواتب مستويات VIP (B1 و B2)",
+    answer: "احصل على مكافآت فورية ورواتب مستمرة كل 10 أيام عند دعوة فريقك:\n• VIP (B1):\n  - 3 أعضاء: $15 مكافأة فورية\n  - 6 أعضاء: $30 راتب مستمر كل 10 أيام (دخل منتظم للفريق النشط)\n  - 10 أعضاء: $50 راتب مستمر كل 10 أيام (المكافأة الكبرى للفريق القيادي المتميز)\n• VIP (B2):\n  - 3 أعضاء: $30 راتب مستمر كل 10 أيام (بدء أولى خطوات القيادة للنخبة)\n  - 6 أعضاء: $60 راتب مستمر كل 10 أيام (عائد نصف شهري سخي ومستقر)\n  - 10 أعضاء: $100 راتب مستمر كل 10 أيام (أعلى راتب قيادي للفريق الذهبي والريادة)"
   },
   {
-    question: "ما هي شروط وأوقات سحب الأرباح والرسوم؟",
-    answer: "الحد الأدنى للسحب هو 2 USDT عبر شبكات (POLYGON, TRC20, BEP20). أوقات طلب السحب يومياً من الساعة 12:00 ظهراً حتى 12:00 ليلاً. توجد رسوم سحب بنسبة 15% وتستغرق معالجة طلب السحب خلال 24 ساعة كأقصى حد."
-  },
-  {
-    question: "ما هي رواتب القادة والعمولات؟",
-    answer: "تحصل على عمولة فورية بنسبة 10% من دخل أرباح المهام اليومية لكل عضو مباشر يسجل ويشترك برابطك. كما توجد رواتب ثابتة تُصرف كل 10 أيام لقادة B1 و B2 عند بناء فريق نشط (من 3 إلى 10 أعضاء)."
+    question: "🎁 جدول مكافآت الإحالة المباشرة حسب المستوى",
+    answer: "نظام الإحالة المجزي للأعضاء الجدد والشركاء (مكافأة فورية عند تسجيل العضو):\n• مستوى العضو A: مكافأة $20\n• مستوى العضو B1: مكافأة $40\n• مستوى العضو B2: مكافأة $80\n• مستوى العضو C1: مكافأة $150\n• مستوى العضو C2: مكافأة $320"
   }
 ];
 
@@ -297,9 +312,9 @@ function getLocalSettings(): SystemSettings {
         workEndHour: parsed.workEndHour !== undefined ? Number(parsed.workEndHour) : 17,
         workStartHour2: parsed.workStartHour2 !== undefined ? Number(parsed.workStartHour2) : 21,
         workEndHour2: parsed.workEndHour2 !== undefined ? Number(parsed.workEndHour2) : 0,
-        supportAgentName: (parsed.supportAgentName && !parsed.supportAgentName.includes("مريم")) ? parsed.supportAgentName : "دعم فني منصة oxlo",
+        supportAgentName: (parsed.supportAgentName && !parsed.supportAgentName.includes("إلينا")) ? parsed.supportAgentName : "إلينا (الدعم الفني)",
         supportAgentSubtitle: (parsed.supportAgentSubtitle && !parsed.supportAgentSubtitle.includes("المالية") && !parsed.supportAgentSubtitle.includes("Mis")) ? parsed.supportAgentSubtitle : "مستشارتك المساعدة في oxlo",
-        supportAgentAvatar: parsed.supportAgentAvatar ?? "",
+        supportAgentAvatar: parsed.supportAgentAvatar || "/support_logo.jpg",
         supportFaqs: (parsed.supportFaqs && parsed.supportFaqs.length > 4 && parsed.supportFaqs.some((f: any) => f.question.includes("تأسست"))) ? parsed.supportFaqs : defaultSupportFaqs,
         tasksCode: parsed.tasksCode ?? "",
         hideTrialPlans: parsed.hideTrialPlans !== undefined ? Boolean(parsed.hideTrialPlans) : false
@@ -344,9 +359,9 @@ function getLocalSettings(): SystemSettings {
     workEndHour: 17,
     workStartHour2: 21,
     workEndHour2: 0,
-    supportAgentName: "دعم فني منصة oxlo",
+    supportAgentName: "إلينا (الدعم الفني)",
     supportAgentSubtitle: "مستشارتك المساعدة في oxlo",
-    supportAgentAvatar: "",
+    supportAgentAvatar: "/support_logo.jpg",
     supportFaqs: defaultSupportFaqs,
     tasksCode: "",
     hideTrialPlans: false
@@ -1068,9 +1083,9 @@ export async function getSystemSettings(): Promise<SystemSettings> {
         workStartHour2: data.workStartHour2 !== undefined ? Number(data.workStartHour2) : 21,
         workEndHour2: data.workEndHour2 !== undefined ? Number(data.workEndHour2) : 0,
         appDownloadUrl: data.appDownloadUrl ?? "",
-        supportAgentName: (data.supportAgentName && !data.supportAgentName.includes("مريم")) ? data.supportAgentName : "دعم فني منصة oxlo",
+        supportAgentName: (data.supportAgentName && !data.supportAgentName.includes("إلينا")) ? data.supportAgentName : "إلينا (الدعم الفني)",
         supportAgentSubtitle: (data.supportAgentSubtitle && !data.supportAgentSubtitle.includes("المالية") && !data.supportAgentSubtitle.includes("Mis")) ? data.supportAgentSubtitle : "مستشارتك المساعدة في oxlo",
-        supportAgentAvatar: data.supportAgentAvatar ?? "",
+        supportAgentAvatar: data.supportAgentAvatar || "/support_logo.jpg",
         supportFaqs: (data.supportFaqs && data.supportFaqs.length > 4 && data.supportFaqs.some((f: any) => f.question.includes("تأسست"))) ? data.supportFaqs : defaultSupportFaqs,
         tasksCode: data.tasksCode ?? "",
         hideTrialPlans: data.hideTrialPlans !== undefined ? Boolean(data.hideTrialPlans) : false
@@ -2392,9 +2407,9 @@ export function subscribeToSystemSettings(onUpdate: (settings: SystemSettings) =
         workStartHour2: data.workStartHour2 !== undefined ? Number(data.workStartHour2) : 21,
         workEndHour2: data.workEndHour2 !== undefined ? Number(data.workEndHour2) : 1,
         appDownloadUrl: data.appDownloadUrl ?? "",
-        supportAgentName: (data.supportAgentName && !data.supportAgentName.includes("مريم")) ? data.supportAgentName : "دعم فني منصة oxlo",
+        supportAgentName: (data.supportAgentName && !data.supportAgentName.includes("إلينا")) ? data.supportAgentName : "إلينا (الدعم الفني)",
         supportAgentSubtitle: (data.supportAgentSubtitle && !data.supportAgentSubtitle.includes("المالية") && !data.supportAgentSubtitle.includes("Mis")) ? data.supportAgentSubtitle : "مستشارتك المساعدة في oxlo",
-        supportAgentAvatar: data.supportAgentAvatar ?? "",
+        supportAgentAvatar: data.supportAgentAvatar || "/support_logo.jpg",
         supportFaqs: (data.supportFaqs && data.supportFaqs.length > 4 && data.supportFaqs.some((f: any) => f.question.includes("تأسست"))) ? data.supportFaqs : defaultSupportFaqs,
         tasksCode: data.tasksCode ?? "",
         hideTrialPlans: data.hideTrialPlans !== undefined ? Boolean(data.hideTrialPlans) : false,

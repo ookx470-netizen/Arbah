@@ -888,6 +888,17 @@ export default function TaskView() {
     startDbAndLoad();
   }, []);
 
+  // Listen for real-time quota fallback activation
+  useEffect(() => {
+    const handleFallback = () => {
+      setIsFallback(true);
+    };
+    window.addEventListener('quota_fallback_activated', handleFallback);
+    return () => {
+      window.removeEventListener('quota_fallback_activated', handleFallback);
+    };
+  }, []);
+
   // Subscribe to system settings in real-time
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
@@ -1537,6 +1548,19 @@ export default function TaskView() {
 
   return (
     <div className="min-h-screen bg-[#f5f7fa] text-slate-800 select-none font-sans relative pb-24" dir="rtl">
+
+      {/* Quota limit fallback notification */}
+      {isFallback && (
+        <div className="bg-amber-50 border-b border-amber-200 px-4 py-3 text-amber-900 relative z-30 text-xs font-semibold shadow-sm flex items-start gap-3" dir="rtl">
+          <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="font-extrabold text-[13px] text-amber-950 mb-1">📢 العمل في وضع التخزين الاحتياطي (Firebase Quota Fallback)</p>
+            <p className="leading-relaxed text-amber-900 text-[11px] font-medium">
+              تنبيه: تم تجاوز حد الاستخدام المجاني لقاعدة بيانات Firebase اليومي (50,000 قراءة). تم تفعيل وضع التخزين المحلي الاحتياطي تلقائياً لتتمكن من استخدام التطبيق دون انقطاع. بياناتك السابقة والجديدة محفوظة بأمان محلياً وسوف تُرفع تلقائياً للسحابة فور قيام جوجل بإعادة تعيين الحد السحابي اليومي (خلال 24 ساعة).
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Global Notification Banner System */}
       {settings.globalNotification && (

@@ -87,7 +87,6 @@ function getBaghdadTimeDetails() {
   };
 }
 
-
 // Secure API for Task Completion
 app.post("/api/complete-task", async (req, res) => {
   try {
@@ -156,7 +155,8 @@ app.post("/api/upgrade-vip", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
-// AI Support Chat API (Maryam - مريم مستشارة الدعم الفني)
+
+// AI Support Chat API (Elena - إلينا مستشارة الدعم الفني)
 app.post("/api/support-chat", async (req, res) => {
   const { userPhone, username, vipTier, earnings, userMessage, recentMessages } = req.body;
   const apiKey = process.env.GEMINI_API_KEY;
@@ -175,17 +175,17 @@ app.post("/api/support-chat", async (req, res) => {
   // Local expert support response engine (100% reliable fallback & instant answers)
   let localReply = "";
   if (text.includes("تأسست") || text.includes("تأسيس") || text.includes("متى") || text.includes("عمر") || text.includes("بداية")) {
-    localReply = `أهلاً بك يا ${username || 'عزيزي'}! تأسست منصة oxlo في تاريخ 2026/05/03 لتكون المنصة الرائدة في المهام الرقمية وأرباح USDT المضمونة.`;
+    localReply = `أهلاً بك يا ${username || 'عزيزي'}! تأسست منصة oxlo في هنكاريا بتاريخ 2026/05/03، ودخلت رسمياً إلى العراق وسوريا في تاريخ 2026/07/08.`;
   } else if (text.includes("سحب") || text.includes("فلوس") || text.includes("ارباح") || text.includes("أرباح") || text.includes("زين كاش")) {
-    localReply = `أهلاً بك يا ${username || 'عزيزي'}! الحد الأدنى للسحب هو 2 USDT عبر شبكات USDT (POLYGON, TRC20, BEP20). أوقات السحب يومياً من 12 ظهراً حتى 12 ليلاً، ومعالجة الطلبات تتم خلال 24 ساعة كحد أقصى.`;
+    localReply = `أهلاً بك يا ${username || 'عزيزي'}! الحد الأدنى للسحب هو 2 USDT عبر شبكات USDT (POLYGON, TRC20, BEP20). أوقات السحب يومياً من 12 ظهراً حتى 12 ليلاً، ومعالجة الطلبات تتم خلال 24 ساعة كحد أقصى (رسوم السحب 15%).`;
   } else if (text.includes("شحن") || text.includes("إيداع") || text.includes("ايداع") || text.includes("رصيد")) {
     localReply = `أهلاً بك يا ${username || 'عزيزي'}! الحد الأدنى للإيداع هو 25 USDT (عبر شبكات POLYGON, TRC20, BEP20). الإيداع متاح 24/7، فقط قم بالتحويل وارفع لقطة الشاشة ورقم المعاملة (الهاش) ليعتمدها المدير فوراً.`;
   } else if (text.includes("مهام") || text.includes("شغل") || text.includes("عمل") || text.includes("عطلة")) {
     localReply = isHoliday 
       ? `اليوم عطلة رسمية (جمعة/سبت) بالمنصة ولا توجد مهام إطلاقاً، وتعود المهام يوم الأحد الساعة 2 ظهراً.`
       : `أوقات المهام اليومية: الفترة الأولى (2 ظهراً لـ 5 عصراً) والفترة الثانية (9 مساءً لـ 12 صباحاً). وتكتمل المهام بدقائق بسيطة!`;
-  } else if (text.includes("باقة") || text.includes("اشتراك") || text.includes("ترقية") || text.includes("a1") || text.includes("a2") || text.includes("b1")) {
-    localReply = `الباقات تبدأ من A1 ($50 بأرباح $2 يومياً)، وA2 ($100 بأرباح $4)، وB1 ($300 بأرباح $9)، وصولاً لباقات القادة C1. يمكنك الترقية فوراً من تبويب 'المنصب'.`;
+  } else if (text.includes("باقة") || text.includes("اشتراك") || text.includes("ترقية") || text.includes("a") || text.includes("b") || text.includes("c") || text.includes("business")) {
+    localReply = `الباقات تبدأ من مستوى A ($150 بأرباح $4 يومياً)، وB1 ($300 بأرباح $9)، وصولاً لباقات القادة C و Business. يمكنك الترقية فوراً من تبويب 'المنصب'.`;
   }
 
   if (localReply) {
@@ -193,7 +193,7 @@ app.post("/api/support-chat", async (req, res) => {
   }
 
   if (!apiKey) {
-    return res.json({ reply: `أهلاً بك يا ${username || 'عزيزي'}! أنا مريم مستشارة الدعم الفني لمنصة oxlo. تأسست المنصة في 2026/05/03، وأوقات السحب والإيداع متوفرة يومياً، والمهام تنفتح بـ 2 ظهراً و9 مساءً. كيف يمكنني مساعدتك الآن؟` });
+    return res.json({ reply: `أهلاً بك يا ${username || 'عزيزي'}! أنا إلينا مستشارة الدعم الفني لمنصة oxlo. تأسست المنصة في 2026/05/03، وأوقات السحب والإيداع متوفرة يومياً، والمهام تنفتح بـ 2 ظهراً و9 مساءً. كيف يمكنني مساعدتك الآن؟` });
   }
 
   try {
@@ -206,18 +206,24 @@ app.post("/api/support-chat", async (req, res) => {
       },
     });
 
-    const systemInstruction = `أنتِ مريم (Maryam)، مستشارة الدعم الفني والمستشارة المالية والتقنية الرسمية لمنصة oxlo (منصة المهام الكبرى USDT).
+    const systemInstruction = `أنتِ إلينا (Elena)، مستشارة الدعم الفني والمستشارة المالية والتقنية الرسمية لمنصة oxlo (منصة المهام الكبرى USDT).
 تلتزمين بقواعد ومعلومات عمل منصة oxlo التالية بدقة متناهية وبنسبة 100%:
 
-0. تأسيس المنصة:
-   - تأسست منصة oxlo رسمياً في تاريخ 2026/05/03.
+0. تأسيس المنصة والدخول الإقليمي:
+   - تأسست منصة oxlo في هنكاريا بتاريخ 2026/05/03.
+   - دخلت المنصة رسمياً إلى العراق وسوريا في تاريخ 2026/07/08.
 
 1. باقات VIP والأرباح اليومية:
-   - باقة A1: سعر الاشتراك $50 - الربح اليومي $2 USDT.
-   - باقة A2: سعر الاشتراك $100 - الربح اليومي $4 USDT.
-   - باقة B1: سعر الاشتراك $300 - الربح اليومي $9 USDT.
-   - باقة B2: سعر الاشتراك $600 - الربح اليومي $22 USDT.
-   - باقة C1: سعر الاشتراك $1200 - الربح اليومي $45 USDT.
+   - مستوى A: التكلفة $150 | الربح اليومي $4
+   - مستوى B1: التكلفة $300 | الربح اليومي $9
+   - مستوى B2: التكلفة $600 | الربح اليومي $25
+   - مستوى C1: التكلفة $1,200 | الربح اليومي $45
+   - مستوى C2: التكلفة $2,600 | الربح اليومي $90
+   - مستوى D1: التكلفة $6,000 | الربح اليومي $162
+   - مستوى F2: التكلفة $13,000 | الربح اليومي $360
+   - مستوى E1: التكلفة $28,000 | الربح اليومي $750
+   - مستوى E2: التكلفة $60,000 | الربح اليومي $1,620
+   - مستوى Business: التكلفة $100,000 | الربح اليومي $2,550
 
 2. الشحن والإيداع:
    - العملة: USDT عبر شبكات (POLYGON, TRC20, BEP20).
@@ -226,6 +232,7 @@ app.post("/api/support-chat", async (req, res) => {
 3. سحب الأرباح:
    - العملة: USDT عبر شبكات (POLYGON, TRC20, BEP20).
    - الحد الأدنى للسحب: 2 USDT. أوقات طلب السحب يومياً من 12 ظهراً لـ 12 ليلاً.
+   - رسوم السحب: 15%.
 
 4. أوقات تنفيذ المهام والعطلات:
    - أوقات العمل: (2 ظهراً - 5 عصراً) و(9 مساءً - 12 صباحاً).
@@ -238,7 +245,7 @@ app.post("/api/support-chat", async (req, res) => {
 - الرصيد الحالي: ${earnings || 0} USDT
 
 تعليمات الإجابة:
-- أجيبي باللغة العربية بأسلوب احترافي ودود كشخص حقيقي من الدعم (مريم).
+- أجيبي باللغة العربية بأسلوب احترافي ودود كشخص حقيقي من الدعم (إلينا).
 - خاطبي العضو باسمه (${username || 'عزيزي'}).
 - إذا سأل متى تأسست المنصة أجبيه بدقة: تأسست في تاريخ 2026/05/03.
 - أجيبي بإيجاز ومباشرة على قدر السؤال دون إطالة.`;
@@ -281,15 +288,13 @@ app.post("/api/support-chat", async (req, res) => {
       }
     }
 
-    const reply = responseText || `أهلاً بك يا ${username || 'عزيزي'}! أنا مريم مستشارة الدعم الفني لمنصة oxlo (تأسست في 2026/05/03). كيف يمكنني مساعدتك الآن؟`;
+    const reply = responseText || `أهلاً بك يا ${username || 'عزيزي'}! أنا إلينا مستشارة الدعم الفني لمنصة oxlo (تأسست في 2026/05/03). كيف يمكنني مساعدتك الآن؟`;
     res.json({ reply });
   } catch (err: any) {
     console.error("Support chat error:", err);
-    res.json({ reply: localReply || `أهلاً بك يا ${username || 'عزيزي'}! أنا مريم مستشارة الدعم الفني لمنصة oxlo (تأسست في 2026/05/03). كيف يمكنني مساعدتك الآن؟` });
+    res.json({ reply: localReply || `أهلاً بك يا ${username || 'عزيزي'}! أنا إلينا مستشارة الدعم الفني لمنصة oxlo (تأسست في 2026/05/03). كيف يمكنني مساعدتك الآن؟` });
   }
 });
-
-
 
 // Vite middleware & Server bootloader wrapped in async startServer
 async function startServer() {

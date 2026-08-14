@@ -188,11 +188,11 @@ export default function ProfileCenter({
 
       if (overrideAnswer) {
         await new Promise(r => setTimeout(r, 600));
-        await sendSupportMessage(userPhone, userName, overrideAnswer, 'admin', settings.supportAgentName || "مريم (الدعم الفني)");
+        await sendSupportMessage(userPhone, userName, overrideAnswer, 'admin', settings.supportAgentName || "إلينا (الدعم الفني)");
         return;
       }
 
-      // Trigger AI Support Agent Auto-Reply (Maryam - مريم)
+      // Trigger AI Support Agent Auto-Reply (Elena - إلينا)
       fetch('/api/support-chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -205,12 +205,12 @@ export default function ProfileCenter({
           recentMessages: supportMessages
         })
       }).then(res => res.json()).then(async (data) => {
-        const replyText = data.reply || `أهلاً بك يا ${userName}! أنا مريم مستشارة الدعم الفني لمنصة oxlo (تأسست في 2026/05/03). أوقات السحب والإيداع متوفرة يومياً، والمهام تنفتح بـ 12 ظهراً و8 مساءً.`;
-        await sendSupportMessage(userPhone, userName, replyText, 'admin', settings.supportAgentName || "مريم (الدعم الفني)");
+        const replyText = data.reply || `أهلاً بك يا ${userName}! أنا إلينا مستشارة الدعم الفني لمنصة oxlo (تأسست في 2026/05/03). أوقات السحب والإيداع متوفرة يومياً، والمهام تنفتح بـ 2 ظهراً و9 مساءً.`;
+        await sendSupportMessage(userPhone, userName, replyText, 'admin', settings.supportAgentName || "إلينا (الدعم الفني)");
       }).catch(async err => {
         console.warn("AI Support Auto-Reply trigger failed:", err);
-        const fallbackReply = `أهلاً بك يا ${userName}! أنا مريم مستشارة الدعم الفني لمنصة oxlo (تأسست في 2026/05/03). كيف يمكنني مساعدتك الآن؟`;
-        await sendSupportMessage(userPhone, userName, fallbackReply, 'admin', settings.supportAgentName || "مريم (الدعم الفني)");
+        const fallbackReply = `أهلاً بك يا ${userName}! أنا إلينا مستشارة الدعم الفني لمنصة oxlo (تأسست في 2026/05/03). كيف يمكنني مساعدتك الآن؟`;
+        await sendSupportMessage(userPhone, userName, fallbackReply, 'admin', settings.supportAgentName || "إلينا (الدعم الفني)");
       });
 
     } catch (err) {
@@ -1493,8 +1493,13 @@ export default function ProfileCenter({
               <ChevronLeft className="w-5 h-5 rotate-180" />
             </button>
             <div className="flex items-center gap-3 relative z-10">
-              <div className="w-11 h-11 bg-blue-600 rounded-full flex items-center justify-center font-black text-sm border-2 border-white/20">
-                {settings.supportAgentName ? settings.supportAgentName.charAt(0) : "OX"}
+              <div className="w-11 h-11 bg-blue-600 rounded-full flex items-center justify-center font-black text-sm border-2 border-white/20 overflow-hidden shadow-md">
+                <img 
+                  src={settings.supportAgentAvatar || "/support_logo.jpg"} 
+                  alt="الدعم الفني" 
+                  className="w-full h-full object-cover" 
+                  referrerPolicy="no-referrer"
+                />
               </div>
               <div className="space-y-0.5">
                 <h4 className="text-[11px] font-black tracking-tight">{settings.supportAgentName || "فريق الدعم الفني"}</h4>
