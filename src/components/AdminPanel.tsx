@@ -934,15 +934,28 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
   const isUserOnline = (u: User) => {
     if (!u) return false;
     if (adminUser && u.phone === adminUser.phone) return true;
-    if (u.isOnline === true) return true;
+    
+    // To be considered online, a user must have been active recently (within the last 3 minutes)
+    // We do not rely on u.isOnline === true alone, because users usually close the app/tab without explicit logout,
+    // leaving u.isOnline as true in Firestore indefinitely.
     if (u.lastActiveAt) {
       const activeMs = new Date(u.lastActiveAt).getTime();
       if (!isNaN(activeMs)) {
         const diff = Date.now() - activeMs;
-        // Active within last 15 minutes = online now
-        return diff >= 0 && diff < 15 * 60 * 1000;
+        // Active within last 3 minutes = online now
+        return diff >= 0 && diff < 3 * 60 * 1000;
       }
     }
+    
+    // Fallback: If lastActiveAt is missing but they are marked as online and logged in within the last 3 minutes
+    if (u.isOnline === true && u.lastLoginAt) {
+      const loginMs = new Date(u.lastLoginAt).getTime();
+      if (!isNaN(loginMs)) {
+        const diff = Date.now() - loginMs;
+        return diff >= 0 && diff < 3 * 60 * 1000;
+      }
+    }
+    
     return false;
   };
 
