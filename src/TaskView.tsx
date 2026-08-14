@@ -67,6 +67,8 @@ import { LeaderBonusModal } from './components/LeaderBonusModal';
 import { 
   initializeDatabase, 
   isFallbackMode,
+  setFallbackMode,
+  getLastFirestoreError,
   getReferralLeaderboard,
   LeaderboardEntry
 } from './firebaseService';
@@ -1419,6 +1421,12 @@ export default function TaskView() {
       const rewardMatch = targetTask.reward.match(/[\d.]+/);
       const rewardValue = rewardMatch ? parseFloat(rewardMatch[0]) : 0;
       
+      if (rewardValue <= 0) {
+        triggerNotification("⚠️ قيمة المكافأة لهذه المهمة غير صالحة. يرجى مراجعة الإدارة.");
+        setIsSubmittingTask(false);
+        return;
+      }
+      
       const response = await fetch('/api/complete-task', {
         method: 'POST',
         headers: {
@@ -1458,9 +1466,10 @@ export default function TaskView() {
       triggerNotification(`🎉 تهانينا! تم تقديم العمل بنجاح وإضافة ${rewardValue} USDT إلى أرباحك مباشرة!`);
       setCurrentView('list');
       setActiveListTab('completed');
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error confirming task and updating earnings:", err);
-      triggerNotification("حدث خطأ أثناء محاولة تحديث رصيد أرباحك.");
+      const errorMessage = err.message || "حدث خطأ غير معروف";
+      triggerNotification(`حدث خطأ أثناء تحديث الرصيد: ${errorMessage}`);
     } finally {
       setIsSubmittingTask(false);
     }
@@ -1565,8 +1574,29 @@ export default function TaskView() {
           <div className="flex-1">
             <p className="font-extrabold text-[13px] text-amber-950 mb-1">📢 العمل في وضع التخزين الاحتياطي (Firebase Quota Fallback)</p>
             <p className="leading-relaxed text-amber-900 text-[11px] font-medium">
-              تنبيه: تم تجاوز حد الاستخدام المجاني لقاعدة بيانات Firebase اليومي (50,000 قراءة). تم تفعيل وضع التخزين المحلي الاحتياطي تلقائياً لتتمكن من استخدام التطبيق دون انقطاع. بياناتك السابقة والجديدة محفوظة بأمان محلياً وسوف تُرفع تلقائياً للسحابة فور قيام جوجل بإعادة تعيين الحد السحابي اليومي (خلال 24 ساعة).
+              تنبيه: تم تفعيل وضع التخزين الاحتياطي بسبب توقف استجابة قاعدة البيانات أو تجاوز حد الاستخدام اليومي. البيانات السابقة والجديدة محفوظة بأمان محلياً.
             </p>
+            {getLastFirestoreError() && (
+              <p className="mt-1.5 text-[10px] text-red-600 font-mono bg-red-50 p-1.5 rounded border border-red-100 break-all" dir="ltr">
+                Last Error: {getLastFirestoreError()}
+              </p>
+            )}
+            <div className="mt-2.5">
+              <button
+                onClick={() => {
+                  try {
+                    localStorage.removeItem('oxlo_quota_fallback_active');
+                    setFallbackMode(false);
+                    window.location.reload();
+                  } catch (e) {
+                    console.error(e);
+                  }
+                }}
+                className="bg-amber-600 hover:bg-amber-700 text-white font-bold px-3 py-1 rounded text-[11px] transition-colors cursor-pointer inline-flex items-center gap-1.5"
+              >
+                🔄 فرض إعادة الاتصال بالسيرفر وتحديث الموقع
+              </button>
+            </div>
           </div>
         </div>
       )}
