@@ -17,7 +17,8 @@ import {
   subscribeToUserChat,
   subscribeToSupportMessages,
   sendSupportMessage,
-  markChatAsReadByUser
+  markChatAsReadByUser,
+  defaultSupportFaqs
 } from '../firebaseService';
 import { User, Deposit, Withdrawal, SystemSettings, UserNotification, SupportMessage, SupportChat } from '../types';
 import { compressBase64Image, calculateRemainingEffectiveDays } from '../utils';
@@ -183,12 +184,26 @@ export default function ProfileCenter({
     const userPhone = currentUser.phone.trim();
     const userName = currentUser.username || currentUser.phone;
 
+    // Optimistically add user message immediately
+    const userMsgId = `msg_${Date.now()}_user`;
+    const userTimestamp = new Date().toISOString();
+    setSupportMessages(prev => [
+      ...prev,
+      { id: userMsgId, chatId: userPhone, text: textToSend, sender: 'user', senderName: userName, timestamp: userTimestamp }
+    ]);
+
     try {
-      await sendSupportMessage(userPhone, userName, textToSend, 'user', userName);
+      sendSupportMessage(userPhone, userName, textToSend, 'user', userName).catch(() => {});
 
       if (overrideAnswer) {
-        await new Promise(r => setTimeout(r, 600));
-        await sendSupportMessage(userPhone, userName, overrideAnswer, 'admin', settings.supportAgentName || "إلينا (الدعم الفني)");
+        await new Promise(r => setTimeout(r, 300));
+        const adminMsgId = `msg_${Date.now()}_admin`;
+        const adminTimestamp = new Date().toISOString();
+        setSupportMessages(prev => [
+          ...prev,
+          { id: adminMsgId, chatId: userPhone, text: overrideAnswer, sender: 'admin', senderName: settings.supportAgentName || "إلينا (الدعم الفني)", timestamp: adminTimestamp }
+        ]);
+        sendSupportMessage(userPhone, userName, overrideAnswer, 'admin', settings.supportAgentName || "إلينا (الدعم الفني)").catch(() => {});
         return;
       }
 
@@ -206,11 +221,23 @@ export default function ProfileCenter({
         })
       }).then(res => res.json()).then(async (data) => {
         const replyText = data.reply || `أهلاً بك يا ${userName}! أنا إلينا مستشارة الدعم الفني لمنصة oxlo (تأسست في 2026/05/03). أوقات السحب والإيداع متوفرة يومياً، والمهام تنفتح بـ 2 ظهراً و9 مساءً.`;
-        await sendSupportMessage(userPhone, userName, replyText, 'admin', settings.supportAgentName || "إلينا (الدعم الفني)");
+        const adminMsgId = `msg_${Date.now()}_admin`;
+        const adminTimestamp = new Date().toISOString();
+        setSupportMessages(prev => [
+          ...prev,
+          { id: adminMsgId, chatId: userPhone, text: replyText, sender: 'admin', senderName: settings.supportAgentName || "إلينا (الدعم الفني)", timestamp: adminTimestamp }
+        ]);
+        sendSupportMessage(userPhone, userName, replyText, 'admin', settings.supportAgentName || "إلينا (الدعم الفني)").catch(() => {});
       }).catch(async err => {
         console.warn("AI Support Auto-Reply trigger failed:", err);
         const fallbackReply = `أهلاً بك يا ${userName}! أنا إلينا مستشارة الدعم الفني لمنصة oxlo (تأسست في 2026/05/03). كيف يمكنني مساعدتك الآن؟`;
-        await sendSupportMessage(userPhone, userName, fallbackReply, 'admin', settings.supportAgentName || "إلينا (الدعم الفني)");
+        const adminMsgId = `msg_${Date.now()}_admin`;
+        const adminTimestamp = new Date().toISOString();
+        setSupportMessages(prev => [
+          ...prev,
+          { id: adminMsgId, chatId: userPhone, text: fallbackReply, sender: 'admin', senderName: settings.supportAgentName || "إلينا (الدعم الفني)", timestamp: adminTimestamp }
+        ]);
+        sendSupportMessage(userPhone, userName, fallbackReply, 'admin', settings.supportAgentName || "إلينا (الدعم الفني)").catch(() => {});
       });
 
     } catch (err) {
@@ -1557,14 +1584,7 @@ export default function ProfileCenter({
               </span>
             </div>
             <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar scroll-smooth">
-              {(settings.supportFaqs && settings.supportFaqs.length > 0 ? settings.supportFaqs : [
-                { question: "القادة", answer: `أهلاً بك يا ${currentUser.username || 'عزيزنا العميل'}! يرجى دعوة (2) من المشتركين الجدد والنشطين على الأقل للترقية إلى فئة VIP (B1) باستخدام رابط أو كود الإحالة الخاص بك.` },
-                { question: "المنصب", answer: "يمكنك الاطلاع على كافة باقات الاشتراكات والترقية فوراً من تبويب 'المنصب' في شريط الملاحة السفلي." },
-                { question: "متى تأسست المنصة؟", answer: "تأسست منصة oxlo في تاريخ 2026/05/03 لتكون المنصة الرائدة في المهام الرقمية وأرباح USDT." },
-                { question: "ما هي باقات VIP والأرباح؟", answer: "الباقات المتاحة:\n• A1: اشتراك $50 / ربح $2\n• A2: اشتراك $100 / ربح $4\n• B1: اشتراك $300 / ربح $9\n• B2: اشتراك $600 / ربح $22\n• C1: اشتراك $1200 / ربح $45" },
-                { question: "كيفية شحن الحساب؟", answer: "يمكنك شحن رصيدك بالذهاب إلى 'المركز الشخصي' ثم 'شحن الحساب' والتحويل لعنوان المحفظة المعتمد مع رفقة الهاش واللقطة." },
-                { question: "أوقات العمل والعطلات؟", answer: "أوقات تنفيذ واعتماد المهام: الفترة الأولى (02:00 ظهراً - 05:00 عصراً)، الفترة الثانية (09:00 مساءً - 12:00 منتصف الليل). الجمعة والسبت عطلة رسمية." }
-              ]).map((faq, idx) => (
+              {((settings.supportFaqs && settings.supportFaqs.length > 0 && settings.supportFaqs.some((f: any) => f.answer.includes("هنكاريا"))) ? settings.supportFaqs : defaultSupportFaqs).map((faq, idx) => (
                 <button
                   key={idx}
                   type="button"

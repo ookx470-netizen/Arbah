@@ -172,20 +172,28 @@ app.post("/api/support-chat", async (req, res) => {
 
   const text = (userMessage || '').trim().toLowerCase();
 
-  // Local expert support response engine (100% reliable fallback & instant answers)
+  // Local expert support response engine (100% instant expert answers)
   let localReply = "";
   if (text.includes("تأسست") || text.includes("تأسيس") || text.includes("متى") || text.includes("عمر") || text.includes("بداية")) {
     localReply = `أهلاً بك يا ${username || 'عزيزي'}! تأسست منصة oxlo في هنكاريا بتاريخ 2026/05/03، ودخلت رسمياً إلى العراق وسوريا في تاريخ 2026/07/08.`;
-  } else if (text.includes("سحب") || text.includes("فلوس") || text.includes("ارباح") || text.includes("أرباح") || text.includes("زين كاش")) {
+  } else if (text.includes("سحب") || text.includes("فلوس") || text.includes("ارباح") || text.includes("أرباح") || text.includes("زين كاش") || text.includes("محفظة")) {
     localReply = `أهلاً بك يا ${username || 'عزيزي'}! الحد الأدنى للسحب هو 2 USDT عبر شبكات USDT (POLYGON, TRC20, BEP20). أوقات السحب يومياً من 12 ظهراً حتى 12 ليلاً، ومعالجة الطلبات تتم خلال 24 ساعة كحد أقصى (رسوم السحب 15%).`;
-  } else if (text.includes("شحن") || text.includes("إيداع") || text.includes("ايداع") || text.includes("رصيد")) {
+  } else if (text.includes("شحن") || text.includes("إيداع") || text.includes("ايداع") || text.includes("رصيد") || text.includes("تحويل")) {
     localReply = `أهلاً بك يا ${username || 'عزيزي'}! الحد الأدنى للإيداع هو 25 USDT (عبر شبكات POLYGON, TRC20, BEP20). الإيداع متاح 24/7، فقط قم بالتحويل وارفع لقطة الشاشة ورقم المعاملة (الهاش) ليعتمدها المدير فوراً.`;
-  } else if (text.includes("مهام") || text.includes("شغل") || text.includes("عمل") || text.includes("عطلة")) {
+  } else if (text.includes("مهام") || text.includes("شغل") || text.includes("عمل") || text.includes("عطلة") || text.includes("مهمة")) {
     localReply = isHoliday 
       ? `اليوم عطلة رسمية (جمعة/سبت) بالمنصة ولا توجد مهام إطلاقاً، وتعود المهام يوم الأحد الساعة 2 ظهراً.`
       : `أوقات المهام اليومية: الفترة الأولى (2 ظهراً لـ 5 عصراً) والفترة الثانية (9 مساءً لـ 12 صباحاً). وتكتمل المهام بدقائق بسيطة!`;
-  } else if (text.includes("باقة") || text.includes("اشتراك") || text.includes("ترقية") || text.includes("a") || text.includes("b") || text.includes("c") || text.includes("business")) {
+  } else if (text.includes("باقة") || text.includes("اشتراك") || text.includes("ترقية") || text.includes("a") || text.includes("b") || text.includes("c") || text.includes("business") || text.includes("مستوى")) {
     localReply = `الباقات تبدأ من مستوى A ($150 بأرباح $4 يومياً)، وB1 ($300 بأرباح $9)، وصولاً لباقات القادة C و Business. يمكنك الترقية فوراً من تبويب 'المنصب'.`;
+  } else if (text.includes("السلام") || text.includes("مرحبا") || text.includes("هلا") || text.includes("صباح") || text.includes("مساء") || text.includes("أهلاً") || text.includes("hi") || text.includes("hello")) {
+    localReply = `أهلاً بك يا ${username || 'عزيزي'}! أنا إلينا مستشارة الدعم الفني لمنصة oxlo. كيف يمكنني مساعدتك اليوم؟`;
+  } else if (text.includes("شكرا") || text.includes("تسلم") || text.includes("بارك") || text.includes("يعطيك")) {
+    localReply = `العفو يا ${username || 'عزيزي'}! أنا دائماً في خدمتكم لضمان نجاحكم وتجاربكم المميزة في منصة oxlo. هل لديك أي استفسار آخر؟`;
+  } else if (text.includes("مشكلة") || text.includes("عطل") || text.includes("خطأ") || text.includes("مساعدة") || text.includes("الدعم")) {
+    localReply = `أنا معك يا ${username || 'عزيزي'}! يمكنك توضيح تفاصيل المشكلة أو إرفاق لقطة شاشة، وسأقوم بمساعدتك وحل طلبك فوراً.`;
+  } else if (text.includes("احالة") || text.includes("دعوة") || text.includes("صديق") || text.includes("رابط")) {
+    localReply = `نظام الإحالة في منصة oxlo يمنحك عمولات مجزية عند دعوة أصدقائك عبر رابط الإحالة الخاص بك الموجود في صفحة حسابك الشخصي!`;
   }
 
   if (localReply) {
@@ -206,8 +214,9 @@ app.post("/api/support-chat", async (req, res) => {
       },
     });
 
-    const systemInstruction = `أنتِ إلينا (Elena)، مستشارة الدعم الفني والمستشارة المالية والتقنية الرسمية لمنصة oxlo (منصة المهام الكبرى USDT).
-تلتزمين بقواعد ومعلومات عمل منصة oxlo التالية بدقة متناهية وبنسبة 100%:
+    const systemInstruction = `أنتِ إلينا (Elena)، مستشارة الدعم الفني والمستشارة المالية والتقنية والرفيقة الودودة الرسمية لمنصة oxlo (منصة المهام الكبرى USDT).
+تتحدثين مع المستخدمين بكل ود ولباقة ومحبة عن **أي شيء وكل شيء** يطلبونه (سواء كان استفساراً عاماً، دردشة، نصائح، مساعدة تقنية، أو مواضيع متنوعة)، وتساعدينهم في كافة احتياجاتهم بروح إيجابية ودافئة.
+وفي حال سأل أحدهم عن معلومات منصة oxlo، تلتزمين بدقة بالمعلومات التالية:
 
 0. تأسيس المنصة والدخول الإقليمي:
    - تأسست منصة oxlo في هنكاريا بتاريخ 2026/05/03.
@@ -245,10 +254,10 @@ app.post("/api/support-chat", async (req, res) => {
 - الرصيد الحالي: ${earnings || 0} USDT
 
 تعليمات الإجابة:
-- أجيبي باللغة العربية بأسلوب احترافي ودود كشخص حقيقي من الدعم (إلينا).
-- خاطبي العضو باسمه (${username || 'عزيزي'}).
-- إذا سأل متى تأسست المنصة أجبيه بدقة: تأسست في تاريخ 2026/05/03.
-- أجيبي بإيجاز ومباشرة على قدر السؤال دون إطالة.`;
+- أجيبي باللغة العربية بأسلوب احترافي، ودود، ومرن جداً (كصديقة ومستشارة حقيقية).
+- كوني مستعدة للحديث والمساعدة في **أي موضوع** يطرحه المستخدم بحماس واهتمام.
+- إذا سأل عن المنصة أو تأسيسها، اذكري أن منصة oxlo تأسست في هنكاريا بتاريخ 2026/05/03 ودخلت العراق وسوريا في 2026/07/08.
+- خاطبي العضو باسمه (${username || 'عزيزي'}).`;
 
     const contents: any[] = [
       { role: "user", parts: [{ text: systemInstruction }] }
@@ -288,11 +297,11 @@ app.post("/api/support-chat", async (req, res) => {
       }
     }
 
-    const reply = responseText || `أهلاً بك يا ${username || 'عزيزي'}! أنا إلينا مستشارة الدعم الفني لمنصة oxlo (تأسست في 2026/05/03). كيف يمكنني مساعدتك الآن؟`;
+    const reply = responseText || `أهلاً بك يا ${username || 'عزيزي'}! أنا إلينا مستشارة الدعم الفني لمنصة oxlo (تأسست في هنكاريا بتاريخ 2026/05/03 ودخلت العراق وسوريا في 2026/07/08). كيف يمكنني مساعدتك الآن؟`;
     res.json({ reply });
   } catch (err: any) {
     console.error("Support chat error:", err);
-    res.json({ reply: localReply || `أهلاً بك يا ${username || 'عزيزي'}! أنا إلينا مستشارة الدعم الفني لمنصة oxlo (تأسست في 2026/05/03). كيف يمكنني مساعدتك الآن؟` });
+    res.json({ reply: localReply || `أهلاً بك يا ${username || 'عزيزي'}! أنا إلينا مستشارة الدعم الفني لمنصة oxlo (تأسست في هنكاريا بتاريخ 2026/05/03 ودخلت العراق وسوريا في 2026/07/08). كيف يمكنني مساعدتك الآن؟` });
   }
 });
 

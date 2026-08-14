@@ -84,8 +84,63 @@ export const LeaderBonusModal: React.FC<LeaderBonusModalProps> = ({
             
             {/* Guide intro */}
             <p className={`text-[11px] font-bold ${isDarkMode ? 'text-slate-300' : 'text-slate-600'} leading-relaxed`}>
-              الريادة والقيادة في منصتنا تمنحك مزايا استثنائية! بمجرد نجاحك في دعوة الأصدقاء للترقية وبناء شبكتك الخاصة، ستحصل تلقائياً على رواتب ثابتة وحوافز تصرف بانتظام كل 10 أيام.
+              الريادة والقيادة في منصتنا تمنحك مزايا استثنائية! بمجرد نجاحك في دعوة الأصدقاء للترقية وبناء شبكتك الخاصة، ستحصل تلقائياً على مكافآت فورية ورواتب ثابتة وحوافز تصرف بانتظام.
             </p>
+
+            {/* Direct Referral Instant Rewards Table (from official guidelines) */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 border-b pb-1.5 border-blue-500/20">
+                <div className="w-6 h-6 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-600 font-bold text-xs">💰</div>
+                <h4 className="text-xs font-black text-blue-600 dark:text-blue-400">
+                  جدول مكافآت الإحالة وفريق العمل (دعوة فورية)
+                </h4>
+              </div>
+
+              <div className="overflow-x-auto rounded-2xl border border-slate-200/80 shadow-sm">
+                <table className="w-full text-right border-collapse text-[10px]">
+                  <thead>
+                    <tr className="bg-slate-900 text-white font-black text-[9px]">
+                      <th className="p-2.5">مستوى العضو المدعو</th>
+                      <th className="p-2.5">مكافأة الإحالة</th>
+                      <th className="p-2.5">نوع المكافأة</th>
+                      <th className="p-2.5">ملاحظة إضافية</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-bold text-slate-700 bg-white">
+                    <tr className="hover:bg-slate-50 transition-all">
+                      <td className="p-2.5 font-black text-indigo-600">مستوى A</td>
+                      <td className="p-2.5 font-black text-emerald-600">$20</td>
+                      <td className="p-2.5">دعوة فورية (حالة)</td>
+                      <td className="p-2.5 text-[9px] text-slate-500">مكافأة دعوة فورية عند تسجيل المستوى A</td>
+                    </tr>
+                    <tr className="hover:bg-slate-50 transition-all">
+                      <td className="p-2.5 font-black text-indigo-600">مستوى B1</td>
+                      <td className="p-2.5 font-black text-emerald-600">$40</td>
+                      <td className="p-2.5">دعوة فورية (حالة)</td>
+                      <td className="p-2.5 text-[9px] text-slate-500">مكافأة دعوة فورية عند تسجيل المستوى B1</td>
+                    </tr>
+                    <tr className="hover:bg-slate-50 transition-all">
+                      <td className="p-2.5 font-black text-indigo-600">مستوى B2</td>
+                      <td className="p-2.5 font-black text-emerald-600">$80</td>
+                      <td className="p-2.5">دعوة فورية (حالة)</td>
+                      <td className="p-2.5 text-[9px] text-slate-500">مكافأة تسجيل المستوى B2</td>
+                    </tr>
+                    <tr className="hover:bg-slate-50 transition-all">
+                      <td className="p-2.5 font-black text-indigo-600">مستوى C1</td>
+                      <td className="p-2.5 font-black text-emerald-600">$150</td>
+                      <td className="p-2.5">دعوة فورية (حالة)</td>
+                      <td className="p-2.5 text-[9px] text-slate-500">مكافأة تسجيل المستوى C1</td>
+                    </tr>
+                    <tr className="hover:bg-slate-50 transition-all">
+                      <td className="p-2.5 font-black text-indigo-600">مستوى C2</td>
+                      <td className="p-2.5 font-black text-emerald-600">$320</td>
+                      <td className="p-2.5">دعوة فورية (حالة)</td>
+                      <td className="p-2.5 text-[9px] text-slate-500">مكافأة تسجيل المستوى C2</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
 
             {/* B1 Rewards Section */}
             <div className="space-y-3">

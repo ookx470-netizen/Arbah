@@ -68,8 +68,8 @@ function checkForQuotaExceeded(error: any) {
   }
 }
 
-// Helper to force timeout on hanging Firestore promises
-const FIRESTORE_TIMEOUT_MS = 12000;
+// Helper to force timeout on hanging Firestore promises (fast 1500ms timeout for snappy performance)
+const FIRESTORE_TIMEOUT_MS = 1500;
 function withTimeout<T>(promise: Promise<T>, ms: number = FIRESTORE_TIMEOUT_MS): Promise<T> {
   return Promise.race([
     promise,
@@ -191,8 +191,8 @@ async function deleteDoc(ref: any): Promise<any> {
 
 export const defaultSupportFaqs = [
   {
-    question: "متى تأسست المنصة؟",
-    answer: "تأسست منصة oxlo في هنكاريا بتاريخ 2026/05/03، ودخلت رسمياً إلى العراق وسوريا في تاريخ 2026/07/08."
+    question: "🌍 متى تأسست المنصة وانطلاقتها الرسمية؟",
+    answer: "تأسست منصة Oxlo رسمياً في دولة **هنكاريا** بتاريخ **2026/05/03**، وانطلقت في التوسع والخدمات الرسمية داخل **العراق وسوريا** في تاريخ **2026/07/08** لتكون المنصة الرائدة في المهام الرقمية وأرباح USDT."
   },
   {
     question: "📊 جدول اشتراكات وأرباح منصة Oxlo",
@@ -466,13 +466,27 @@ export async function migrateOldCachedDataToNewDb(force: boolean = false) {
 
 // Check and Initialize Admin & System Settings if not exist
 export async function initializeDatabase() {
-  // Always trigger the migration process first asynchronously
-  migrateOldCachedDataToNewDb().catch(err => {
-    console.warn("Migration trigger error:", err);
-  });
+  // Always trigger the migration and background sync process asynchronously
+  (async () => {
+    try {
+      await migrateOldCachedDataToNewDb();
+      const localUsers = getLocalUsers();
+      await Promise.all(
+        Object.keys(localUsers).slice(0, 10).map(phoneKey => {
+          const u = localUsers[phoneKey];
+          if (u && phoneKey) {
+            return setDoc(doc(db, "users", phoneKey), u, { merge: true }).catch(() => {});
+          }
+          return Promise.resolve();
+        })
+      );
+    } catch (e) {
+      console.warn("Background sync warning:", e);
+    }
+  })().catch(() => {});
 
   try {
-    // 1. Initialize Admin
+    // 1. Initialize Admin quickly
     const adminPhone = "07519952000";
     const adminRef = doc(db, "users", adminPhone);
 
@@ -490,67 +504,27 @@ export async function initializeDatabase() {
       role: "admin",
       createdAt: new Date().toISOString()
     };
-    // Always write/merge the new fixed admin credentials to guarantee it is initialized correctly
-    await setDoc(adminRef, adminUser, { merge: true });
-    // Remove old default admin account from Firestore if present
-    await deleteDoc(doc(db, "users", "07712345678")).catch(() => {});
+    setDoc(adminRef, adminUser, { merge: true }).catch(() => {});
 
-    // Sync any local storage users to Firestore so they are globally shared across normal and incognito browsers
-    const localUsers = getLocalUsers();
-    await Promise.all(
-      Object.keys(localUsers).map(phoneKey => {
-        const u = localUsers[phoneKey];
-        if (u && phoneKey) {
-          return setDoc(doc(db, "users", phoneKey), u, { merge: true }).catch(() => {});
-        }
-        return Promise.resolve();
-      })
-    );
-
-    // Sync local deposits to Firestore
-    const localDeposits = getLocalDeposits();
-    await Promise.all(
-      Object.keys(localDeposits).map(depId => {
-        const d = localDeposits[depId];
-        if (d && depId) {
-          return setDoc(doc(db, "deposits", depId), d, { merge: true }).catch(() => {});
-        }
-        return Promise.resolve();
-      })
-    );
-
-    // Sync local withdrawals to Firestore
-    const localWithdrawals = getLocalWithdrawals();
-    await Promise.all(
-      Object.keys(localWithdrawals).map(withId => {
-        const w = localWithdrawals[withId];
-        if (w && withId) {
-          return setDoc(doc(db, "withdrawals", withId), w, { merge: true }).catch(() => {});
-        }
-        return Promise.resolve();
-      })
-    );
-
-    console.log("Admin account and local data synchronized successfully with shared Firestore database!");
-
-    // 2. Initialize System Settings
+    // 2. Initialize System Settings quickly
     const settingsRef = doc(db, "settings", "general");
-    const settingsSnap = await getDoc(settingsRef);
-    if (!settingsSnap.exists()) {
-      const defaultSettings: SystemSettings = {
-        siteName: "OXLO",
-        rechargeAddress: "e738819b080a278d",
-        rechargeAddressTRC20: "sfnmQtKLfcDarAMd",
-        rechargeAddressBEP20: "0x71C7656EC7ab88b098defB751B7401B5f6d8976F",
-        telegramLink: "-fhzo.vercel.app",
-        minDeposit: 25,
-        minWithdrawal: 2,
-        holidayActive: false,
-        holidayDays: [5] // Default to Friday
-      };
-      await setDoc(settingsRef, defaultSettings);
-      console.log("Default settings initialized successfully in Firestore!");
-    }
+    getDoc(settingsRef).then(settingsSnap => {
+      if (!settingsSnap.exists()) {
+        const defaultSettings: SystemSettings = {
+          siteName: "OXLO",
+          rechargeAddress: "e738819b080a278d",
+          rechargeAddressTRC20: "sfnmQtKLfcDarAMd",
+          rechargeAddressBEP20: "0x71C7656EC7ab88b098defB751B7401B5f6d8976F",
+          telegramLink: "-fhzo.vercel.app",
+          minDeposit: 25,
+          minWithdrawal: 2,
+          holidayActive: false,
+          holidayDays: [5]
+        };
+        setDoc(settingsRef, defaultSettings).catch(() => {});
+      }
+    }).catch(() => {});
+
   } catch (error) {
     console.warn("Error initializing database (using local defaults if offline):", error);
     getLocalUsers();

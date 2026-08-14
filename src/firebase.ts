@@ -19,9 +19,9 @@ const app = initializeApp(firebaseConfig);
 // لتشغيل قاعدة البيانات الافتراضية المفتوحة وبلا أي حدود بعد الترحيل:
 // export const db = getFirestore(app);
 
-// To use the limited custom database (currently capped at 50,000 reads/day):
-// لتشغيل قاعدة البيانات المخصصة الحالية (التي تقفل عند 50 ألف قراءة):
-export const db = getFirestore(app, "(default)");
+// To use the custom database containing all production data (86+ users, deposits, withdrawals):
+// تشغيل قاعدة البيانات المخصصة التي تحتوي على كافة البيانات الفعلية للأعضاء:
+export const db = getFirestore(app, "ai-studio-imagegallery-a44d0f4b-f3bd-412d-9cdd-d5863b832b78");
 
 export const oldDb = db;
 

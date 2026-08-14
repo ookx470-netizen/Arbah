@@ -848,11 +848,11 @@ export default function TaskView() {
   useEffect(() => {
     const startDbAndLoad = async () => {
       const startTime = Date.now();
-      setLoadingProgress(25);
+      setLoadingProgress(30);
 
-      // Initialize Firestore admin and settings
-      await initializeDatabase();
-      setLoadingProgress(55);
+      // Initialize Firestore admin and settings in background (non-blocking)
+      initializeDatabase().catch(() => {});
+      setLoadingProgress(60);
 
       // Auto login user from localStorage if exists
       const cachedPhone = localStorage.getItem('logged_in_phone');
@@ -861,7 +861,7 @@ export default function TaskView() {
           const { getUserByPhone, shadowFirebaseAuth } = await import('./firebaseService');
           const usr = await getUserByPhone(cachedPhone);
           if (usr) {
-            await shadowFirebaseAuth(usr.phone, usr.password || usr.id).catch(e => console.warn('Shadow auth failed:', e));
+            shadowFirebaseAuth(usr.phone, usr.password || usr.id).catch(e => console.warn('Shadow auth failed:', e));
             setCurrentUser(usr);
           }
         } catch (e) {
@@ -870,14 +870,11 @@ export default function TaskView() {
       }
       setLoadingProgress(85);
 
-      // Guarantee minimum splash screen visibility time (2200ms) for professional branding display
+      // Fast minimum splash duration (600ms) for snappy loading
       const elapsedTime = Date.now() - startTime;
-      const minDuration = 2200;
+      const minDuration = 600;
       if (elapsedTime < minDuration) {
-        const remaining = minDuration - elapsedTime;
-        // Animate remaining progress smoothly
-        setTimeout(() => setLoadingProgress(95), Math.max(100, remaining - 300));
-        await new Promise(resolve => setTimeout(resolve, remaining));
+        await new Promise(resolve => setTimeout(resolve, minDuration - elapsedTime));
       }
 
       setLoadingProgress(100);
