@@ -932,8 +932,17 @@ export default function TaskView() {
     });
 
     const interval = setInterval(() => {
-      import('./firebaseService').then(({ recordUserActivity }) => {
+      import('./firebaseService').then(({ recordUserActivity, getUserByPhone }) => {
         recordUserActivity(currentUser.phone).catch(e => console.warn(e));
+        // Also fetch latest data to pick up admin updates (money, VIP tier, etc.)
+        getUserByPhone(currentUser.phone).then(updated => {
+          if (updated) {
+            // Only update if there's an actual change to prevent unnecessary re-renders
+            if (JSON.stringify(updated) !== JSON.stringify(currentUser)) {
+              setCurrentUser(updated);
+            }
+          }
+        }).catch(() => {});
       });
     }, 45000); // every 45 seconds
 
@@ -1259,6 +1268,7 @@ export default function TaskView() {
 
   // Check if today is a holiday according to system settings
   const isTodayHoliday = (() => {
+    if (currentUser?.bypassHoliday === true) return false; // فتح العطلة عن هذا العضو تحديداً
     if (!settings.holidayActive) return false;
     const todayDay = new Date().getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
     const holidayDays = settings.holidayDays ?? [5]; // default to Friday

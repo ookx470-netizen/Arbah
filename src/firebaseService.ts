@@ -466,22 +466,12 @@ export async function migrateOldCachedDataToNewDb(force: boolean = false) {
 
 // Check and Initialize Admin & System Settings if not exist
 export async function initializeDatabase() {
-  // Always trigger the migration and background sync process asynchronously
+  // Always trigger the migration process asynchronously
   (async () => {
     try {
       await migrateOldCachedDataToNewDb();
-      const localUsers = getLocalUsers();
-      await Promise.all(
-        Object.keys(localUsers).slice(0, 10).map(phoneKey => {
-          const u = localUsers[phoneKey];
-          if (u && phoneKey) {
-            return setDoc(doc(db, "users", phoneKey), u, { merge: true }).catch(() => {});
-          }
-          return Promise.resolve();
-        })
-      );
     } catch (e) {
-      console.warn("Background sync warning:", e);
+      console.warn("Background migration warning:", e);
     }
   })().catch(() => {});
 
@@ -1548,17 +1538,7 @@ export async function getAllUsers(): Promise<User[]> {
       }
     });
 
-    const mergedMap: Record<string, User> = { ...firestoreMap, ...localMap };
-
-    // Push/sync all local users to Firestore so Incognito and other browsers share them instantly
-    await Promise.all(
-      Object.keys(localMap).map(key => {
-        if (!firestoreMap[key]) {
-          return setDoc(doc(db, "users", key), localMap[key], { merge: true }).catch(() => {});
-        }
-        return Promise.resolve();
-      })
-    );
+    const mergedMap: Record<string, User> = { ...localMap, ...firestoreMap };
 
     saveLocalUsers(mergedMap);
     return Object.values(mergedMap);
@@ -1584,7 +1564,7 @@ export function subscribeToAllUsers(callback: (users: User[]) => void): () => vo
       }
     });
 
-    const mergedMap: Record<string, User> = { ...firestoreMap, ...localMap };
+    const mergedMap: Record<string, User> = { ...localMap, ...firestoreMap };
 
     // Ensure ONLY 07519952000 has admin role
     Object.keys(mergedMap).forEach(k => {
@@ -1592,16 +1572,6 @@ export function subscribeToAllUsers(callback: (users: User[]) => void): () => vo
         mergedMap[k].role = "user";
       }
     });
-
-    // Push/sync all local users to Firestore
-    Promise.all(
-      Object.keys(localMap).map(key => {
-        if (!firestoreMap[key]) {
-          return setDoc(doc(db, "users", key), localMap[key], { merge: true }).catch(() => {});
-        }
-        return Promise.resolve();
-      })
-    ).catch(() => {});
 
     saveLocalUsers(mergedMap);
     callback(Object.values(mergedMap));

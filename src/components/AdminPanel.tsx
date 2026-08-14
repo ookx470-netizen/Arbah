@@ -64,7 +64,8 @@ import {
   Sun,
   Moon,
   MapPin,
-  Globe
+  Globe,
+  Calendar
 } from 'lucide-react';
 import { getCountryFlagEmoji } from '../locationService';
 
@@ -238,6 +239,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
   const [editPasswordInput, setEditPasswordInput] = useState<string>('');
   const [editVipTierInput, setEditVipTierInput] = useState<string>('');
   const [editWithdrawalBlocked, setEditWithdrawalBlocked] = useState<boolean>(false);
+  const [editBypassHoliday, setEditBypassHoliday] = useState<boolean>(false);
 
   // States for Manual Withdrawal modal
   const [selectedUserForWithdrawal, setSelectedUserForWithdrawal] = useState<User | null>(null);
@@ -288,6 +290,20 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
       setAdminPasswordInput(adminUser.rawPassword || adminUser.password || '');
     }
   }, [adminUser]);
+
+  useEffect(() => {
+    if (selectedUserForEdit) {
+      setEditUsernameInput(selectedUserForEdit.username || '');
+      setEditPhoneInput(selectedUserForEdit.phone || '');
+      setEditPasswordInput(selectedUserForEdit.rawPassword || selectedUserForEdit.password || '');
+      setEditVipTierInput(selectedUserForEdit.vipTier || 'الباقة العادية');
+      setEditEarnings(selectedUserForEdit.earnings || 0);
+      setEditTaskIncome(selectedUserForEdit.taskIncome || 0);
+      setEditEffectiveDays(calculateRemainingEffectiveDays(selectedUserForEdit));
+      setEditWithdrawalBlocked(!!selectedUserForEdit.isWithdrawalBlocked);
+      setEditBypassHoliday(!!selectedUserForEdit.bypassHoliday);
+    }
+  }, [selectedUserForEdit]);
 
   const handleSaveAdminCredentials = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -585,7 +601,8 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
         taskIncome: Number(editTaskIncome),
         effectiveDays: Number(editEffectiveDays),
         vipStartDate: new Date().toISOString(),
-        isWithdrawalBlocked: editWithdrawalBlocked
+        isWithdrawalBlocked: editWithdrawalBlocked,
+        bypassHoliday: editBypassHoliday
       });
 
       setUsers(prev => prev.map(u => {
@@ -600,7 +617,8 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
             taskIncome: Number(editTaskIncome),
             effectiveDays: Number(editEffectiveDays),
             vipStartDate: new Date().toISOString(),
-            isWithdrawalBlocked: editWithdrawalBlocked
+            isWithdrawalBlocked: editWithdrawalBlocked,
+            bypassHoliday: editBypassHoliday
           };
         }
         return u;
@@ -1463,6 +1481,11 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                               ) : (
                                 <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 px-1.5 py-0.5 rounded text-[8px] font-black inline-block">
                                   ✅ السحب مفعّل
+                                </span>
+                              )}
+                              {u.bypassHoliday && (
+                                <span className="bg-amber-100 text-amber-800 border border-amber-200 px-1.5 py-0.5 rounded text-[8px] font-black inline-block">
+                                  🔓 العطلة مفتوحة
                                 </span>
                               )}
                             </div>
@@ -3567,6 +3590,43 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                 {editWithdrawalBlocked && (
                   <p className="text-[10px] text-rose-700 font-bold bg-white p-2 rounded-lg border border-rose-150 leading-relaxed text-right">
                     ⚠️ عند حظر السحب، لن يتمكن هذا العضو من تقديم أي طلبات سحب، وسيظهر له تنبيه يطالبه بجلب (2) من المشتركين الجدد والنشطين على الأقل في فئة VIP (B1) ليستعيد ميزة السحب التلقائي لديه.
+                  </p>
+                )}
+              </div>
+
+              {/* Holiday Bypass Setting */}
+              <div className="p-3 bg-amber-50/50 border border-amber-200/60 rounded-xl space-y-2">
+                <span className="block text-[10px] text-amber-800 font-extrabold flex items-center gap-1.5 justify-end">
+                  حالة العطلة الرسمية لهذا العضو:
+                  <Calendar className="w-4 h-4 text-amber-600" />
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditBypassHoliday(false)}
+                    className={`flex-1 py-2 px-3 rounded-lg border font-bold text-[11px] transition-all cursor-pointer text-center ${
+                      !editBypassHoliday
+                        ? 'bg-amber-600 text-white border-amber-600 shadow-sm font-extrabold'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    يخضع للعطلة الرسمية (إيقاف)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditBypassHoliday(true)}
+                    className={`flex-1 py-2 px-3 rounded-lg border font-bold text-[11px] transition-all cursor-pointer text-center ${
+                      editBypassHoliday
+                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm font-extrabold'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    فتح العطلة وتخطي القفل 🔓
+                  </button>
+                </div>
+                {editBypassHoliday && (
+                  <p className="text-[10px] text-emerald-800 font-bold bg-white p-2 rounded-lg border border-emerald-150 leading-relaxed text-right">
+                    🔓 لقد قمت باستثناء هذا العضو من العطلة الإجبارية. يمكنه العمل والوصول لقائمة المهمات وإنجازها بشكل طبيعي حتى لو كانت المنصة في وضع العطلة الرسمية اليوم!
                   </p>
                 )}
               </div>

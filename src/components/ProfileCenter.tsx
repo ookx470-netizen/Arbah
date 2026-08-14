@@ -714,9 +714,10 @@ export default function ProfileCenter({
               nextPlan = plansList[0];
             }
 
-            let targetPrice = nextPlan ? nextPlan.price : (plansList[plansList.length - 1]?.price || 150);
+            let targetPrice = (nextPlan ? nextPlan.price : (plansList[plansList.length - 1]?.price || 150)) || 150;
             let nextTierName = nextPlan ? `${nextPlan.name}` : "أعلى مستوى";
-            let percentage = nextPlan ? Math.min(100, Math.max(0, Math.round((currentEarn / targetPrice) * 100))) : 100;
+            let rawPercentage = nextPlan ? Math.round((currentEarn / targetPrice) * 100) : 100;
+            let percentage = isNaN(rawPercentage) ? 0 : Math.min(100, Math.max(0, rawPercentage));
 
             return (
               <div className="px-5 mt-6">
