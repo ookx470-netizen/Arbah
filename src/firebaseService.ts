@@ -1445,7 +1445,7 @@ export async function getReferralTeam(myInviteCode: string): Promise<User[]> {
   }
 
   try {
-    // 1. Direct match in Firestore
+    // 1. Direct match in Firestore using efficient query
     const q = query(collection(db, "users"), where("referrerCode", "==", myInviteCode.trim()));
     const snap = await getDocs(q);
     snap.forEach((d) => {
@@ -1465,15 +1465,7 @@ export async function getReferralTeam(myInviteCode: string): Promise<User[]> {
       });
     }
 
-    // 3. Fallback scan all users in Firestore to guarantee case-insensitive matches
-    const allUsersSnap = await getDocs(collection(db, "users"));
-    allUsersSnap.forEach((d) => {
-      const u = d.data() as User;
-      if (u.referrerCode && u.referrerCode.trim().toUpperCase() === cleanCode) {
-        const key = u.phone || u.id || d.id;
-        if (key) teamMap[key] = u;
-      }
-    });
+    // 3. REMOVED expensive full collection scan to save quota!
 
     const result = Object.values(teamMap).sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
     return result;
@@ -1497,15 +1489,16 @@ export function subscribeToReferralTeam(myInviteCode: string, callback: (team: U
   // Initial fetch immediately
   getReferralTeam(myInviteCode).then(list => callback(list)).catch(() => {});
 
-  return safeOnSnapshot(collection(db, "users"), (snapshot) => {
+  // Optimization: use filtered query instead of listening to all users to save quota
+  const q = query(collection(db, "users"), where("referrerCode", "==", myInviteCode.trim()));
+  
+  return safeOnSnapshot(q, (snapshot) => {
     const teamMap: Record<string, User> = {};
 
     snapshot.forEach((docSnap) => {
       const u = docSnap.data() as User;
-      if (u.referrerCode && u.referrerCode.trim().toUpperCase() === cleanCode) {
-        const key = u.phone || u.id || docSnap.id;
-        if (key) teamMap[key] = u;
-      }
+      const key = u.phone || u.id || docSnap.id;
+      if (key) teamMap[key] = u;
     });
 
     // Merge local storage fallback

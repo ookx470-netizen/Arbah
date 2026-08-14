@@ -932,6 +932,8 @@ export default function TaskView() {
     });
 
     const interval = setInterval(() => {
+      if (document.visibilityState !== 'visible') return; // Save quota if tab is background
+
       import('./firebaseService').then(({ recordUserActivity, getUserByPhone }) => {
         recordUserActivity(currentUser.phone).catch(e => console.warn(e));
         // Also fetch latest data to pick up admin updates (money, VIP tier, etc.)
@@ -944,7 +946,7 @@ export default function TaskView() {
           }
         }).catch(() => {});
       });
-    }, 45000); // every 45 seconds
+    }, 90000); // every 90 seconds (reduced from 45s to save quota)
 
     return () => {
       clearInterval(interval);
@@ -1556,8 +1558,8 @@ export default function TaskView() {
   return (
     <div className="min-h-screen bg-[#f5f7fa] text-slate-800 select-none font-sans relative pb-24" dir="rtl">
 
-      {/* Quota limit fallback notification */}
-      {isFallback && (
+      {/* Quota limit fallback notification - Only visible to Admin */}
+      {isFallback && currentUser?.role === 'admin' && (
         <div className="bg-amber-50 border-b border-amber-200 px-4 py-3 text-amber-900 relative z-30 text-xs font-semibold shadow-sm flex items-start gap-3" dir="rtl">
           <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
           <div className="flex-1">
