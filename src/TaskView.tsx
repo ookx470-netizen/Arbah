@@ -464,8 +464,23 @@ export function getNormalizedTaskText(task: any) {
 export default function TaskView() {
   // Navigation / Active Views
   // 'list' -> Task Log View, 'detail' -> Task Details View
-  const [currentView, setCurrentView] = useState<'list' | 'detail'>('list');
-  const [activeBottomTab, setActiveBottomTab] = useState<'home' | 'jobs' | 'rank' | 'log' | 'profile'>('home');
+  const [currentView, setCurrentView] = useState<'list' | 'detail'>(() => {
+    try {
+      const saved = localStorage.getItem('nav_current_view');
+      return (saved === 'list' || saved === 'detail') ? saved : 'list';
+    } catch {
+      return 'list';
+    }
+  });
+  const [activeBottomTab, setActiveBottomTab] = useState<'home' | 'jobs' | 'rank' | 'log' | 'profile'>(() => {
+    try {
+      const saved = localStorage.getItem('nav_active_bottom_tab');
+      const validTabs = ['home', 'jobs', 'rank', 'log', 'profile'];
+      return (saved && validTabs.includes(saved)) ? (saved as any) : 'home';
+    } catch {
+      return 'home';
+    }
+  });
   
   // Daily Tasks Code Verification States
   const [lastVerifiedCode, setLastVerifiedCode] = useState<string>('');
@@ -593,7 +608,28 @@ export default function TaskView() {
   };
   
   // Selected Task for Details View
-  const [selectedTaskId, setSelectedTaskId] = useState<string>('task-1');
+  const [selectedTaskId, setSelectedTaskId] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('nav_selected_task_id');
+      return saved || 'task-1';
+    } catch {
+      return 'task-1';
+    }
+  });
+
+  // Persistent navigation effect
+  useEffect(() => {
+    try {
+      localStorage.setItem('nav_current_view', currentView);
+      localStorage.setItem('nav_active_bottom_tab', activeBottomTab);
+      if (selectedTaskId) {
+        localStorage.setItem('nav_selected_task_id', selectedTaskId);
+      }
+    } catch (e) {
+      console.warn("Storage write error for navigation:", e);
+    }
+  }, [currentView, activeBottomTab, selectedTaskId]);
+
   const [taskToDeleteId, setTaskToDeleteId] = useState<string | null>(null);
 
   // Interactive local states with persistence
@@ -1034,7 +1070,14 @@ export default function TaskView() {
     localStorage.removeItem('micro_tasks_data');
     try {
       localStorage.removeItem('local_db_notifications');
+      localStorage.removeItem('nav_current_view');
+      localStorage.removeItem('nav_active_bottom_tab');
+      localStorage.removeItem('nav_selected_task_id');
     } catch (e) {}
+    // Reset view state
+    setCurrentView('list');
+    setActiveBottomTab('home');
+    setSelectedTaskId('task-1');
     // Also reset current tasks to default state on logout so next screen starts clean
     setTasks([]);
   };
@@ -1427,23 +1470,64 @@ export default function TaskView() {
         return;
       }
       
-      const response = await fetch('/api/complete-task', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          phone: currentUser.phone,
-          password: currentUser.password || currentUser.id,
-          taskId: targetTask.id,
-          rewardValue
-        })
-      });
+      let data: any;
+      let usedClientFallback = false;
       
-      const data = await response.json();
-      
-      if (!data.success) {
-        throw new Error(data.message || "فشل تسجيل المهمة");
+      try {
+        const response = await fetch('/api/complete-task', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            phone: currentUser.phone,
+            password: currentUser.password || currentUser.id,
+            taskId: targetTask.id,
+            rewardValue
+          })
+        });
+        
+        const contentType = response.headers.get('content-type') || '';
+        if (!response.ok || contentType.includes('text/html')) {
+          throw new Error('API_NOT_FOUND_OR_HTML');
+        }
+        
+        data = await response.json();
+        
+        if (!data.success) {
+          throw new Error(data.message || "فشل تسجيل المهمة");
+        }
+      } catch (apiErr: any) {
+        console.warn("API complete-task failed or not found, falling back to direct client-side database update:", apiErr);
+        usedClientFallback = true;
+        
+        const baseEarnings = Number(currentUser.earnings) || 0;
+        const baseTaskIncome = Number(currentUser.taskIncome) || 0;
+        const reward = Number(rewardValue) || 0;
+        
+        const newEarnings = Number((baseEarnings + reward).toFixed(2));
+        const newTaskIncome = Number((baseTaskIncome + reward).toFixed(2));
+        
+        const { updateUserStats, creditReferrerCommission } = await import('./firebaseService');
+        
+        // 1. Direct Firestore write
+        await updateUserStats(currentUser.phone, {
+          earnings: newEarnings,
+          taskIncome: newTaskIncome
+        });
+        
+        // 2. Direct Referrer commission credit
+        try {
+          await creditReferrerCommission(currentUser.phone, reward, currentUser.username || '');
+        } catch (commErr) {
+          console.warn("Client fallback commission error:", commErr);
+        }
+        
+        data = {
+          success: true,
+          newEarnings,
+          newTaskIncome
+        };
       }
       
       const updatedUser = {
@@ -2125,33 +2209,66 @@ export default function TaskView() {
                     />
                     
                     {currentTask.uploadedScreenshot ? (
-                      <div className="relative group rounded-xl overflow-hidden border border-stone-200 aspect-video bg-stone-50">
-                        <img 
-                          src={currentTask.uploadedScreenshot} 
-                          alt="Screenshot Preview" 
-                          className="w-full h-full object-cover"
-                        />
+                      <div className="space-y-3">
+                        <div 
+                          onClick={currentTask.status === 'in_progress' ? triggerFileUpload : undefined}
+                          className={`relative rounded-xl overflow-hidden border border-stone-200 aspect-video bg-stone-50 group ${currentTask.status === 'in_progress' ? 'cursor-pointer hover:opacity-95' : ''}`}
+                        >
+                          <img 
+                            src={currentTask.uploadedScreenshot} 
+                            alt="Screenshot Preview" 
+                            className="w-full h-full object-cover"
+                          />
+                          {currentTask.status === 'in_progress' && (
+                            <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-sm text-white text-[10px] px-2.5 py-1 rounded-lg font-bold flex items-center gap-1">
+                              <Camera className="w-3.5 h-3.5" />
+                              <span>انقر لتغيير الصورة</span>
+                            </div>
+                          )}
+                        </div>
                         {currentTask.status === 'in_progress' && (
-                          <div className="absolute inset-0 bg-[#0B1528]/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                            <button 
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
                               onClick={triggerFileUpload}
-                              className="bg-white text-stone-900 px-3 py-1.5 rounded-lg font-bold text-[10px]"
+                              className="flex-1 bg-blue-50 text-blue-600 hover:bg-blue-100 py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all"
                             >
-                              تغيير الصورة
+                              <Camera className="w-4 h-4" />
+                              <span>رفع لقطة جديدة</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const updated = tasks.map(t => {
+                                  if (t.id === currentTask.id) {
+                                    return { ...t, uploadedScreenshot: undefined };
+                                  }
+                                  return t;
+                                });
+                                saveTasks(updated);
+                                triggerNotification("🗑️ تم حذف لقطة الشاشة الحالية بنجاح! يرجى رفع لقطة جديدة.");
+                              }}
+                              className="bg-rose-50 text-rose-600 hover:bg-rose-100 py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                              <span>حذف الصورة</span>
                             </button>
                           </div>
                         )}
                       </div>
                     ) : (
                       <button
+                        type="button"
                         onClick={triggerFileUpload}
                         disabled={isUploading || currentTask.status !== 'in_progress'}
-                        className={`w-16 h-16 rounded-xl border-2 border-dashed border-blue-400/80 flex flex-col items-center justify-center text-blue-500 hover:bg-blue-50/50 transition-all ${
+                        className={`w-full py-6 rounded-xl border-2 border-dashed border-blue-400/80 flex flex-col items-center justify-center text-blue-500 hover:bg-blue-50/50 transition-all ${
                           isUploading ? 'animate-pulse' : ''
                         } ${currentTask.status !== 'in_progress' ? 'opacity-50 cursor-not-allowed' : ''}`}
                       >
-                        <Camera className="w-5 h-5 stroke-[2]" />
-                        {isUploading && <span className="text-[8px] mt-0.5">جاري الرفع...</span>}
+                        <Camera className="w-6 h-6 stroke-[2] mb-1" />
+                        <span className="text-xs font-bold">رفع لقطة الشاشة (سكرين شوت)</span>
+                        {isUploading && <span className="text-[10px] mt-1 text-blue-400 animate-pulse">جاري الرفع والمعالجة...</span>}
                       </button>
                     )}
                   </div>

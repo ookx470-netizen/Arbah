@@ -52,9 +52,10 @@ export async function hashPassword(password: string): Promise<string> {
 
 // Let's keep a state flag for Local Storage fallback mode
 let useLocalStorageFallback = false;
-// Clear sticky offline fallback on load to automatically heal and reconnect to Firestore when Blaze plan is active or quota resets!
 try {
-  localStorage.removeItem('oxlo_quota_fallback_active');
+  if (localStorage.getItem('oxlo_quota_fallback_active') === 'true') {
+    useLocalStorageFallback = true;
+  }
 } catch (e) {
   console.warn(e);
 }
