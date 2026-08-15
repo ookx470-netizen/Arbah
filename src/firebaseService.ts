@@ -2735,24 +2735,92 @@ function normalizePhone(p: string): string {
   return digits.length >= 10 ? digits.slice(-10) : digits;
 }
 
-function matchesUser(notifUserId: string, target: string | User): boolean {
-  if (!notifUserId || !target) return false;
-  if (notifUserId === 'all' || notifUserId === 'broadcast') return true;
+export function isUserSubscriber(user: User | null | undefined): boolean {
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+  if (user.hasDeposited) return true;
+  const tier = (user.vipTier || '').trim();
+  return tier !== '' && tier !== 'الباقة العادية' && tier !== 'VIP0';
+}
 
-  const targetPhone = typeof target === 'string' ? target : (target.phone || target.id || '');
-  const targetUserObj = typeof target === 'string' ? null : target;
+export function matchesUserNotification(notif: UserNotification | any, target: string | User): boolean {
+  if (!notif || !target) return false;
+  const notifUserId = typeof notif === 'string' ? notif : (notif.userId || '');
+  const notifMsg = typeof notif === 'object' && notif.message ? notif.message : '';
+  const notifCreatedAt = typeof notif === 'object' && notif.createdAt ? notif.createdAt : '';
 
+  const targetPhone = typeof target === 'string' ? target.trim() : (target.phone || target.id || '').trim();
+  const targetUserObj: User | null = typeof target === 'string' ? (getLocalUsers()[targetPhone] || null) : target;
+  const targetIsAdmin = (typeof target === 'string' && (target === 'admin' || target === '07519952000' || target === 'ADMIN95' || target === 'OXLO95')) || 
+                        (targetUserObj?.role === 'admin');
+
+  // 1. SUPPORT / CHAT MESSAGES:
+  // Must ONLY appear to the specific account owner (or admin if it's an admin notification). Never broadcast to everyone.
+  const isSupportOrChatMessage = notifMsg.includes('الدعم الفني') || 
+                                 notifMsg.includes('دردشة') || 
+                                 notifMsg.includes('رسالة جديدة من الإدارة') || 
+                                 notifMsg.includes('رسالة جديدة من العضو');
+  if (isSupportOrChatMessage) {
+    if (notifUserId === 'broadcast' || notifUserId === 'all') {
+      return false; // Legacy corrupt broadcast support message should never leak to users
+    }
+    if (notifUserId === 'admin') {
+      return Boolean(targetIsAdmin);
+    }
+    // Strict match to the specific user's phone or ID
+    if (targetUserObj) {
+      if (notifUserId === targetUserObj.phone || notifUserId === targetUserObj.id) return true;
+    }
+    if (notifUserId === targetPhone) return true;
+    const n1 = normalizePhone(notifUserId);
+    const n2 = normalizePhone(targetPhone);
+    if (n1 && n2 && n1.length >= 9 && n1 === n2) return true;
+    return false;
+  }
+
+  // 2. DAILY TASK CODE NOTIFICATIONS (رمز المهام):
+  // Must ONLY reach subscribers (hasDeposited: true or active VIP tier). Non-subscribers MUST NEVER receive it.
+  const isTaskCodeMessage = notifMsg.includes('رمز المهام') || notifMsg.includes('🔑 رمز المهام');
+  if (isTaskCodeMessage) {
+    // If target is not a subscriber and not admin, reject unconditionally!
+    if (!targetIsAdmin && (!targetUserObj || !isUserSubscriber(targetUserObj))) {
+      return false;
+    }
+  }
+
+  // 3. BROADCAST NOTIFICATIONS:
+  // When a user opens a new account, they should only see their welcome message.
+  // Past broadcast notifications created before the user's account registration date (createdAt) MUST NOT be shown!
+  if (notifUserId === 'all' || notifUserId === 'broadcast') {
+    if (isTaskCodeMessage) {
+      // Legacy broadcast task code: only show to subscribers if created after registration
+      if (!targetIsAdmin && (!targetUserObj || !isUserSubscriber(targetUserObj))) {
+        return false;
+      }
+    }
+    if (targetUserObj && targetUserObj.createdAt && notifCreatedAt) {
+      const userCreatedMs = new Date(targetUserObj.createdAt).getTime();
+      const notifCreatedMs = new Date(notifCreatedAt).getTime();
+      // If notification was created before user registered (with 30s buffer), do not deliver to new user
+      if (notifCreatedMs < userCreatedMs - 30000) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // 4. DIRECT USER NOTIFICATIONS (Matched by Phone, ID, or Admin):
   if (notifUserId === targetPhone) return true;
 
   if (targetUserObj) {
     if (targetUserObj.id && notifUserId === targetUserObj.id) return true;
     if (targetUserObj.phone && notifUserId === targetUserObj.phone) return true;
     if (targetUserObj.inviteCode && notifUserId === targetUserObj.inviteCode) return true;
-    if (targetUserObj.role === 'admin' && (notifUserId === 'admin' || notifUserId === 'oxlo_admin' || notifUserId === '07519952000' || notifUserId === '07712345678' || notifUserId === 'ADMIN95' || notifUserId === 'OXLO95')) {
+    if (targetIsAdmin && (notifUserId === 'admin' || notifUserId === 'oxlo_admin' || notifUserId === '07519952000' || notifUserId === '07712345678' || notifUserId === 'ADMIN95' || notifUserId === 'OXLO95')) {
       return true;
     }
   } else {
-    if (targetPhone === 'admin' && (notifUserId === 'admin' || notifUserId === 'oxlo_admin' || notifUserId === '07519952000' || notifUserId === '07712345678' || notifUserId === 'ADMIN95' || notifUserId === 'OXLO95')) {
+    if (targetIsAdmin && (notifUserId === 'admin' || notifUserId === 'oxlo_admin' || notifUserId === '07519952000' || notifUserId === '07712345678' || notifUserId === 'ADMIN95' || notifUserId === 'OXLO95')) {
       return true;
     }
   }
@@ -2764,6 +2832,10 @@ function matchesUser(notifUserId: string, target: string | User): boolean {
   }
 
   return false;
+}
+
+function matchesUser(notifUserIdOrObj: string | UserNotification, target: string | User): boolean {
+  return matchesUserNotification(notifUserIdOrObj, target);
 }
 
 function deduplicateNotifications(list: UserNotification[]): UserNotification[] {
@@ -2779,7 +2851,7 @@ function deduplicateNotifications(list: UserNotification[]): UserNotification[] 
 }
 
 export async function getUserNotifications(targetUser: string | User): Promise<UserNotification[]> {
-  const localList = Object.values(getLocalNotifications()).filter(n => matchesUser(n.userId, targetUser));
+  const localList = Object.values(getLocalNotifications()).filter(n => matchesUserNotification(n, targetUser));
 
   try {
     const q = query(collection(db, "notifications"));
@@ -2787,7 +2859,7 @@ export async function getUserNotifications(targetUser: string | User): Promise<U
     const fsList: UserNotification[] = [];
     snap.forEach(d => {
       const data = d.data() as UserNotification;
-      if (matchesUser(data.userId, targetUser)) {
+      if (matchesUserNotification(data, targetUser)) {
         fsList.push(data);
       }
     });
@@ -2808,7 +2880,7 @@ export async function getUserNotifications(targetUser: string | User): Promise<U
 export function subscribeToUserNotifications(targetUser: string | User, callback: (notifs: UserNotification[]) => void): () => void {
   const getFilteredList = (localMap: Record<string, UserNotification>) => {
     const filtered = Object.values(localMap)
-      .filter(n => matchesUser(n.userId, targetUser))
+      .filter(n => matchesUserNotification(n, targetUser))
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     return deduplicateNotifications(filtered);
   };
@@ -2852,7 +2924,7 @@ export async function markAllNotificationsAsRead(targetUser: string | User): Pro
   let updated = false;
 
   Object.values(localMap).forEach(n => {
-    if (matchesUser(n.userId, targetUser) && !n.read) {
+    if (matchesUserNotification(n, targetUser) && !n.read) {
       n.read = true;
       updated = true;
     }
@@ -2869,7 +2941,7 @@ export async function markAllNotificationsAsRead(targetUser: string | User): Pro
     let count = 0;
     snapshot.forEach(d => {
       const data = d.data() as UserNotification;
-      if (matchesUser(data.userId, targetUser)) {
+      if (matchesUserNotification(data, targetUser)) {
         batch.update(d.ref, { read: true });
         count++;
       }

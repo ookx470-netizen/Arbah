@@ -668,12 +668,30 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
     try {
       const msg = `🔑 رمز المهام اليومي الجديد لفتح السجل الخاص بك هو: ${code}`;
       
-      // Send a single broadcast notification to all users instantly
-      await createNotification('broadcast', msg);
+      // Get only active subscribers (المشتركين الفعليين بباقات VIP أو أصحاب الإيداعات)
+      const subscribers = users.filter(u => 
+        u.role !== 'admin' && (
+          u.hasDeposited === true || 
+          (u.vipTier && u.vipTier !== 'الباقة العادية' && u.vipTier !== 'VIP0' && u.vipTier.trim() !== '')
+        )
+      );
+
+      if (subscribers.length === 0) {
+        showToast("⚠️ تنبيه: لا يوجد مشتركون باقات VIP حالياً لإرسال الرمز إليهم.");
+        return;
+      }
+
+      // Send dedicated notification to each subscriber's personal account
+      await Promise.all(
+        subscribers.map(sub => {
+          const target = sub.phone || sub.id;
+          return createNotification(target, msg);
+        })
+      );
       
-      showToast(`🎉 تم إرسال الرمز اليومي بنجاح إلى جرس إشعارات جميع المستخدمين! 📢`);
+      showToast(`🎉 تم إرسال الرمز اليومي بنجاح إلى المشتركين فقط (${subscribers.length} مشترك) ولن يظهر لغير المشتركين! 👑`);
     } catch (err) {
-      console.error("Error sending daily code to all users:", err);
+      console.error("Error sending daily code to subscribers:", err);
       showToast("⚠️ حدث خطأ أثناء إرسال الإشعار.");
     } finally {
       setSendingNotification(false);
@@ -3119,7 +3137,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                         showSendCodeConfirm ? (
                           <div className="mt-3 bg-blue-950/40 border border-blue-800/40 p-2.5 rounded-xl flex flex-col gap-2 animate-fadeIn text-center">
                             <span className="text-[10px] text-teal-300 font-extrabold leading-relaxed">
-                              هل أنت متأكد من إرسال رمز المهام اليومي ({tasksCodeInput.trim()}) إلى جرس إشعارات جميع المستخدمين؟
+                              هل أنت متأكد من إرسال رمز المهام اليومي ({tasksCodeInput.trim()}) إلى جرس إشعارات المشتركين فقط (VIP)؟ لن يصل لغير المشتركين نهائياً.
                             </span>
                             <div className="flex gap-2 justify-center">
                               <button
@@ -3129,7 +3147,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                                 className="bg-teal-600 hover:bg-teal-700 text-white text-[10px] px-3 py-1.5 rounded-lg font-black cursor-pointer transition-all active:scale-95 flex items-center justify-center gap-1"
                               >
                                 {sendingNotification && <RefreshCw className="w-3 h-3 animate-spin" />}
-                                نعم، أرسل الآن
+                                نعم، أرسل للمشتركين فقط
                               </button>
                               <button
                                 type="button"
@@ -3145,14 +3163,14 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                             type="button"
                             onClick={() => handleSendCodeToSubscribers(false)}
                             disabled={sendingNotification}
-                            className="w-full mt-3 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white py-2 px-3 rounded-lg text-[11px] font-black shadow transition-all cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 disabled:opacity-50"
+                            className="w-full mt-3 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-700 hover:to-amber-800 text-white py-2 px-3 rounded-lg text-[11px] font-black shadow transition-all cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 disabled:opacity-50"
                           >
                             {sendingNotification ? (
                               <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                             ) : (
                               <Bell className="w-3.5 h-3.5" />
                             )}
-                            <span>📢 إرسال الرمز الحالي إلى جرس إشعارات جميع المستخدمين 🚀</span>
+                            <span>👑 إرسال الرمز الحالي إلى جرس إشعارات المشتركين فقط (VIP) 🚀</span>
                           </button>
                         )
                       )}
