@@ -64,6 +64,7 @@ import ProfileCenter from './components/ProfileCenter';
 import AdminPanel from './components/AdminPanel';
 import { WelcomeOverlay } from './components/WelcomeOverlay';
 import { LeaderBonusModal } from './components/LeaderBonusModal';
+import { SignalLogo } from './components/SignalLogo';
 import { 
   initializeDatabase, 
   isFallbackMode,
@@ -2599,7 +2600,74 @@ export default function TaskView() {
             )}
           </div>
           
-          <div className="bg-gradient-to-br from-blue-50 to-indigo-50/70 rounded-2xl p-4 border border-blue-200/60 text-right space-y-3 shadow-sm">
+          {/* Signal Official Community Card (مجموعة سجنال الرسمية) */}
+          {(settings.showSignalGroup !== false) && (
+            <div className="bg-gradient-to-br from-[#2C6BED]/10 via-[#2C6BED]/5 to-white rounded-2xl p-4 sm:p-5 border-2 border-[#2C6BED]/30 text-right space-y-3 shadow-sm hover:shadow-md transition-all mb-6">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <SignalLogo className="w-10 h-10 shrink-0" rounded="rounded-xl" />
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-black text-slate-900">مجموعة OXLO على Signal</span>
+                      <span className="bg-[#2C6BED]/15 text-[#2C6BED] text-[9px] font-black px-2 py-0.5 rounded-full border border-[#2C6BED]/30">
+                        المجموعة الرسمية
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-slate-500 font-bold block mt-0.5">
+                      مجتمع وتحديثات الأعضاء الحصرية
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <p className="text-[10px] sm:text-[11px] text-slate-600 leading-relaxed font-bold">
+                انضم الآن إلى مجموعة OXLO الرسمية على تطبيق Signal لمتابعة أهم التوصيات، الإعلانات والتحديثات المباشرة، والتواصل الفوري مع مجتمع المنصة.
+              </p>
+
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const rawLink = (settings.signalGroupLink || '').trim();
+                    if (!rawLink) {
+                      triggerNotification("سيتم إضافة رابط مجموعة Signal قريباً من قبل الإدارة");
+                      return;
+                    }
+                    const fullLink = rawLink.startsWith('http://') || rawLink.startsWith('https://') 
+                      ? rawLink 
+                      : `https://${rawLink}`;
+                    window.open(fullLink, '_blank', 'noopener,noreferrer');
+                  }}
+                  className="flex-1 bg-[#2C6BED] hover:bg-[#2057c7] text-white py-2.5 px-4 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 shadow-md hover:shadow-lg active:scale-95 cursor-pointer"
+                >
+                  <SignalLogo className="w-4 h-4" rounded="rounded-md" />
+                  <span>انضمام إلى مجموعة Signal الآن</span>
+                  <ArrowUpRight className="w-3.5 h-3.5" />
+                </button>
+
+                {settings.signalGroupLink && settings.signalGroupLink.trim() !== '' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const rawLink = settings.signalGroupLink!.trim();
+                      const fullLink = rawLink.startsWith('http://') || rawLink.startsWith('https://') 
+                        ? rawLink 
+                        : `https://${rawLink}`;
+                      navigator.clipboard.writeText(fullLink);
+                      triggerNotification("تم نسخ رابط مجموعة Signal بنجاح");
+                      playChimeSound();
+                    }}
+                    className="p-2.5 bg-white hover:bg-slate-100 text-[#2C6BED] border border-[#2C6BED]/30 rounded-xl transition-all cursor-pointer shrink-0 shadow-sm"
+                    title="نسخ الرابط"
+                  >
+                    <Copy className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="bg-gradient-to-br from-blue-50 to-indigo-50/70 rounded-2xl p-4 border border-blue-200/60 text-right space-y-3 shadow-sm mt-6">
             <div className="flex items-center gap-2 justify-end text-blue-800">
               <span className="text-xs font-black flex items-center gap-1.5">
                 <Smartphone className="w-4 h-4 text-blue-600" />

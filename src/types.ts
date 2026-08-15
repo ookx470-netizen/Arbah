@@ -27,6 +27,7 @@ export interface User {
   isOnline?: boolean; // حالة الاتصال الحالية للمستخدم (داخل الموقع أم لا)
   isWithdrawalBlocked?: boolean; // حظر سحب الأرباح للمستخدم
   bypassHoliday?: boolean; // استثناء العضو من العطلة الإجبارية وفتح السجل له
+  hasDeposited?: boolean; // هل قام المستخدم بالإيداع وتفعيل الحساب؟
 }
 
 export interface UserNotification {
@@ -120,6 +121,8 @@ export interface SystemSettings {
   supportFaqs?: SupportFaq[]; // الأسئلة الشائعة للرد التلقائي المخصص
   tasksCode?: string; // رمز المهام اليومي المطلوب لدخول السجل
   hideTrialPlans?: boolean; // إخفاء الباقات التجريبية من واجهة الأعضاء
+  signalGroupLink?: string; // رابط مجموعة Signal الرسمية
+  showSignalGroup?: boolean; // إظهار أو إخفاء زر مجموعة Signal في الصفحة الرئيسية
 }
 
 export interface SupportFaq {

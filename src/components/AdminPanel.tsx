@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   getAllUsers, 
   getAllDeposits, 
@@ -65,8 +65,23 @@ import {
   Moon,
   MapPin,
   Globe,
-  Calendar
+  Calendar,
+  Network,
+  Share2,
+  UserPlus,
+  Award,
+  CheckCircle2,
+  PhoneCall,
+  Layers,
+  Sparkles,
+  TrendingUp,
+  UserCheck,
+  Eye,
+  Copy,
+  Phone,
+  ExternalLink
 } from 'lucide-react';
+import { SignalLogo } from './SignalLogo';
 import { getCountryFlagEmoji } from '../locationService';
 
 interface AdminPanelProps {
@@ -101,9 +116,156 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
   });
   
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'deposits' | 'withdrawals' | 'plans' | 'settings' | 'all' | 'support'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'teams' | 'deposits' | 'withdrawals' | 'plans' | 'settings' | 'all' | 'support'>('overview');
   const [depositFilter, setDepositFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
   const [withdrawalFilter, setWithdrawalFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
+
+  // Team Management & Referral Tree States
+  const [selectedUserForTeamModal, setSelectedUserForTeamModal] = useState<User | null>(null);
+  const [teamSearchTerm, setTeamSearchTerm] = useState<string>('');
+  const [teamListFilter, setTeamListFilter] = useState<'all' | 'has_team' | 'vip' | 'deposited'>('all');
+  const [modalLevelFilter, setModalLevelFilter] = useState<'all' | '1' | '2' | '3'>('all');
+  const [modalMemberSearch, setModalMemberSearch] = useState<string>('');
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  const handleCopyText = (text: string, key: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey(null), 2000);
+  };
+
+  // Map of invite codes to Users for rapid lookups
+  const inviteCodeToUserMap = useMemo(() => {
+    const map: Record<string, User> = {};
+    users.forEach(u => {
+      if (u.inviteCode) {
+        map[u.inviteCode.trim().toUpperCase()] = u;
+      }
+    });
+    return map;
+  }, [users]);
+
+  // Map of direct invites: referrerCode -> User[]
+  const directInvitesMap = useMemo(() => {
+    const map: Record<string, User[]> = {};
+    users.forEach(u => {
+      if (u.referrerCode) {
+        const ref = u.referrerCode.trim().toUpperCase();
+        if (!map[ref]) map[ref] = [];
+        map[ref].push(u);
+      }
+    });
+    return map;
+  }, [users]);
+
+  // Helper to get structured 3-level team breakdown
+  const getUserTeamBreakdown = (user: User | null) => {
+    if (!user || !user.inviteCode) {
+      return { level1: [], level2: [], level3: [], all: [], directCount: 0, totalCount: 0, depositedCount: 0 };
+    }
+    const myCode = user.inviteCode.trim().toUpperCase();
+    
+    // Level 1 (Direct)
+    const level1 = directInvitesMap[myCode] || [];
+    
+    // Level 2 (Indirect 1)
+    const level2: User[] = [];
+    level1.forEach(m1 => {
+      if (m1.inviteCode) {
+        const sub = directInvitesMap[m1.inviteCode.trim().toUpperCase()] || [];
+        level2.push(...sub);
+      }
+    });
+
+    // Level 3 (Indirect 2)
+    const level3: User[] = [];
+    level2.forEach(m2 => {
+      if (m2.inviteCode) {
+        const sub = directInvitesMap[m2.inviteCode.trim().toUpperCase()] || [];
+        level3.push(...sub);
+      }
+    });
+
+    const all = [...level1, ...level2, ...level3];
+    const depositedCount = all.filter(m => m.hasDeposited === true).length;
+
+    return {
+      level1,
+      level2,
+      level3,
+      all,
+      directCount: level1.length,
+      totalCount: all.length,
+      depositedCount
+    };
+  };
+
+  const filteredTeamUsers = useMemo(() => {
+    return users.filter(u => {
+      const q = teamSearchTerm.trim().toLowerCase();
+      const matchesSearch = !q || 
+        u.username.toLowerCase().includes(q) || 
+        u.phone.includes(q) || 
+        (u.inviteCode && u.inviteCode.toLowerCase().includes(q)) ||
+        (u.referrerCode && u.referrerCode.toLowerCase().includes(q));
+
+      if (!matchesSearch) return false;
+
+      const teamInfo = getUserTeamBreakdown(u);
+
+      if (teamListFilter === 'has_team') {
+        return teamInfo.totalCount > 0;
+      }
+      if (teamListFilter === 'vip') {
+        return u.vipTier && u.vipTier !== 'الباقة العادية' && u.vipTier !== 'VIP0';
+      }
+      if (teamListFilter === 'deposited') {
+        return u.hasDeposited === true;
+      }
+
+      return true;
+    }).sort((a, b) => {
+      const aTeam = getUserTeamBreakdown(a).totalCount;
+      const bTeam = getUserTeamBreakdown(b).totalCount;
+      if (bTeam !== aTeam) return bTeam - aTeam;
+      return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+    });
+  }, [users, teamSearchTerm, teamListFilter, directInvitesMap]);
+
+  const selectedUserTeam = useMemo(() => {
+    if (!selectedUserForTeamModal) return null;
+    return getUserTeamBreakdown(selectedUserForTeamModal);
+  }, [selectedUserForTeamModal, directInvitesMap]);
+
+  const filteredModalMembers = useMemo(() => {
+    if (!selectedUserTeam) return [];
+    
+    let list: { member: User; level: number }[] = [];
+    if (modalLevelFilter === '1') {
+      list = selectedUserTeam.level1.map(m => ({ member: m, level: 1 }));
+    } else if (modalLevelFilter === '2') {
+      list = selectedUserTeam.level2.map(m => ({ member: m, level: 2 }));
+    } else if (modalLevelFilter === '3') {
+      list = selectedUserTeam.level3.map(m => ({ member: m, level: 3 }));
+    } else {
+      list = [
+        ...selectedUserTeam.level1.map(m => ({ member: m, level: 1 })),
+        ...selectedUserTeam.level2.map(m => ({ member: m, level: 2 })),
+        ...selectedUserTeam.level3.map(m => ({ member: m, level: 3 }))
+      ];
+    }
+
+    if (modalMemberSearch.trim()) {
+      const q = modalMemberSearch.trim().toLowerCase();
+      list = list.filter(item => 
+        item.member.username.toLowerCase().includes(q) ||
+        item.member.phone.includes(q) ||
+        (item.member.inviteCode && item.member.inviteCode.toLowerCase().includes(q))
+      );
+    }
+
+    return list;
+  }, [selectedUserTeam, modalLevelFilter, modalMemberSearch]);
 
   // Support Chat admin states
   const [chats, setChats] = useState<SupportChat[]>([]);
@@ -179,6 +341,8 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
   const [tasksCodeInput, setTasksCodeInput] = useState<string>('');
   const [hideTrialPlansInput, setHideTrialPlansInput] = useState<boolean>(false);
   const [telegramSupportUsernameInput, setTelegramSupportUsernameInput] = useState<string>('');
+  const [signalGroupLinkInput, setSignalGroupLinkInput] = useState<string>('');
+  const [showSignalGroupInput, setShowSignalGroupInput] = useState<boolean>(true);
   const [sendingNotification, setSendingNotification] = useState<boolean>(false);
   const [showSendCodeConfirm, setShowSendCodeConfirm] = useState<boolean>(false);
 
@@ -379,6 +543,8 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
       setTasksCodeInput(sysSettings.tasksCode ?? '');
       setHideTrialPlansInput(sysSettings.hideTrialPlans ?? false);
       setTelegramSupportUsernameInput(sysSettings.telegramSupportUsername ?? '');
+      setSignalGroupLinkInput(sysSettings.signalGroupLink ?? '');
+      setShowSignalGroupInput(sysSettings.showSignalGroup !== undefined ? sysSettings.showSignalGroup : true);
     } catch (error) {
       console.error("Error loading admin data:", error);
       showToast("خطأ أثناء تحميل البيانات من قاعدة البيانات");
@@ -465,6 +631,8 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
         supportAgentAvatar: settings.supportAgentAvatar,
         supportFaqs: settings.supportFaqs,
         telegramSupportUsername: telegramSupportUsernameInput.trim(),
+        signalGroupLink: signalGroupLinkInput.trim(),
+        showSignalGroup: showSignalGroupInput,
         vipPlans: settings.vipPlans ?? [
           { id: 'plan_600', name: 'باقة 600$', price: 600, profit: 18, tasksCount: 5 },
           { id: 'plan_1200', name: 'باقة 1200$', price: 1200, profit: 38, tasksCount: 5 }
@@ -1059,6 +1227,13 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
               { id: 'overview', label: 'الرئيسية والإحصائيات', icon: ShieldAlert, badge: null },
               { id: 'users', label: 'قائمة الأعضاء', icon: Users, badge: users.length },
               { 
+                id: 'teams', 
+                label: 'الفريق', 
+                icon: Network, 
+                badge: users.filter(u => (directInvitesMap[u.inviteCode?.trim().toUpperCase() || ''] || []).length > 0).length,
+                badgeColor: 'bg-indigo-100 text-indigo-700 font-extrabold'
+              },
+              { 
                 id: 'deposits', 
                 label: 'طلبات الإيداع', 
                 icon: ArrowDownCircle, 
@@ -1597,6 +1772,19 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                                 </button>
 
                                 <button
+                                  onClick={() => {
+                                    setSelectedUserForTeamModal(u);
+                                    setModalLevelFilter('all');
+                                    setModalMemberSearch('');
+                                  }}
+                                  className="px-2 py-1 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded text-[10px] font-bold transition-all cursor-pointer flex items-center justify-center gap-1"
+                                  title="عرض شجرة وأعضاء الفريق"
+                                >
+                                  <Network className="w-3 h-3 text-indigo-600" />
+                                  <span>عرض الفريق</span>
+                                </button>
+
+                                <button
                                   onClick={() => handleEditUserClick(u)}
                                   className="px-2 py-0.5 bg-slate-100 text-slate-600 hover:bg-slate-200 rounded text-[9px] font-bold transition-all cursor-pointer"
                                   title="تعديل الأرصدة السريع"
@@ -1605,6 +1793,293 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                                 </button>
                               </div>
                             )}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          )}
+
+          {/* Panel: Team Tree & Referral Network (إدارة الفريق وشبكة الإحالات) */}
+          {(activeTab === 'teams' || activeTab === 'all') && (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden animate-fadeIn">
+            {/* Header */}
+            <div className="p-4 bg-gradient-to-r from-indigo-900 via-slate-900 to-slate-900 text-white flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-400/30 flex items-center justify-center text-indigo-300">
+                  <Network className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-extrabold text-white flex items-center gap-2">
+                    <span>إدارة الفريق وشبكة الإحالات</span>
+                    <span className="bg-indigo-500/30 text-indigo-200 text-[10px] px-2 py-0.5 rounded-full border border-indigo-400/30 font-mono">
+                      {users.length} مستخدم
+                    </span>
+                  </h2>
+                  <p className="text-[11px] text-slate-300 font-medium mt-0.5">
+                    عرض كل شخص مع فريقه المباشر وشجرته التابعة له عند الضغط على اسمه
+                  </p>
+                </div>
+              </div>
+
+              {/* Summary Badges in Header */}
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="bg-white/10 border border-white/15 px-3 py-1.5 rounded-xl text-center">
+                  <span className="block text-[9px] text-indigo-200 font-medium">أصحاب الفرق</span>
+                  <span className="text-xs font-black text-amber-300">
+                    {users.filter(u => getUserTeamBreakdown(u).totalCount > 0).length} قائد
+                  </span>
+                </div>
+                <div className="bg-white/10 border border-white/15 px-3 py-1.5 rounded-xl text-center">
+                  <span className="block text-[9px] text-indigo-200 font-medium">المشتركين المودعين</span>
+                  <span className="text-xs font-black text-emerald-400">
+                    {users.filter(u => u.hasDeposited === true).length} عضو
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Filter and Search Bar */}
+            <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+              {/* Filter Pills */}
+              <div className="flex flex-wrap items-center gap-1.5 bg-slate-200/80 p-1 rounded-xl text-[11px] font-bold">
+                {[
+                  { id: 'all', label: `الكل (${users.length})` },
+                  { id: 'has_team', label: `👥 لديهم فريق (${users.filter(u => getUserTeamBreakdown(u).totalCount > 0).length})` },
+                  { id: 'vip', label: `⭐ باقات VIP (${users.filter(u => u.vipTier && u.vipTier !== 'الباقة العادية' && u.vipTier !== 'VIP0').length})` },
+                  { id: 'deposited', label: `💎 مودعين (${users.filter(u => u.hasDeposited === true).length})` }
+                ].map(f => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => setTeamListFilter(f.id as any)}
+                    className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                      teamListFilter === f.id ? 'bg-indigo-600 text-white shadow-sm font-extrabold' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Search Box */}
+              <div className="relative min-w-[260px]">
+                <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="ابحث بالاسم، رقم الهاتف، أو كود الإحالة..."
+                  value={teamSearchTerm}
+                  onChange={(e) => setTeamSearchTerm(e.target.value)}
+                  className="w-full pl-3 pr-9 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                />
+                {teamSearchTerm && (
+                  <button
+                    onClick={() => setTeamSearchTerm('')}
+                    className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Table of Users and Their Teams */}
+            <div className="overflow-x-auto">
+              <table className="w-full text-right text-xs">
+                <thead>
+                  <tr className="bg-slate-100/90 text-slate-700 font-extrabold border-b border-slate-200 text-[11px]">
+                    <th className="p-3 w-12 text-center">#</th>
+                    <th className="p-3 min-w-[170px]">المستخدم (القائد)</th>
+                    <th className="p-3 min-w-[120px]">كود الدعوة الخاص به</th>
+                    <th className="p-3 min-w-[150px]">تمت دعوته بواسطة</th>
+                    <th className="p-3 text-center min-w-[110px]">الفريق المباشر (L1)</th>
+                    <th className="p-3 text-center min-w-[120px]">إجمالي الفريق (L1-L3)</th>
+                    <th className="p-3 text-center min-w-[110px]">الباقة الحالية</th>
+                    <th className="p-3 text-center min-w-[120px]">الإجراءات</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredTeamUsers.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="p-12 text-center text-slate-400">
+                        <Users className="w-12 h-12 mx-auto mb-2 opacity-20 text-indigo-500" />
+                        <span className="font-bold text-sm block">لا يوجد مستخدمين مطابقين لخيارات البحث</span>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredTeamUsers.map((u, index) => {
+                      const teamInfo = getUserTeamBreakdown(u);
+                      const inviterUser = u.referrerCode ? inviteCodeToUserMap[u.referrerCode.trim().toUpperCase()] : null;
+                      const hasActiveTeam = teamInfo.totalCount > 0;
+
+                      return (
+                        <tr 
+                          key={u.phone || u.id} 
+                          className={`hover:bg-indigo-50/40 transition-colors ${
+                            hasActiveTeam ? 'bg-white font-medium' : 'bg-slate-50/40'
+                          }`}
+                        >
+                          {/* Index */}
+                          <td className="p-3 text-center text-slate-400 font-mono text-[10px]">
+                            {index + 1}
+                          </td>
+
+                          {/* User Details (Clickable) */}
+                          <td className="p-3">
+                            <div 
+                              onClick={() => {
+                                setSelectedUserForTeamModal(u);
+                                setModalLevelFilter('all');
+                                setModalMemberSearch('');
+                              }}
+                              className="group cursor-pointer flex items-center gap-2.5"
+                            >
+                              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center font-bold text-xs shadow-sm shrink-0 group-hover:scale-105 transition-transform">
+                                {u.username ? u.username.charAt(0).toUpperCase() : 'U'}
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-extrabold text-slate-900 group-hover:text-indigo-600 transition-colors underline decoration-dotted underline-offset-4">
+                                    {u.username}
+                                  </span>
+                                  {isUserOnline(u) && (
+                                    <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" title="نشط الآن"></span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-1.5 mt-0.5">
+                                  <span className="font-mono text-[10px] text-slate-500" dir="ltr">{u.phone}</span>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleCopyText(u.phone, `phone_${u.phone}`);
+                                    }}
+                                    className="text-slate-400 hover:text-indigo-600 p-0.5 rounded cursor-pointer"
+                                    title="نسخ رقم الهاتف"
+                                  >
+                                    {copiedKey === `phone_${u.phone}` ? (
+                                      <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                    ) : (
+                                      <Copy className="w-3 h-3" />
+                                    )}
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Invite Code */}
+                          <td className="p-3">
+                            {u.inviteCode ? (
+                              <div className="flex items-center gap-1">
+                                <span className="bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-md font-mono font-black text-[11px]">
+                                  {u.inviteCode}
+                                </span>
+                                <button
+                                  onClick={() => handleCopyText(u.inviteCode || '', `inv_${u.phone}`)}
+                                  className="text-slate-400 hover:text-indigo-600 p-0.5 rounded cursor-pointer"
+                                  title="نسخ كود الدعوة"
+                                >
+                                  {copiedKey === `inv_${u.phone}` ? (
+                                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                  ) : (
+                                    <Copy className="w-3 h-3" />
+                                  )}
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="text-slate-400 text-[10px]">--</span>
+                            )}
+                          </td>
+
+                          {/* Referrer Info (تمت دعوته بواسطة) */}
+                          <td className="p-3">
+                            {inviterUser ? (
+                              <div 
+                                onClick={() => {
+                                  setSelectedUserForTeamModal(inviterUser);
+                                  setModalLevelFilter('all');
+                                  setModalMemberSearch('');
+                                }}
+                                className="cursor-pointer hover:bg-slate-100 p-1 rounded-lg transition-colors inline-block"
+                                title="عرض فريق الراعي"
+                              >
+                                <span className="font-bold text-slate-800 text-xs block hover:text-indigo-600">
+                                  {inviterUser.username}
+                                </span>
+                                <span className="font-mono text-[10px] text-slate-500 block" dir="ltr">
+                                  {inviterUser.phone}
+                                </span>
+                              </div>
+                            ) : u.referrerCode ? (
+                              <span className="font-mono text-[10px] text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">
+                                كود: {u.referrerCode}
+                              </span>
+                            ) : (
+                              <span className="text-[10px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full font-medium">
+                                تسجيل مباشر
+                              </span>
+                            )}
+                          </td>
+
+                          {/* Level 1 Direct Team Count */}
+                          <td className="p-3 text-center">
+                            {teamInfo.directCount > 0 ? (
+                              <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1 rounded-xl font-black text-xs">
+                                <UserCheck className="w-3.5 h-3.5" />
+                                <span>{teamInfo.directCount} عضو</span>
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 text-[11px]">0</span>
+                            )}
+                          </td>
+
+                          {/* Total Multi-level Team Count */}
+                          <td className="p-3 text-center">
+                            {teamInfo.totalCount > 0 ? (
+                              <div className="inline-flex flex-col items-center">
+                                <span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 border border-indigo-200 px-2.5 py-1 rounded-xl font-black text-xs shadow-sm">
+                                  <Network className="w-3.5 h-3.5" />
+                                  <span>{teamInfo.totalCount} عضو</span>
+                                </span>
+                                {teamInfo.depositedCount > 0 && (
+                                  <span className="text-[9px] text-emerald-600 font-extrabold mt-0.5">
+                                    ({teamInfo.depositedCount} مودع نشط)
+                                  </span>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-slate-400 text-[11px]">0</span>
+                            )}
+                          </td>
+
+                          {/* VIP Tier */}
+                          <td className="p-3 text-center">
+                            <span className={`inline-block px-2.5 py-1 rounded-xl text-[10px] font-extrabold ${
+                              u.vipTier && u.vipTier !== 'الباقة العادية' && u.vipTier !== 'VIP0'
+                                ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                                : 'bg-slate-100 text-slate-600'
+                            }`}>
+                              {u.vipTier || 'الباقة العادية'}
+                            </span>
+                          </td>
+
+                          {/* Actions Button */}
+                          <td className="p-3 text-center">
+                            <button
+                              onClick={() => {
+                                setSelectedUserForTeamModal(u);
+                                setModalLevelFilter('all');
+                                setModalMemberSearch('');
+                              }}
+                              className="px-3 py-1.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-sm hover:shadow flex items-center justify-center gap-1.5 mx-auto active:scale-95"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              <span>عرض الفريق</span>
+                            </button>
                           </td>
                         </tr>
                       );
@@ -2183,6 +2658,87 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                     className="w-full px-3 py-2.5 bg-[#0B1528] border border-blue-900/50 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-indigo-500 text-left"
                     dir="ltr"
                   />
+                </div>
+              </div>
+
+              {/* Signal Group Configuration (إعدادات ورابط مجموعة سجنال في الصفحة الرئيسية) */}
+              <div className="bg-gradient-to-br from-[#070D19] to-[#0d1c3a] p-4 sm:p-5 rounded-2xl border-2 border-[#2C6BED]/40 shadow-xl mt-4 text-right space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-blue-900/40 pb-3.5">
+                  <div className="flex items-center gap-3">
+                    <SignalLogo className="w-10 h-10 shrink-0" rounded="rounded-xl" />
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs sm:text-sm font-black text-white">إعدادات مجموعة OXLO على تطبيق Signal</span>
+                        <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full border ${
+                          showSignalGroupInput 
+                            ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' 
+                            : 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                        }`}>
+                          {showSignalGroupInput ? '✅ الزر مفعّل وظاهر' : '❌ الزر مخفي'}
+                        </span>
+                      </div>
+                      <span className="block text-[10px] sm:text-[11px] text-slate-300 mt-0.5">
+                        تحكم في رابط مجموعة تطبيق Signal وإمكانية إظهار أو إخفاء زر المجموعة في نهاية الصفحة الرئيسية للمستخدمين
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Toggle Show/Hide Button */}
+                  <div className="flex items-center gap-1.5 bg-[#0B1528] p-1 rounded-xl border border-blue-900/60 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setShowSignalGroupInput(true)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                        showSignalGroupInput
+                          ? 'bg-[#2C6BED] text-white shadow-md'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      إظهار الزر
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowSignalGroupInput(false)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                        !showSignalGroupInput
+                          ? 'bg-rose-600 text-white shadow-md'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      إخفاء الزر
+                    </button>
+                  </div>
+                </div>
+
+                {/* Input for Signal Group Link */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <label className="font-bold text-slate-200">رابط دعوة مجموعة Signal (Link):</label>
+                    {signalGroupLinkInput && (
+                      <a
+                        href={signalGroupLinkInput.startsWith('http') ? signalGroupLinkInput : `https://${signalGroupLinkInput}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[#2C6BED] hover:text-blue-300 flex items-center gap-1 font-bold text-[10px]"
+                      >
+                        <span>تجربة فتح الرابط</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )}
+                  </div>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={signalGroupLinkInput}
+                      onChange={(e) => setSignalGroupLinkInput(e.target.value)}
+                      placeholder="https://signal.group/#CjQK..."
+                      className="w-full pl-3 pr-3 py-2.5 bg-[#030712] border border-[#2C6BED]/40 rounded-xl text-xs font-mono text-blue-200 focus:outline-none focus:border-[#2C6BED] text-left"
+                      dir="ltr"
+                    />
+                  </div>
+                  <p className="text-[10px] text-slate-400">
+                    ضع رابط الدعوة المباشر للمجموعة على تطبيق Signal. عند ضغط المشتركين على الزر في الصفحة الرئيسية سيتم توجيههم مباشرة إلى المجموعة.
+                  </p>
                 </div>
               </div>
 
@@ -4189,6 +4745,287 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                 </button>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Team Details Modal (نافذة تفاصيل الفريق وشجرة الإحالات) */}
+      {selectedUserForTeamModal && selectedUserTeam && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-stone-950/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white rounded-3xl border border-slate-200 w-full max-w-4xl shadow-2xl overflow-hidden animate-scaleIn flex flex-col max-h-[92vh]">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-indigo-900 via-indigo-800 to-slate-900 text-white p-4 sm:p-5 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center text-indigo-200 font-black text-lg shadow-inner">
+                  {selectedUserForTeamModal.username ? selectedUserForTeamModal.username.charAt(0).toUpperCase() : 'U'}
+                </div>
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="font-black text-base sm:text-lg text-white">
+                      فريق: {selectedUserForTeamModal.username}
+                    </h3>
+                    <span className="bg-amber-400/90 text-slate-950 text-[10px] font-black px-2 py-0.5 rounded-md">
+                      {selectedUserForTeamModal.vipTier || 'الباقة العادية'}
+                    </span>
+                    {selectedUserForTeamModal.hasDeposited && (
+                      <span className="bg-emerald-500/30 text-emerald-200 text-[10px] font-bold px-2 py-0.5 rounded-md border border-emerald-400/30">
+                        مستثمر مودع
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3 text-xs text-indigo-200 mt-1 font-medium">
+                    <span className="flex items-center gap-1">
+                      <Phone className="w-3 h-3 text-indigo-300" />
+                      <span className="font-mono text-white font-bold" dir="ltr">{selectedUserForTeamModal.phone}</span>
+                    </span>
+                    <span>•</span>
+                    <span className="flex items-center gap-1">
+                      <span>كود الدعوة:</span>
+                      <span className="bg-white/20 text-white px-1.5 py-0.5 rounded font-mono font-black text-[11px]">
+                        {selectedUserForTeamModal.inviteCode || 'لا يوجد'}
+                      </span>
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setSelectedUserForTeamModal(null)}
+                className="text-white/70 hover:text-white bg-white/10 hover:bg-white/20 p-2 rounded-xl transition-colors cursor-pointer"
+                title="إغلاق"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Quick Metrics Bar */}
+            <div className="bg-slate-50 border-b border-slate-200 p-3 sm:p-4 grid grid-cols-2 sm:grid-cols-4 gap-2.5 shrink-0">
+              <div className="bg-white p-3 rounded-2xl border border-slate-200/80 shadow-sm text-center">
+                <span className="block text-[10px] font-bold text-slate-500 mb-0.5">المستوى 1 (مباشر)</span>
+                <span className="text-base sm:text-lg font-black text-emerald-600 font-mono">
+                  {selectedUserTeam.directCount}
+                </span>
+                <span className="text-[9px] text-slate-400 block">أعضاء بدعوته المباشرة</span>
+              </div>
+
+              <div className="bg-white p-3 rounded-2xl border border-slate-200/80 shadow-sm text-center">
+                <span className="block text-[10px] font-bold text-slate-500 mb-0.5">المستوى 2 و 3 (فرعي)</span>
+                <span className="text-base sm:text-lg font-black text-blue-600 font-mono">
+                  {selectedUserTeam.level2.length + selectedUserTeam.level3.length}
+                </span>
+                <span className="text-[9px] text-slate-400 block">إحالات غير مباشرة</span>
+              </div>
+
+              <div className="bg-white p-3 rounded-2xl border border-slate-200/80 shadow-sm text-center">
+                <span className="block text-[10px] font-bold text-slate-500 mb-0.5">إجمالي الفريق بالكامل</span>
+                <span className="text-base sm:text-lg font-black text-indigo-700 font-mono">
+                  {selectedUserTeam.totalCount}
+                </span>
+                <span className="text-[9px] text-slate-400 block">جميع المستويات 1-3</span>
+              </div>
+
+              <div className="bg-white p-3 rounded-2xl border border-slate-200/80 shadow-sm text-center">
+                <span className="block text-[10px] font-bold text-slate-500 mb-0.5">الأعضاء المودعين النشطين</span>
+                <span className="text-base sm:text-lg font-black text-amber-600 font-mono">
+                  {selectedUserTeam.depositedCount}
+                </span>
+                <span className="text-[9px] text-slate-400 block">قاموا بالشحن والإيداع</span>
+              </div>
+            </div>
+
+            {/* Filter and Search Bar inside modal */}
+            <div className="p-3 sm:p-4 bg-white border-b border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 shrink-0">
+              {/* Level Tabs */}
+              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-bold overflow-x-auto no-scrollbar">
+                {[
+                  { id: 'all', label: `الكل (${selectedUserTeam.totalCount})` },
+                  { id: '1', label: `المستوى 1 (${selectedUserTeam.directCount})` },
+                  { id: '2', label: `المستوى 2 (${selectedUserTeam.level2.length})` },
+                  { id: '3', label: `المستوى 3 (${selectedUserTeam.level3.length})` }
+                ].map(tab => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setModalLevelFilter(tab.id as any)}
+                    className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer whitespace-nowrap text-[11px] ${
+                      modalLevelFilter === tab.id
+                        ? 'bg-indigo-600 text-white font-black shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Search Inside Team */}
+              <div className="relative min-w-[200px] sm:w-64">
+                <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="بحث في أعضاء الفريق..."
+                  value={modalMemberSearch}
+                  onChange={(e) => setModalMemberSearch(e.target.value)}
+                  className="w-full pl-3 pr-8 py-1.5 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50"
+                />
+                {modalMemberSearch && (
+                  <button
+                    onClick={() => setModalMemberSearch('')}
+                    className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Modal Body - Team Members List */}
+            <div className="p-3 sm:p-4 overflow-y-auto flex-1 space-y-2.5 bg-slate-50/50">
+              {filteredModalMembers.length === 0 ? (
+                <div className="text-center py-12 bg-white rounded-2xl border border-dashed border-slate-300 p-6">
+                  <Network className="w-12 h-12 mx-auto mb-3 text-slate-300" />
+                  <h4 className="text-sm font-bold text-slate-700">لا يوجد أعضاء في هذا القسم</h4>
+                  <p className="text-xs text-slate-400 mt-1">
+                    {modalMemberSearch ? 'لا توجد نتائج مطابقة لبحثك' : 'لم يسجل أي عضو في هذا المستوى بعد'}
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {filteredModalMembers.map((item, idx) => {
+                    const m = item.member;
+                    const directSponsor = m.referrerCode ? inviteCodeToUserMap[m.referrerCode.trim().toUpperCase()] : null;
+                    const subTeam = getUserTeamBreakdown(m);
+
+                    return (
+                      <div 
+                        key={m.phone || m.id || idx}
+                        className="bg-white rounded-2xl border border-slate-200 p-3.5 shadow-sm hover:shadow-md transition-all relative overflow-hidden"
+                      >
+                        {/* Top Ribbon / Level Badge */}
+                        <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-slate-100">
+                          <div className="flex items-center gap-2">
+                            <span className={`px-2 py-0.5 rounded-lg text-[10px] font-black ${
+                              item.level === 1 
+                                ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                                : item.level === 2
+                                ? 'bg-blue-100 text-blue-800 border border-blue-300'
+                                : 'bg-purple-100 text-purple-800 border border-purple-300'
+                            }`}>
+                              {item.level === 1 ? 'المستوى 1 (مباشر)' : item.level === 2 ? 'المستوى 2 (فرعي)' : 'المستوى 3 (فرعي)'}
+                            </span>
+                            <span className="text-[10px] font-mono text-slate-400">#{idx + 1}</span>
+                          </div>
+
+                          <div className="flex items-center gap-1.5">
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                              m.vipTier && m.vipTier !== 'الباقة العادية' && m.vipTier !== 'VIP0'
+                                ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                                : 'bg-slate-100 text-slate-600'
+                            }`}>
+                              {m.vipTier || 'الباقة العادية'}
+                            </span>
+                            {m.hasDeposited ? (
+                              <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[9px] font-extrabold px-1.5 py-0.5 rounded">
+                                ✅ مودع
+                              </span>
+                            ) : (
+                              <span className="bg-slate-100 text-slate-500 text-[9px] font-medium px-1.5 py-0.5 rounded">
+                                ⏳ مجاني
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Member Details */}
+                        <div className="pt-2.5 flex items-start justify-between gap-3">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-extrabold text-slate-900 text-xs sm:text-sm">
+                                {m.username}
+                              </span>
+                              {isUserOnline(m) && (
+                                <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" title="نشط الآن"></span>
+                              )}
+                            </div>
+
+                            {/* Phone & Quick Copy */}
+                            <div className="flex items-center gap-2 text-xs">
+                              <span className="font-mono font-bold text-slate-700 text-xs" dir="ltr">
+                                {m.phone}
+                              </span>
+                              <button
+                                onClick={() => handleCopyText(m.phone, `modal_phone_${m.phone}`)}
+                                className="text-slate-400 hover:text-indigo-600 p-0.5 rounded cursor-pointer"
+                                title="نسخ رقم الهاتف"
+                              >
+                                {copiedKey === `modal_phone_${m.phone}` ? (
+                                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                ) : (
+                                  <Copy className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                            </div>
+
+                            {/* Referrer Info */}
+                            {directSponsor && (
+                              <div className="text-[10px] text-slate-500 flex items-center gap-1 pt-0.5">
+                                <span className="text-slate-400">الراعي المباشر:</span>
+                                <span className="font-bold text-slate-700">{directSponsor.username}</span>
+                                <span className="font-mono text-slate-400" dir="ltr">({directSponsor.phone})</span>
+                              </div>
+                            )}
+
+                            {/* Join Date */}
+                            <div className="text-[10px] text-slate-400 flex items-center gap-1">
+                              <Calendar className="w-3 h-3 text-slate-400" />
+                              <span>انضم بتاريخ: {m.createdAt ? new Date(m.createdAt).toLocaleDateString('ar-EG', { year: 'numeric', month: 'short', day: 'numeric' }) : 'غير محدد'}</span>
+                            </div>
+                          </div>
+
+                          {/* Balance & Sub-team Quick Drill */}
+                          <div className="text-left space-y-1.5 shrink-0">
+                            <div className="bg-slate-50 border border-slate-200/80 px-2 py-1 rounded-xl text-left">
+                              <span className="block text-[8px] text-slate-400">الرصيد / الأرباح</span>
+                              <span className="text-[11px] font-black text-slate-800 font-mono">
+                                ${((m.balance || 0) + (m.earnings || 0)).toFixed(2)}
+                              </span>
+                            </div>
+
+                            {/* Button to Drill Down into this member's team */}
+                            {subTeam.totalCount > 0 && (
+                              <button
+                                onClick={() => {
+                                  setSelectedUserForTeamModal(m);
+                                  setModalLevelFilter('all');
+                                  setModalMemberSearch('');
+                                }}
+                                className="w-full text-[10px] font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-2 py-1 rounded-lg transition-colors cursor-pointer flex items-center justify-center gap-1"
+                                title="عرض فريق هذا العضو"
+                              >
+                                <Network className="w-3 h-3" />
+                                <span>فريقه ({subTeam.totalCount})</span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-3 bg-slate-100 border-t border-slate-200 flex items-center justify-between shrink-0">
+              <div className="text-xs text-slate-600 font-bold">
+                إجمالي المعروض: <span className="font-black text-indigo-600">{filteredModalMembers.length}</span> من أصل <span className="font-black text-slate-800">{selectedUserTeam.totalCount}</span> عضو
+              </div>
+              <button
+                onClick={() => setSelectedUserForTeamModal(null)}
+                className="bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold px-4 py-2 rounded-xl transition-all cursor-pointer shadow-sm"
+              >
+                إغلاق
+              </button>
+            </div>
           </div>
         </div>
       )}
