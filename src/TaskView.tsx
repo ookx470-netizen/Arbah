@@ -57,12 +57,17 @@ import {
   History,
   FileSearch,
   AlertCircle,
-  RotateCcw
+  RotateCcw,
+  BookOpen,
+  HelpCircle
 } from 'lucide-react';
 import AuthPage from './components/AuthPage';
 import ProfileCenter from './components/ProfileCenter';
 import AdminPanel from './components/AdminPanel';
 import { WelcomeOverlay } from './components/WelcomeOverlay';
+import { WelcomeTourModal } from './components/WelcomeTourModal';
+import { QuickGuidePromptToast } from './components/QuickGuidePromptToast';
+import { TaskTutorialModal } from './components/TaskTutorialModal';
 import { LeaderBonusModal } from './components/LeaderBonusModal';
 import { SignalLogo } from './components/SignalLogo';
 import { 
@@ -653,6 +658,9 @@ export default function TaskView() {
   const [profileSubView, setProfileSubView] = useState<'menu' | 'recharge' | 'withdraw' | 'team' | 'bind' | 'dep_log' | 'with_log' | 'change_pass' | 'support' | 'jobs'>('menu');
   const [selectedPlanForUpgrade, setSelectedPlanForUpgrade] = useState<VipPlan | null>(null);
   const [showSupportOptions, setShowSupportOptions] = useState<boolean>(false);
+  const [showWelcomeTour, setShowWelcomeTour] = useState<boolean>(false);
+  const [showGuidePromptToast, setShowGuidePromptToast] = useState<boolean>(false);
+  const [showTaskTutorial, setShowTaskTutorial] = useState<boolean>(false);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [isLoadingLeaderboard, setIsLoadingLeaderboard] = useState<boolean>(false);
   const [rankSubTab, setRankSubTab] = useState<'upgrade' | 'calculator'>('upgrade');
@@ -1062,6 +1070,11 @@ export default function TaskView() {
     } catch (e) {}
     setCurrentUser(usr);
     localStorage.setItem('logged_in_phone', usr.phone);
+
+    // Show stylish prompt banner at the top inviting user to open the guide
+    setTimeout(() => {
+      setShowGuidePromptToast(true);
+    }, 400);
   };
 
   const handleLogout = () => {
@@ -1944,8 +1957,13 @@ export default function TaskView() {
               </div>
 
               <button 
-                onClick={() => triggerNotification("سيتم فتح دليل المساعدة التعليمي قريباً!")}
-                className="bg-white text-blue-600 px-4 py-2 rounded-full text-xs font-extrabold shadow-sm flex items-center gap-1.5 hover:bg-stone-50 transition-all active:scale-95"
+                type="button"
+                onClick={() => {
+                  setShowTaskTutorial(true);
+                  playChimeSound();
+                }}
+                className="bg-white text-blue-600 px-4 py-2 rounded-full text-xs font-extrabold shadow-sm flex items-center gap-1.5 hover:bg-stone-50 transition-all active:scale-95 cursor-pointer hover:shadow-md"
+                title="شرح طريقة تنفيذ المهام وجني الأرباح"
               >
                 <Lightbulb className="w-4 h-4 text-amber-500 fill-amber-300 shrink-0" />
                 <span>درس تعليمي</span>
@@ -2385,13 +2403,18 @@ export default function TaskView() {
       {activeBottomTab === 'home' && (
         <div className="w-full max-w-md mx-auto px-4 pt-4 animate-fadeIn pb-24 text-right">
           
-          {/* Sound & Audio Interactive Bar (Feature 5) */}
+          {/* Sound & Audio Interactive Bar + Quick Guide Button */}
           <div className="flex items-center justify-between bg-white rounded-xl px-3.5 py-2 border border-stone-200/80 mb-4 shadow-sm">
-            <span className="text-[10px] text-stone-500 font-bold flex items-center gap-1">
-              <span>الحالة:</span>
-              <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              <span className="text-emerald-700 font-black">متصل بالشبكة الآمنة</span>
-            </span>
+            <button
+              type="button"
+              onClick={() => setShowWelcomeTour(true)}
+              className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black transition-all border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 active:scale-95 cursor-pointer shadow-sm"
+              title="دليل البدء السريع والتعليمات"
+            >
+              <HelpCircle className="w-3.5 h-3.5 text-blue-600" />
+              <span>دليل البدء والتعليمات</span>
+            </button>
+
             <button 
               onClick={() => {
                 toggleSound();
@@ -2418,7 +2441,7 @@ export default function TaskView() {
               }`}
             >
               {soundEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
-              <span>المؤثرات التفاعلية: {soundEnabled ? 'تشغيل' : 'إيقاف'}</span>
+              <span>المؤثرات: {soundEnabled ? 'تشغيل' : 'إيقاف'}</span>
             </button>
           </div>
 
@@ -2685,6 +2708,53 @@ export default function TaskView() {
               <Download className="w-3.5 h-3.5" />
               <span>تحميل تطبيق الأندرويد المباشر (APK)</span>
             </a>
+          </div>
+
+          {/* Quick Learning & Tutorial Action Buttons at Bottom of Home Page */}
+          <div className="grid grid-cols-2 gap-3 mt-4">
+            <button
+              type="button"
+              onClick={() => {
+                setShowTaskTutorial(true);
+                playChimeSound();
+              }}
+              className="bg-white hover:bg-slate-50 border border-amber-200/80 p-3.5 rounded-2xl shadow-sm text-right flex flex-col justify-between gap-2.5 transition-all active:scale-95 cursor-pointer group"
+            >
+              <div className="flex items-center justify-between w-full">
+                <div className="w-8 h-8 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center border border-amber-500/20 group-hover:scale-105 transition-transform">
+                  <Lightbulb className="w-4 h-4 fill-amber-400/20" />
+                </div>
+                <span className="text-[9px] bg-amber-50 text-amber-700 font-extrabold px-2 py-0.5 rounded-full border border-amber-200">
+                  شرح المهام
+                </span>
+              </div>
+              <div>
+                <span className="text-xs font-black text-slate-800 block">الدرس التعليمي</span>
+                <span className="text-[9px] text-slate-400 font-bold block mt-0.5">كيفية تنفيذ المهام والأرباح</span>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setShowWelcomeTour(true);
+                playChimeSound();
+              }}
+              className="bg-white hover:bg-slate-50 border border-blue-200/80 p-3.5 rounded-2xl shadow-sm text-right flex flex-col justify-between gap-2.5 transition-all active:scale-95 cursor-pointer group"
+            >
+              <div className="flex items-center justify-between w-full">
+                <div className="w-8 h-8 rounded-xl bg-blue-500/10 text-blue-600 flex items-center justify-center border border-blue-500/20 group-hover:scale-105 transition-transform">
+                  <BookOpen className="w-4 h-4" />
+                </div>
+                <span className="text-[9px] bg-blue-50 text-blue-700 font-extrabold px-2 py-0.5 rounded-full border border-blue-200">
+                  دليل البدء
+                </span>
+              </div>
+              <div>
+                <span className="text-xs font-black text-slate-800 block">دليل البدء والتعليمات</span>
+                <span className="text-[9px] text-slate-400 font-bold block mt-0.5">الآلية والخطوات الأساسية</span>
+              </div>
+            </button>
           </div>
 
         </div>
@@ -3039,7 +3109,7 @@ export default function TaskView() {
             initialSubView={profileSubView}
             onSubViewChange={(view) => setProfileSubView(view)}
             settings={settings}
-           
+            onOpenWelcomeTour={() => setShowWelcomeTour(true)}
           />
         </div>
       )}
@@ -3227,6 +3297,52 @@ export default function TaskView() {
           </form>
         </div>
       )}
+
+      {/* Quick Guide Prompt Banner on Login */}
+      {currentUser && (
+        <QuickGuidePromptToast
+          isOpen={showGuidePromptToast}
+          onOpenGuide={() => {
+            setShowGuidePromptToast(false);
+            setShowWelcomeTour(true);
+          }}
+          onClose={() => setShowGuidePromptToast(false)}
+          userName={currentUser.username || currentUser.phone}
+        />
+      )}
+
+      {/* New User Welcome Tour & Quick Start Guide Modal */}
+      {currentUser && (
+        <WelcomeTourModal
+          isOpen={showWelcomeTour}
+          onClose={() => setShowWelcomeTour(false)}
+          user={currentUser}
+          settings={settings}
+          onNavigateToUpgrade={() => {
+            setShowWelcomeTour(false);
+            navigateToTab('rank');
+          }}
+          onNavigateToJobs={() => {
+            setShowWelcomeTour(false);
+            navigateToTab('jobs');
+          }}
+          onNavigateToSupport={() => {
+            setShowWelcomeTour(false);
+            navigateToTab('profile');
+            setProfileSubView('support');
+          }}
+        />
+      )}
+
+      {/* Task Execution Tutorial Modal (درس تعليمي) */}
+      <TaskTutorialModal
+        isOpen={showTaskTutorial}
+        onClose={() => setShowTaskTutorial(false)}
+        onNavigateToJobs={() => {
+          setShowTaskTutorial(false);
+          navigateToTab('jobs');
+        }}
+      />
 
       {/* Subscription Required Welcome Overlay */}
       <WelcomeOverlay 

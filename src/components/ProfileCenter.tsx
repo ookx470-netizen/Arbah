@@ -60,6 +60,7 @@ interface ProfileCenterProps {
   initialSubView?: 'menu' | 'recharge' | 'withdraw' | 'team' | 'bind' | 'dep_log' | 'with_log' | 'change_pass' | 'support' | 'jobs';
   onSubViewChange?: (view: 'menu' | 'recharge' | 'withdraw' | 'team' | 'bind' | 'dep_log' | 'with_log' | 'change_pass' | 'support' | 'jobs') => void;
   settings?: SystemSettings;
+  onOpenWelcomeTour?: () => void;
 }
 
 export default function ProfileCenter({ 
@@ -69,6 +70,7 @@ export default function ProfileCenter({
   initialSubView,
   onSubViewChange,
   settings: propSettings,
+  onOpenWelcomeTour,
 }: ProfileCenterProps) {
   const [activeSubView, _setActiveSubView] = useState<'menu' | 'recharge' | 'withdraw' | 'team' | 'bind' | 'dep_log' | 'with_log' | 'change_pass' | 'support'>(initialSubView || 'menu');
 
@@ -862,6 +864,25 @@ export default function ProfileCenter({
               ))}
 
 
+
+              {/* How to work / Quick Start Guide */}
+              {onOpenWelcomeTour && (
+                <button
+                  onClick={onOpenWelcomeTour}
+                  className="w-full p-6 flex items-center justify-between hover:bg-slate-50 transition-all group active:bg-slate-100"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="w-11 h-11 bg-blue-50 rounded-xl flex items-center justify-center text-blue-600 shrink-0 shadow-sm border border-white/50">
+                      <HelpCircle className="w-5 h-5 stroke-[2.5]" />
+                    </div>
+                    <div className="text-right">
+                      <span className="text-xs font-black text-slate-900 block">دليل الاستخدام والتعليمات</span>
+                      <span className="text-[9px] font-bold text-slate-400 block mt-0.5 uppercase tracking-wider">شرح البدء السريع والأرباح</span>
+                    </div>
+                  </div>
+                  <ChevronLeft className="w-4 h-4 text-slate-300 group-hover:translate-x-[-4px] transition-transform" />
+                </button>
+              )}
 
               {/* Support */}
               <button
