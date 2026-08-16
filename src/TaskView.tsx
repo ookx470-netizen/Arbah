@@ -2705,25 +2705,7 @@ export default function TaskView() {
             </div>
           )}
 
-          <div className="bg-gradient-to-br from-blue-50 to-indigo-50/70 rounded-2xl p-4 border border-blue-200/60 text-right space-y-3 shadow-sm mt-6">
-            <div className="flex items-center gap-2 justify-end text-blue-800">
-              <span className="text-xs font-black flex items-center gap-1.5">
-                <Smartphone className="w-4 h-4 text-blue-600" />
-                التطبيق الرسمي للمنصة
-              </span>
-            </div>
-            <p className="text-[10px] text-stone-600 leading-relaxed font-bold">
-              الآن يمكنك تحميل تطبيق المنصة الرسمي لأجهزة الأندرويد للاستمتاع بتجربة أسرع، استقرار أعلى، وتلقي إشعارات فورية بكل مهام وأخبار المنصة الجديدة أولاً بأول.
-            </p>
-            <a
-              href="/app.apk"
-              download="Mis.apk"
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-xl text-[11px] font-extrabold transition-all flex items-center justify-center gap-1.5 shadow-md active:scale-95 cursor-pointer"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>تحميل تطبيق الأندرويد المباشر (APK)</span>
-            </a>
-          </div>
+
 
           {/* Quick Learning & Tutorial Action Buttons at Bottom of Home Page */}
           <div className="grid grid-cols-2 gap-3 mt-4">
