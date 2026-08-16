@@ -153,24 +153,27 @@ export interface SupportChat {
 
 export function isExemptFromDepositRequirement(user: User | null | undefined): boolean {
   if (!user) return false;
-  // If explicitly marked as deposited
-  if (user.hasDeposited === true) return true;
   
-  // Strict rule: Any user (old or new) in Free or Regular tier cannot withdraw without activation/deposit
+  // Strict rule: If membership tier is regular/ordinary/free/empty, 
+  // even if they deposited money, they CANNOT withdraw until they upgrade/activate a VIP package!
   const tier = (user.vipTier || '').trim().toLowerCase();
-  if (
-    tier !== '' && 
-    tier !== 'عضو عادي' && 
-    tier !== 'free' && 
-    tier !== 'مجاني' && 
-    tier !== 'مجانية' &&
-    tier !== 'عضو جديد' &&
-    !tier.includes('عادي') &&
-    !tier.includes('مجاني')
-  ) {
-    return true;
+  
+  const isRegularOrFree = 
+    tier === '' ||
+    tier === 'عضو عادي' ||
+    tier === 'العضوية العادية' ||
+    tier === 'free' ||
+    tier === 'مجاني' ||
+    tier === 'مجانية' ||
+    tier === 'عضو جديد' ||
+    tier.includes('عادي') ||
+    tier.includes('مجاني');
+
+  if (isRegularOrFree) {
+    return false; // Cannot withdraw if membership is regular/free/ordinary!
   }
   
-  return false;
+  // If they have a valid VIP tier and have deposited or active
+  return user.hasDeposited === true || tier !== '';
 }
 
