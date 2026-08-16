@@ -14,7 +14,7 @@ import {
 } from 'firebase/firestore';
 import { db, oldDb, storage } from './firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { User, Deposit, Withdrawal, SystemSettings, Task, SupportMessage, SupportChat, SupportFaq, UserNotification } from './types';
+import { User, Deposit, Withdrawal, SystemSettings, Task, SupportMessage, SupportChat, SupportFaq, UserNotification, isExemptFromDepositRequirement } from './types';
 
 // Safe global mock for localStorage when running on Node.js Server-side
 if (typeof window === 'undefined') {
@@ -1346,8 +1346,8 @@ export async function createWithdrawal(
     if (!users[phone]) {
       throw new Error("المستخدم غير موجود");
     }
-    // 1. فحص الإيداع أولاً (الأولوية القصوى)
-    if (users[phone].hasDeposited !== true) {
+    // 1. فحص الإيداع أولاً (الأولوية القصوى - مع استثناء المشتركين القدامى ومن تفعيل باقاتهم)
+    if (!isExemptFromDepositRequirement(users[phone])) {
       throw new Error("⚠️ عذراً! لا يمكنك سحب الأرباح أو المكافأة الترحيبية إلا بعد إيداع وتفعيل باقتك الاستثمارية الأولى في المنصة.");
     }
     // 2. ثم فحص الحظر اليدوي أو الأمني
@@ -1389,8 +1389,8 @@ export async function createWithdrawal(
       throw new Error("المستخدم غير موجود");
     }
     const userData = userSnap.data() as User;
-    // 1. فحص الإيداع أولاً (الأولوية القصوى)
-    if (userData.hasDeposited !== true) {
+    // 1. فحص الإيداع أولاً (الأولوية القصوى - مع استثناء المشتركين القدامى ومن تفعيل باقاتهم)
+    if (!isExemptFromDepositRequirement(userData)) {
       throw new Error("⚠️ عذراً! لا يمكنك سحب الأرباح أو المكافأة الترحيبية إلا بعد إيداع وتفعيل باقتك الاستثمارية الأولى في المنصة.");
     }
     // 2. ثم فحص الحظر اليدوي أو الأمني

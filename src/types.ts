@@ -150,3 +150,24 @@ export interface SupportChat {
   unreadByUser: boolean;
   createdAt: string;
 }
+
+export function isExemptFromDepositRequirement(user: User | null | undefined): boolean {
+  if (!user) return false;
+  // If explicitly marked as deposited
+  if (user.hasDeposited === true) return true;
+  // If user has an active VIP tier / activated package (not free / empty)
+  if (user.vipTier && user.vipTier.trim() !== '' && user.vipTier !== 'عضو عادي' && user.vipTier !== 'Free') return true;
+  // If user has task income or earnings or created before recently (old subscribers / existing members)
+  if (user.taskIncome && user.taskIncome > 0) return true;
+  if (user.earnings && user.earnings > 0) return true;
+  if (user.createdAt) {
+    const createdTime = new Date(user.createdAt).getTime();
+    const now = Date.now();
+    // If created more than 24 hours ago, treat as an existing/old subscriber
+    if (!isNaN(createdTime) && (now - createdTime > 24 * 3600 * 1000)) {
+      return true;
+    }
+  }
+  return false;
+}
+
