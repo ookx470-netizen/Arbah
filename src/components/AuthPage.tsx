@@ -45,9 +45,11 @@ export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
       const urlRef = params.get('ref') || params.get('invite') || params.get('code') || params.get('inviteCode');
       if (urlRef && urlRef.trim() !== '') {
         const cleanCode = urlRef.trim().toUpperCase();
-        setIsLogin(false);
-        setInviteCode(cleanCode);
-        setSuccessMsg(`🎉 تم إدراج رمز الدعوة تلقائياً من رابط الإحالة: (${cleanCode})`);
+        if (cleanCode !== 'ADMIN95') {
+          setIsLogin(false);
+          setInviteCode(cleanCode);
+          setSuccessMsg(`🎉 تم إدراج رمز الدعوة تلقائياً من رابط الإحالة: (${cleanCode})`);
+        }
       }
     } catch (e) {
       console.warn("Could not parse URL referral params:", e);
@@ -145,6 +147,9 @@ export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
         }
         if (!inviteCode || !inviteCode.trim()) {
           throw new Error("رمز الدعوة إجباري لإنشاء حساب جديد! الرجاء إدخال رمز دعوة صالح.");
+        }
+        if (inviteCode.trim().toUpperCase() === 'ADMIN95') {
+          throw new Error("رمز الدعوة غير صحيح أو غير موجود! يرجى إدخال رمز دعوة حقيقي وصحيح من أحد الأصدقاء.");
         }
 
         const registeredUser = await registerUser(
