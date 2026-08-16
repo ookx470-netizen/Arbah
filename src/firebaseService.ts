@@ -269,11 +269,17 @@ function getLocalUsers(): Record<string, User> {
     }
   }
   
-  // Purge any old admin accounts so that ONLY 07519952000 is admin
+  // Purge any old admin accounts and ensure users don't have unauthorized VIP tiers
   const adminPhone = "07519952000";
   Object.keys(users).forEach(key => {
-    if (key !== adminPhone && users[key]?.phone !== adminPhone && users[key]?.role === "admin") {
-      users[key].role = "user";
+    if (key !== adminPhone && users[key]?.phone !== adminPhone) {
+      if (users[key]?.role === "admin") {
+        users[key].role = "user";
+      }
+      // If a regular user has vipTier A or B1 without deposit, reset it
+      if (!users[key].hasDeposited && (users[key].vipTier === "A" || users[key].vipTier === "B1" || users[key].vipTier === "1" || users[key].vipTier === "A1")) {
+        users[key].vipTier = "";
+      }
     }
   });
 
