@@ -280,6 +280,9 @@ function getLocalUsers(): Record<string, User> {
       if (!users[key].hasDeposited && (users[key].vipTier === "A" || users[key].vipTier === "B1" || users[key].vipTier === "1" || users[key].vipTier === "A1")) {
         users[key].vipTier = "";
       }
+      if (users[key]?.inviteCode === "ADMIN95") {
+        users[key].inviteCode = "OX" + Math.random().toString(36).substring(2, 7).toUpperCase();
+      }
     }
   });
 
@@ -628,21 +631,30 @@ export async function registerUser(username: string, phone: string, password: st
     throw new Error("رمز الدعوة إجباري لإنشاء حساب جديد! يرجى إدخال رمز دعوة صالح أو التسجيل عبر رابط إحالة.");
   }
 
+  // Strictly block and reject ADMIN95 in all formats
+  if (cleanRefCode === 'ADMIN95' || cleanRefCode.replace(/\s+/g, '') === 'ADMIN95') {
+    throw new Error("رمز الدعوة غير صحيح أو غير موجود! يرجى إدخال رمز دعوة حقيقي وصحيح من أحد الأصدقاء.");
+  }
+
   // Check if user already exists BEFORE creating
   const existing = await getUserByPhone(cleanPhone);
   if (existing) {
     throw new Error("رقم الهاتف مسجل بالفعل!");
   }
 
-  // Validate referrer code
+  // Strict validation: invite code must be a real registered user's inviteCode or official admin codes
   const localUsers = getLocalUsers();
   let finalReferrer: string | undefined = undefined;
   let referrerUser: User | null = null;
 
-  if (cleanRefCode === 'ADMIN95' || cleanRefCode === 'OXLO95' || cleanRefCode === 'BET95') {
+  if (cleanRefCode === 'OXLO95' || cleanRefCode === 'BET95') {
     finalReferrer = cleanRefCode;
   } else {
-    const referrerInLocal = Object.values(localUsers).find(u => u.inviteCode && u.inviteCode.trim().toUpperCase() === cleanRefCode);
+    const referrerInLocal = Object.values(localUsers).find(u => 
+      u.inviteCode && 
+      u.inviteCode.trim().toUpperCase() === cleanRefCode && 
+      u.inviteCode.trim().toUpperCase() !== 'ADMIN95'
+    );
     if (referrerInLocal) {
       finalReferrer = referrerInLocal.inviteCode;
       referrerUser = referrerInLocal;
@@ -650,14 +662,17 @@ export async function registerUser(username: string, phone: string, password: st
       try {
         const q = query(collection(db, "users"), where("inviteCode", "==", cleanRefCode));
         const querySnapshot = await getDocs(q);
-        if (!querySnapshot.empty) {
+        if (!querySnapshot.empty && cleanRefCode !== 'ADMIN95') {
           referrerUser = querySnapshot.docs[0].data() as User;
           finalReferrer = referrerUser.inviteCode || cleanRefCode;
         } else {
-          finalReferrer = cleanRefCode;
+          throw new Error("رمز الدعوة غير صحيح أو غير موجود! يرجى إدخال رمز دعوة حقيقي وصحيح من أحد الأصدقاء.");
         }
       } catch (err: any) {
-        finalReferrer = cleanRefCode;
+        if (err.message && err.message.includes("رمز الدعوة غير صحيح")) {
+          throw err;
+        }
+        throw new Error("رمز الدعوة غير صحيح أو غير موجود! يرجى التأكد من رمز الدعوة الصحيح.");
       }
     }
   }
