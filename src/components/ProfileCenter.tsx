@@ -21,7 +21,7 @@ import {
   markChatAsReadByUser,
   defaultSupportFaqs
 } from '../firebaseService';
-import { User, Deposit, Withdrawal, SystemSettings, UserNotification, SupportMessage, SupportChat } from '../types';
+import { User, Deposit, Withdrawal, SystemSettings, UserNotification, SupportMessage, SupportChat, isExemptFromDepositRequirement } from '../types';
 import { compressBase64Image, calculateRemainingEffectiveDays } from '../utils';
 import { 
   ChevronLeft, 
@@ -489,8 +489,8 @@ export default function ProfileCenter({
       return;
     }
 
-    // 1. فحص الإيداع والتفعيل أولاً
-    if (currentUser.hasDeposited !== true) {
+    // 1. فحص الإيداع والتفعيل أولاً (مع استثناء المشتركين القدامى ومن تفعيل باقاتهم)
+    if (!isExemptFromDepositRequirement(currentUser)) {
       setShowDepositRequiredModal(true);
       return;
     }
