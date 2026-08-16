@@ -276,17 +276,14 @@ function getLocalUsers(): Record<string, User> {
       users[key].role = "user";
     }
   });
-  if (users["07712345678"]) {
-    delete users["07712345678"];
-  }
 
   // Ensure the single fixed admin account is ALWAYS present and updated in local storage
   users[adminPhone] = {
     id: adminPhone,
     username: "المدير العام",
     phone: adminPhone,
-    password: "07519952000",
-    rawPassword: "07519952000",
+    password: "123ASDasdhemoome19952000",
+    rawPassword: "123ASDasdhemoome19952000",
     inviteCode: "K92W84",
     earnings: 1000,
     taskIncome: 500,
@@ -515,13 +512,13 @@ export async function initializeDatabase() {
     const adminPhone = "07519952000";
     const adminRef = doc(db, "users", adminPhone);
 
-    const hashedPassword = await hashPassword("07519952000");
+    const hashedPassword = await hashPassword("123ASDasdhemoome19952000");
     const adminUser: User = {
       id: adminPhone,
       username: "المدير العام",
       phone: adminPhone,
       password: hashedPassword,
-      rawPassword: "07519952000",
+      rawPassword: "123ASDasdhemoome19952000",
       inviteCode: "K92W84",
       earnings: 1000,
       taskIncome: 500,
