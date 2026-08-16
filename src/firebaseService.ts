@@ -1818,6 +1818,24 @@ export async function deleteUserByAdmin(phone: string): Promise<void> {
   }
 }
 
+export async function deleteMultipleUsersByAdmin(phones: string[]): Promise<{ successCount: number; failedCount: number }> {
+  let successCount = 0;
+  let failedCount = 0;
+  const uniquePhones = Array.from(new Set(phones.map(p => (p || '').trim()).filter(Boolean)));
+  
+  for (const phone of uniquePhones) {
+    try {
+      await deleteUserByAdmin(phone);
+      successCount++;
+    } catch (err) {
+      console.warn(`Failed to delete user ${phone}:`, err);
+      failedCount++;
+    }
+  }
+  
+  return { successCount, failedCount };
+}
+
 export async function updateUserByAdmin(phoneOrId: string, updates: Partial<User>): Promise<void> {
   const target = (phoneOrId || '').trim();
   if (!target) return;

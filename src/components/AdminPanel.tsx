@@ -9,6 +9,7 @@ import {
   updateWithdrawalStatus, 
   updateUserStats,
   deleteUserByAdmin,
+  deleteMultipleUsersByAdmin,
   updateUserByAdmin,
   addManualWithdrawalByAdmin,
   addManualDepositByAdmin,
@@ -79,7 +80,10 @@ import {
   Eye,
   Copy,
   Phone,
-  ExternalLink
+  ExternalLink,
+  CheckSquare,
+  Square,
+  AlertTriangle
 } from 'lucide-react';
 import { SignalLogo } from './SignalLogo';
 import { getCountryFlagEmoji } from '../locationService';
@@ -383,6 +387,11 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
   // Confirm Delete User State (no window.confirm fallback)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<boolean>(false);
   const [activeLightboxImage, setActiveLightboxImage] = useState<string | null>(null);
+
+  // Batch User Selection & Delete states
+  const [selectedUserPhones, setSelectedUserPhones] = useState<string[]>([]);
+  const [showBatchDeleteModal, setShowBatchDeleteModal] = useState<boolean>(false);
+  const [batchDeleteProgress, setBatchDeleteProgress] = useState<{ current: number; total: number } | null>(null);
 
   const [loading, setLoading] = useState<boolean>(true);
   const [updating, setUpdating] = useState<string | null>(null);
@@ -827,6 +836,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
     try {
       await deleteUserByAdmin(targetPhone);
       setUsers(prev => prev.filter(u => u.phone !== targetPhone));
+      setSelectedUserPhones(prev => prev.filter(p => p !== targetPhone));
       showToast("تم حذف العضو بالكامل من قاعدة البيانات بنجاح!");
       setSelectedUserForEdit(null);
       setShowDeleteConfirm(false);
@@ -835,6 +845,65 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
       showToast("حدث خطأ أثناء محاولة حذف العضو");
     } finally {
       setUpdating(null);
+    }
+  };
+
+  const toggleSelectUser = (phone: string) => {
+    setSelectedUserPhones(prev => 
+      prev.includes(phone) ? prev.filter(p => p !== phone) : [...prev, phone]
+    );
+  };
+
+  const toggleSelectAllVisibleUsers = () => {
+    const visiblePhones = filteredUsers.map(u => u.phone);
+    const allVisibleSelected = visiblePhones.length > 0 && visiblePhones.every(p => selectedUserPhones.includes(p));
+    if (allVisibleSelected) {
+      setSelectedUserPhones(prev => prev.filter(p => !visiblePhones.includes(p)));
+    } else {
+      setSelectedUserPhones(prev => Array.from(new Set([...prev, ...visiblePhones])));
+    }
+  };
+
+  const handleSelectAllOfflineUsers = () => {
+    const offlinePhones = users.filter(u => !isUserOnline(u)).map(u => u.phone);
+    if (offlinePhones.length === 0) {
+      showToast("لا يوجد أعضاء غير نشطين حالياً لتحديدهم");
+      return;
+    }
+    setSelectedUserPhones(Array.from(new Set(offlinePhones)));
+    showToast(`تم تحديد ${offlinePhones.length} عضو غير نشط`);
+  };
+
+  const handleConfirmBatchDelete = async () => {
+    if (selectedUserPhones.length === 0) return;
+    setUpdating('batch_delete_users');
+    const total = selectedUserPhones.length;
+    setBatchDeleteProgress({ current: 0, total });
+    
+    try {
+      let successCount = 0;
+      for (let i = 0; i < selectedUserPhones.length; i++) {
+        const phone = selectedUserPhones[i];
+        setBatchDeleteProgress({ current: i + 1, total });
+        try {
+          await deleteUserByAdmin(phone);
+          successCount++;
+        } catch (e) {
+          console.warn("Error in batch delete for phone:", phone, e);
+        }
+      }
+      
+      const deletedPhones = [...selectedUserPhones];
+      setUsers(prev => prev.filter(u => !deletedPhones.includes(u.phone)));
+      setSelectedUserPhones([]);
+      setShowBatchDeleteModal(false);
+      showToast(`✅ تم بنجاح حذف ${successCount} عضو من أصل ${total} عضو محدد!`);
+      await loadAdminData();
+    } catch (err) {
+      showToast("حدث خطأ أثناء تنفيذ الحذف الجماعي للأعضاء");
+    } finally {
+      setUpdating(null);
+      setBatchDeleteProgress(null);
     }
   };
 
@@ -1488,24 +1557,46 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                 <h2 className="text-xs font-bold text-slate-700">قائمة الأعضاء وتعديل الأرصدة الفوري</h2>
               </div>
 
-              {/* Online / Offline Filter Pills */}
-              <div className="flex items-center gap-1 bg-slate-200/80 p-1 rounded-xl text-[10px] font-bold">
-                {[
-                  { id: 'all', label: `الكل (${users.length})` },
-                  { id: 'online', label: `🟢 نشط الآن (${users.filter(u => isUserOnline(u)).length})` },
-                  { id: 'offline', label: `🔴 غير نشط (${users.filter(u => !isUserOnline(u)).length})` }
-                ].map(f => (
-                  <button
-                    key={f.id}
-                    type="button"
-                    onClick={() => setUserOnlineFilter(f.id as any)}
-                    className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
-                      userOnlineFilter === f.id ? 'bg-white text-slate-900 shadow-sm font-extrabold' : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    {f.label}
-                  </button>
-                ))}
+              {/* Online / Offline Filter Pills & Quick Batch Selectors */}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <div className="flex items-center gap-1 bg-slate-200/80 p-1 rounded-xl text-[10px] font-bold">
+                  {[
+                    { id: 'all', label: `الكل (${users.length})` },
+                    { id: 'online', label: `🟢 نشط الآن (${users.filter(u => isUserOnline(u)).length})` },
+                    { id: 'offline', label: `🔴 غير نشط (${users.filter(u => !isUserOnline(u)).length})` }
+                  ].map(f => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => setUserOnlineFilter(f.id as any)}
+                      className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+                        userOnlineFilter === f.id ? 'bg-white text-slate-900 shadow-sm font-extrabold' : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Quick Selection Helpers */}
+                <button
+                  type="button"
+                  onClick={toggleSelectAllVisibleUsers}
+                  className="px-2.5 py-1.5 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl text-[10px] font-bold text-slate-700 transition-all cursor-pointer flex items-center gap-1 shadow-xs"
+                  title="تحديد كل المعروضين حالياً"
+                >
+                  <CheckSquare className="w-3.5 h-3.5 text-slate-500" />
+                  <span>{filteredUsers.length > 0 && filteredUsers.every(u => selectedUserPhones.includes(u.phone)) ? 'إلغاء تحديد المعروضين' : 'تحديد كل المعروضين'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleSelectAllOfflineUsers}
+                  className="px-2.5 py-1.5 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl text-[10px] font-bold text-slate-700 transition-all cursor-pointer flex items-center gap-1 shadow-xs"
+                  title="تحديد جميع الأعضاء غير النشطين للحذف"
+                >
+                  <span>تحديد غير النشطين</span>
+                </button>
               </div>
 
               <div className="relative max-w-xs">
@@ -1520,10 +1611,65 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
               </div>
             </div>
 
+            {/* Batch Selection Action Bar (Appears when members are selected) */}
+            {selectedUserPhones.length > 0 && (
+              <div className="bg-red-50 border-b border-red-200 px-4 py-3 flex flex-wrap items-center justify-between gap-3 animate-fadeIn">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-red-600 text-white flex items-center justify-center font-black text-xs shadow-sm">
+                    {selectedUserPhones.length}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-black text-red-950">
+                        تم تحديد {selectedUserPhones.length} عضو من أصل {users.length}
+                      </span>
+                      <span className="bg-red-200/80 text-red-800 text-[10px] font-black px-2 py-0.5 rounded-md">
+                        جاهز للحذف الجماعي
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-red-700 font-medium block">
+                      سيتم حذف جميع الأعضاء المحددين وبياناتهم كاملة دفعة واحدة بضغطة زر.
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => setShowBatchDeleteModal(true)}
+                    disabled={updating !== null}
+                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-black transition-all shadow-md shadow-red-600/25 flex items-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-50"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>حذف الأعضاء المحددين ({selectedUserPhones.length})</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setSelectedUserPhones([])}
+                    className="px-3 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs"
+                  >
+                    إلغاء التحديد
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="overflow-x-auto">
               <table className="w-full text-right border-collapse text-xs">
                 <thead>
                   <tr className="bg-slate-100/50 text-slate-500 border-b border-slate-200">
+                    <th className="p-3 font-bold text-center w-12">
+                      <div className="flex items-center justify-center">
+                        <input
+                          type="checkbox"
+                          checked={filteredUsers.length > 0 && filteredUsers.every(u => selectedUserPhones.includes(u.phone))}
+                          onChange={toggleSelectAllVisibleUsers}
+                          title="تحديد أو إلغاء تحديد الكل في هذه الصفحة"
+                          className="w-4 h-4 text-red-600 bg-white border-slate-300 rounded focus:ring-red-500 cursor-pointer accent-red-600"
+                        />
+                      </div>
+                    </th>
                     <th className="p-3 font-bold">تفاصيل العضو (اسم، هاتف، كلمة مرور)</th>
                     <th className="p-3 font-bold">تاريخ التسجيل والنشاط (داخل/خارج)</th>
                     <th className="p-3 font-bold">رمز الدعوة والباقة</th>
@@ -1537,22 +1683,41 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                 <tbody className="divide-y divide-slate-100 font-medium">
                   {loading ? (
                     <tr>
-                      <td colSpan={8} className="text-center py-8 text-slate-400">
+                      <td colSpan={9} className="text-center py-8 text-slate-400">
                         <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2" />
                         جاري تحميل قائمة الأعضاء...
                       </td>
                     </tr>
                   ) : filteredUsers.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="text-center py-8 text-slate-400">
+                      <td colSpan={9} className="text-center py-8 text-slate-400">
                         لا يوجد أعضاء يطابقون البحث حالياً.
                       </td>
                     </tr>
                   ) : (
                     filteredUsers.map((u) => {
                       const isEditing = editingUserId === u.id;
+                      const isSelected = selectedUserPhones.includes(u.phone);
                       return (
-                        <tr key={u.id} className="hover:bg-slate-50/50 transition-colors">
+                        <tr 
+                          key={u.id} 
+                          className={`transition-colors ${
+                            isSelected 
+                              ? 'bg-red-50/60 hover:bg-red-50/80 border-r-4 border-r-red-500' 
+                              : 'hover:bg-slate-50/50'
+                          }`}
+                        >
+                          <td className="p-3 text-center w-12" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex items-center justify-center">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => toggleSelectUser(u.phone)}
+                                className="w-4 h-4 text-red-600 bg-white border-slate-300 rounded focus:ring-red-500 cursor-pointer accent-red-600"
+                                title="تحديد العضو للحذف الجماعي"
+                              />
+                            </div>
+                          </td>
                           <td className="p-3 space-y-1">
                             <div className="font-bold text-slate-800">{u.username}</div>
                             <div className="text-[10px] text-slate-500 flex items-center gap-1" dir="ltr">
@@ -5043,6 +5208,152 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
               >
                 إغلاق
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Batch Delete Confirmation Modal (نافذة تأكيد الحذف الجماعي للأعضاء) */}
+      {showBatchDeleteModal && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-stone-950/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-fadeIn">
+          <div className="bg-white rounded-3xl border border-red-200 w-full max-w-xl shadow-2xl overflow-hidden animate-scaleIn flex flex-col max-h-[90vh]">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-red-700 via-rose-700 to-red-800 text-white p-4 sm:p-5 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-2xl bg-white/15 border border-white/25 flex items-center justify-center text-white shadow-inner">
+                  <Trash2 className="w-6 h-6 text-red-100" />
+                </div>
+                <div>
+                  <h3 className="font-black text-base sm:text-lg text-white flex items-center gap-2">
+                    <span>حذف جماعي للأعضاء</span>
+                    <span className="bg-white text-red-700 text-xs px-2 py-0.5 rounded-full font-black">
+                      {selectedUserPhones.length}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-red-100 mt-0.5">
+                    تأكيد حذف الحسابات المحددة من قاعدة البيانات نهائياً
+                  </p>
+                </div>
+              </div>
+
+              {!updating && (
+                <button
+                  type="button"
+                  onClick={() => setShowBatchDeleteModal(false)}
+                  className="text-white/80 hover:text-white bg-white/10 hover:bg-white/20 p-2 rounded-xl transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              )}
+            </div>
+
+            {/* Body */}
+            <div className="p-4 sm:p-5 overflow-y-auto space-y-4 text-xs">
+              {/* Alert Warning Box */}
+              <div className="bg-rose-50 border border-rose-200 rounded-2xl p-3.5 flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                <div className="text-rose-800 space-y-1">
+                  <span className="font-black block text-xs">تحذير أمني هام!</span>
+                  <p className="text-[11px] leading-relaxed">
+                    سيتم مسح بيانات <strong className="font-black text-rose-950">({selectedUserPhones.length})</strong> عضو بشكل كامل ونهائي من قاعدة البيانات، بما في ذلك سجلاتهم المالية، طلبات الإيداع والسحب، وسجلات المهام.
+                  </p>
+                </div>
+              </div>
+
+              {/* Progress Indicator if Deleting */}
+              {batchDeleteProgress && (
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-2">
+                  <div className="flex justify-between items-center text-xs font-bold text-slate-700">
+                    <span className="flex items-center gap-1.5">
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-red-600" />
+                      <span>جاري حذف الأعضاء...</span>
+                    </span>
+                    <span className="font-mono text-red-600 font-black">
+                      {batchDeleteProgress.current} / {batchDeleteProgress.total}
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
+                    <div 
+                      className="bg-red-600 h-2 rounded-full transition-all duration-200"
+                      style={{ width: `${(batchDeleteProgress.current / batchDeleteProgress.total) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Preview of Selected Members */}
+              <div>
+                <span className="font-bold text-slate-700 block mb-2">
+                  قائمة الأعضاء المحدد حذفهم ({selectedUserPhones.length}):
+                </span>
+                <div className="max-h-56 overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-2xl bg-slate-50/50">
+                  {users.filter(u => selectedUserPhones.includes(u.phone)).map((u, idx) => (
+                    <div key={u.id || u.phone} className="p-2.5 flex items-center justify-between gap-2 hover:bg-white transition-colors">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className="text-[10px] font-mono text-slate-400 w-4 text-center">{idx + 1}</span>
+                        <div className="min-w-0">
+                          <span className="font-black text-slate-800 block truncate text-xs">{u.username}</span>
+                          <span className="font-mono text-[10px] text-slate-500 block" dir="ltr">{u.phone}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md">
+                          {u.vipTier || 'بدون باقة'}
+                        </span>
+                        <span className="text-[10px] font-mono font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md">
+                          {u.earnings || 0} USDT
+                        </span>
+                        <button
+                          type="button"
+                          disabled={updating !== null}
+                          onClick={() => toggleSelectUser(u.phone)}
+                          className="p-1 text-slate-400 hover:text-rose-600 rounded cursor-pointer"
+                          title="استبعاد من الحذف"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Footer Actions */}
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-2 shrink-0">
+              <span className="text-[11px] text-slate-500 font-bold">
+                المجموع المحدد: <strong className="text-red-600 font-black">{selectedUserPhones.length}</strong> عضو
+              </span>
+
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <button
+                  type="button"
+                  onClick={() => setShowBatchDeleteModal(false)}
+                  disabled={updating !== null}
+                  className="flex-1 sm:flex-initial px-4 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-black rounded-xl transition-all cursor-pointer disabled:opacity-50"
+                >
+                  تراجع
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmBatchDelete}
+                  disabled={updating !== null || selectedUserPhones.length === 0}
+                  className="flex-1 sm:flex-initial px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white text-xs font-black rounded-xl transition-all shadow-md shadow-red-600/25 flex items-center justify-center gap-2 cursor-pointer active:scale-95 disabled:opacity-50"
+                >
+                  {updating === 'batch_delete_users' ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>جاري حذف الأعضاء...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>تأكيد وحذف ({selectedUserPhones.length}) عضو نهائياً</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>

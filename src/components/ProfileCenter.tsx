@@ -50,8 +50,14 @@ import {
   Moon,
   Send,
   HelpCircle,
-  Info
+  Info,
+  Share2,
+  FileText,
+  Printer,
+  Sparkles
 } from 'lucide-react';
+import { PromoBannerModal } from './PromoBannerModal';
+import { AccountStatementModal } from './AccountStatementModal';
 
 interface ProfileCenterProps {
   currentUser: User;
@@ -109,6 +115,10 @@ export default function ProfileCenter({
   // Notifications State
   const [notifications, setNotifications] = useState<UserNotification[]>([]);
   const [showNotifModal, setShowNotifModal] = useState<boolean>(false);
+
+  // Promo Banner & Account Statement Modals
+  const [showPromoBannerModal, setShowPromoBannerModal] = useState<boolean>(false);
+  const [showStatementModal, setShowStatementModal] = useState<boolean>(false);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -336,6 +346,22 @@ export default function ProfileCenter({
       if (unsubTeam) unsubTeam();
     };
   }, [activeSubView, currentUser.inviteCode]);
+
+  const handleOpenStatement = async () => {
+    setShowStatementModal(true);
+    if (deposits.length === 0 || withdrawals.length === 0) {
+      try {
+        const [depList, withList] = await Promise.all([
+          getUserDeposits(currentUser.phone),
+          getUserWithdrawals(currentUser.phone)
+        ]);
+        setDeposits(depList);
+        setWithdrawals(withList);
+      } catch (err) {
+        console.warn('Error loading statement transactions:', err);
+      }
+    }
+  };
 
   const showToast = (msg: string) => {
     if (msg.includes("تعليق ميزة السحب مؤقتاً") || (msg.includes("VIP (B1)") && msg.includes("دعوة"))) {
@@ -840,6 +866,7 @@ export default function ProfileCenter({
               {[
                 { id: 'recharge', label: 'شحن الحساب', sub: 'BEP20 / TRC20 / Polygon', icon: ArrowDownCircle, color: 'text-blue-600', bg: 'bg-blue-50' },
                 { id: 'withdraw', label: 'سحب الأرباح', sub: 'فقط USDT Polygon', icon: ArrowUpCircle, color: 'text-indigo-600', bg: 'bg-indigo-50' },
+                { id: 'statement', label: 'سجل المعاملات وكشف الحساب', sub: 'تقرير رسمي وتنزيل PDF', icon: FileText, color: 'text-amber-600', bg: 'bg-amber-50', onClick: handleOpenStatement },
                 { id: 'bind', label: 'ربط المحفظة', sub: 'USDT Polygon للسحب', icon: Wallet, color: 'text-emerald-600', bg: 'bg-emerald-50' },
                 { id: 'jobs', label: 'توظيف الموظفين', sub: 'برنامج الدعوات والعمولات', icon: UserPlus, color: 'text-purple-600', bg: 'bg-purple-50' },
                 { id: 'dep_log', label: 'سجل الإيداع', sub: 'تتبع طلبات شحنك', icon: History, color: 'text-slate-600', bg: 'bg-slate-50' },
@@ -847,7 +874,7 @@ export default function ProfileCenter({
               ].map((item) => (
                 <button
                   key={item.id}
-                  onClick={() => setActiveSubView(item.id as any)}
+                  onClick={item.onClick ? item.onClick : () => setActiveSubView(item.id as any)}
                   className="w-full p-6 flex items-center justify-between hover:bg-slate-50 transition-all group active:bg-slate-100"
                 >
                   <div className="flex items-center gap-4">
@@ -862,27 +889,6 @@ export default function ProfileCenter({
                   <ChevronLeft className="w-4 h-4 text-slate-300 group-hover:translate-x-[-4px] transition-transform" />
                 </button>
               ))}
-
-
-
-              {/* How to work / Quick Start Guide */}
-              {onOpenWelcomeTour && (
-                <button
-                  onClick={onOpenWelcomeTour}
-                  className="w-full p-6 flex items-center justify-between hover:bg-slate-50 transition-all group active:bg-slate-100"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="w-11 h-11 bg-blue-50 rounded-xl flex items-center justify-center text-blue-600 shrink-0 shadow-sm border border-white/50">
-                      <HelpCircle className="w-5 h-5 stroke-[2.5]" />
-                    </div>
-                    <div className="text-right">
-                      <span className="text-xs font-black text-slate-900 block">دليل الاستخدام والتعليمات</span>
-                      <span className="text-[9px] font-bold text-slate-400 block mt-0.5 uppercase tracking-wider">شرح البدء السريع والأرباح</span>
-                    </div>
-                  </div>
-                  <ChevronLeft className="w-4 h-4 text-slate-300 group-hover:translate-x-[-4px] transition-transform" />
-                </button>
-              )}
 
               {/* Support */}
               <button
@@ -1021,17 +1027,56 @@ export default function ProfileCenter({
                         {selectedNetwork} Network
                       </span>
                       <button 
+                        type="button"
                         onClick={() => handleCopy(currentAddress)}
-                        className="p-2 bg-white/5 hover:bg-white/10 rounded-xl transition-all"
+                        className="px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-xl transition-all text-[10px] font-black flex items-center gap-1.5 cursor-pointer text-white"
                       >
-                        <Copy className="w-4 h-4 text-slate-400" />
+                        <Copy className="w-3.5 h-3.5 text-blue-400" />
+                        <span>نسخ العنوان</span>
                       </button>
                     </div>
 
+                    {/* High Precision Dynamic Deposit Barcode / QR Code */}
+                    <div className="flex flex-col items-center justify-center py-2">
+                      <div className="p-3.5 bg-white rounded-3xl shadow-2xl border-4 border-white/20 inline-block relative group">
+                        <img 
+                          src={`https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(currentAddress)}&margin=1&format=png`}
+                          alt={`${selectedNetwork} Deposit QR`}
+                          className="w-40 h-40 sm:w-44 sm:h-44 rounded-2xl block"
+                          loading="lazy"
+                        />
+                        <div className="absolute inset-0 bg-slate-900/60 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-xs">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(currentAddress)}&margin=1&format=png`;
+                              const a = document.createElement('a');
+                              a.href = qrUrl;
+                              a.download = `OXLO_${selectedNetwork}_Deposit_QR.png`;
+                              a.target = '_blank';
+                              document.body.appendChild(a);
+                              a.click();
+                              document.body.removeChild(a);
+                            }}
+                            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-black rounded-xl shadow-lg cursor-pointer"
+                          >
+                            حفظ الباركود
+                          </button>
+                        </div>
+                      </div>
+                      <span className="text-[10px] text-slate-300 font-bold mt-2.5 flex items-center gap-1.5">
+                        <QrCode className="w-3.5 h-3.5 text-amber-400" />
+                        <span>امسح الباركود من تطبيق محفظتك (Binance / Trust / OKX)</span>
+                      </span>
+                    </div>
+
                     <div className="space-y-2">
-                      <span className="text-[9px] font-bold text-slate-500 block">عنوان المحفظة الرسمي</span>
-                      <div className="bg-black/20 p-4 rounded-2xl border border-white/5 font-mono text-[11px] font-black break-all text-left text-white/90 leading-relaxed tracking-wider shadow-inner">
-                        {currentAddress}
+                      <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-bold text-slate-400 block">عنوان المحفظة الرسمي للإيداع:</span>
+                        <span className="text-[9px] font-bold text-slate-500 font-mono">100% Verified</span>
+                      </div>
+                      <div className="bg-black/40 p-4 rounded-2xl border border-white/10 font-mono text-[11px] font-black break-all text-left text-white leading-relaxed tracking-wider shadow-inner select-all flex items-center justify-between gap-2">
+                        <span className="text-slate-100">{currentAddress}</span>
                       </div>
                     </div>
 
@@ -1281,25 +1326,69 @@ export default function ProfileCenter({
             <div className="bg-slate-900 p-8 rounded-[2.5rem] text-white border border-white/5 shadow-2xl relative overflow-hidden text-center space-y-5">
               <div className="absolute top-0 right-0 w-32 h-32 bg-blue-600/10 rounded-full blur-3xl -mr-16 -mt-16"></div>
               
-              <div className="space-y-3 relative z-10">
-                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">كود الدعوة الخاص بك</span>
+              <div className="space-y-4 relative z-10">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">كود ورابط الدعوة الرسمي</span>
+                
                 <div className="flex items-center justify-center gap-3">
                   <span className="text-3xl font-black font-mono tracking-tighter text-blue-400">{currentUser.inviteCode}</span>
-                  <button onClick={() => handleCopy(currentUser.inviteCode)} className="w-10 h-10 bg-white/5 rounded-xl border border-white/10 flex items-center justify-center hover:bg-white/10 transition-all">
-                    <Copy className="w-4 h-4 text-slate-400" />
+                  <button onClick={() => handleCopy(currentUser.inviteCode)} className="w-10 h-10 bg-white/5 rounded-xl border border-white/10 flex items-center justify-center hover:bg-white/10 transition-all cursor-pointer" title="نسخ كود الدعوة">
+                    <Copy className="w-4 h-4 text-slate-300" />
                   </button>
                 </div>
 
-                <button 
-                  onClick={() => {
-                    const shareLink = `${window.location.origin}/?ref=${currentUser.inviteCode}`;
-                    handleCopy(shareLink);
-                  }}
-                  className="w-full bg-blue-600 hover:bg-blue-500 text-white py-3 px-4 rounded-xl text-xs font-black transition-all active:scale-[0.98] shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2 mt-2"
-                >
-                  <span>نسخ رابط الدعوة المباشر</span>
-                  <Copy className="w-4 h-4" />
-                </button>
+                {/* Direct High-Resolution Barcode / QR Code */}
+                <div className="flex flex-col items-center justify-center pt-2">
+                  <div className="p-3 bg-white rounded-3xl shadow-xl border-4 border-white/20 inline-block relative group">
+                    <img 
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(`${window.location.origin}/?ref=${currentUser.inviteCode}`)}&margin=1&format=png`}
+                      alt="Referral QR Barcode"
+                      className="w-36 h-36 sm:w-40 sm:h-40 rounded-2xl block"
+                      loading="lazy"
+                    />
+                    <div className="absolute inset-0 bg-slate-900/60 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-xs">
+                      <button
+                        onClick={() => {
+                          const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(`${window.location.origin}/?ref=${currentUser.inviteCode}`)}&margin=1&format=png`;
+                          const a = document.createElement('a');
+                          a.href = qrUrl;
+                          a.download = `QR_OXLO_${currentUser.inviteCode}.png`;
+                          a.target = '_blank';
+                          document.body.appendChild(a);
+                          a.click();
+                          document.body.removeChild(a);
+                        }}
+                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-black rounded-xl shadow-lg cursor-pointer"
+                      >
+                        حفظ الباركود
+                      </button>
+                    </div>
+                  </div>
+                  <span className="text-[10px] text-slate-400 font-bold mt-2.5 flex items-center gap-1.5">
+                    <QrCode className="w-3.5 h-3.5 text-amber-400" />
+                    <span>امسح الباركود مباشرة للتسجيل الفوري</span>
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
+                  <button 
+                    onClick={() => {
+                      const shareLink = `${window.location.origin}/?ref=${currentUser.inviteCode}`;
+                      handleCopy(shareLink);
+                    }}
+                    className="w-full bg-blue-600 hover:bg-blue-500 text-white py-3 px-4 rounded-xl text-xs font-black transition-all active:scale-[0.98] shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <span>نسخ رابط الدعوة المباشر</span>
+                    <Copy className="w-4 h-4" />
+                  </button>
+
+                  <button 
+                    onClick={() => setShowPromoBannerModal(true)}
+                    className="w-full bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 hover:to-yellow-500 text-stone-950 py-3 px-4 rounded-xl text-xs font-black transition-all active:scale-[0.98] shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <span>توليد بطاقة تسويقية مصورة</span>
+                    <Share2 className="w-4 h-4 text-stone-950" />
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -1428,7 +1517,14 @@ export default function ProfileCenter({
                 <ChevronLeft className="w-6 h-6 rotate-180 text-white" />
               </button>
               <h3 className="text-sm font-black tracking-tight">سجل الإيداع</h3>
-              <div className="w-11"></div>
+              <button 
+                onClick={handleOpenStatement}
+                className="px-3 py-2 bg-blue-600 hover:bg-blue-500 rounded-xl text-[10px] font-black text-white flex items-center gap-1.5 transition-all shadow-md active:scale-95 cursor-pointer"
+                title="كشف حساب شامل وتنزيل PDF"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span className="text-[9px]">كشف الحساب</span>
+              </button>
             </div>
           </div>
 
@@ -1483,7 +1579,14 @@ export default function ProfileCenter({
                 <ChevronLeft className="w-6 h-6 rotate-180 text-white" />
               </button>
               <h3 className="text-sm font-black tracking-tight">سجل السحوبات</h3>
-              <div className="w-11"></div>
+              <button 
+                onClick={handleOpenStatement}
+                className="px-3 py-2 bg-blue-600 hover:bg-blue-500 rounded-xl text-[10px] font-black text-white flex items-center gap-1.5 transition-all shadow-md active:scale-95 cursor-pointer"
+                title="كشف حساب شامل وتنزيل PDF"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span className="text-[9px]">كشف الحساب</span>
+              </button>
             </div>
           </div>
 
@@ -1781,6 +1884,22 @@ export default function ProfileCenter({
           </div>
         </div>
       )}
+
+      {/* Promo Banner Generator Modal */}
+      <PromoBannerModal
+        isOpen={showPromoBannerModal}
+        onClose={() => setShowPromoBannerModal(false)}
+        user={currentUser}
+      />
+
+      {/* Account Statement & Transaction History Modal */}
+      <AccountStatementModal
+        isOpen={showStatementModal}
+        onClose={() => setShowStatementModal(false)}
+        user={currentUser}
+        deposits={deposits}
+        withdrawals={withdrawals}
+      />
 
     </div>
   );

@@ -69,6 +69,7 @@ import { WelcomeTourModal } from './components/WelcomeTourModal';
 import { QuickGuidePromptToast } from './components/QuickGuidePromptToast';
 import { TaskTutorialModal } from './components/TaskTutorialModal';
 import { LeaderBonusModal } from './components/LeaderBonusModal';
+import { PromoBannerModal } from './components/PromoBannerModal';
 import { SignalLogo } from './components/SignalLogo';
 import { 
   initializeDatabase, 
@@ -497,6 +498,7 @@ export default function TaskView() {
   const [pendingListTab, setPendingListTab] = useState<'withdrawn' | 'in_progress' | 'completed' | 'rejected' | null>(null);
   const [showSubscribeRequiredModal, setShowSubscribeRequiredModal] = useState<boolean>(false);
   const [showLeaderBonusModal, setShowLeaderBonusModal] = useState<boolean>(false);
+  const [showPromoCardModal, setShowPromoCardModal] = useState<boolean>(false);
 
   const [pendingPlatformTab, setPendingPlatformTab] = useState<'youtube' | 'facebook' | 'tiktok' | null>(null);
   const [homeCategoryTab, setHomeCategoryTab] = useState<'youtube' | 'facebook' | 'tiktok'>('youtube');
@@ -2549,16 +2551,29 @@ export default function TaskView() {
               </div>
             </div>
             
-            <button
-              onClick={() => {
-                setShowLeaderBonusModal(true);
-                playChimeSound();
-              }}
-              className="w-full relative z-10 bg-white/10 hover:bg-white/20 border border-white/10 backdrop-blur-md py-3 rounded-2xl text-[10px] font-black transition-all flex items-center justify-center gap-2 active:scale-[0.98] cursor-pointer"
-            >
-              <Crown className="w-4 h-4 text-amber-400 fill-amber-400" />
-              <span>تفاصيل برنامج الرواتب والمزايا</span>
-            </button>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 relative z-10">
+              <button
+                onClick={() => {
+                  setShowLeaderBonusModal(true);
+                  playChimeSound();
+                }}
+                className="w-full bg-white/10 hover:bg-white/20 border border-white/10 backdrop-blur-md py-3 rounded-2xl text-[10px] font-black transition-all flex items-center justify-center gap-2 active:scale-[0.98] cursor-pointer text-white"
+              >
+                <Crown className="w-4 h-4 text-amber-400 fill-amber-400" />
+                <span>برنامج الرواتب والمزايا</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setShowPromoCardModal(true);
+                  playChimeSound();
+                }}
+                className="w-full bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 hover:to-yellow-500 py-3 rounded-2xl text-[10px] font-black transition-all flex items-center justify-center gap-2 active:scale-[0.98] cursor-pointer text-stone-950 shadow-md shadow-amber-500/20"
+              >
+                <Share2 className="w-4 h-4 text-stone-950 stroke-[2.5]" />
+                <span>بطاقة الدعوة التسويقية (PNG)</span>
+              </button>
+            </div>
           </div>
 
           {/* Direct Technical Support Trigger Card */}
@@ -3359,8 +3374,16 @@ export default function TaskView() {
         isOpen={showLeaderBonusModal}
         onClose={() => setShowLeaderBonusModal(false)}
         inviteCode={currentUser?.inviteCode || ''}
-       
       />
+
+      {/* Promo Banner Marketing Card Generator Modal */}
+      {currentUser && (
+        <PromoBannerModal
+          isOpen={showPromoCardModal}
+          onClose={() => setShowPromoCardModal(false)}
+          user={currentUser}
+        />
+      )}
 
     </div>
   );
