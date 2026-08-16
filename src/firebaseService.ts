@@ -1793,9 +1793,7 @@ export function subscribeToReferralTeam(myInviteCodeOrPhone: string, callback: (
     const level3 = Array.from(level3UsersMap.values());
 
     const teamList: (User & { teamLevel?: number })[] = [
-      ...level1.map(m => ({ ...m, teamLevel: 1 })),
-      ...level2.map(m => ({ ...m, teamLevel: 2 })),
-      ...level3.map(m => ({ ...m, teamLevel: 3 }))
+      ...level1.map(m => ({ ...m, teamLevel: 1 }))
     ];
 
     const result = teamList.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
@@ -1812,6 +1810,7 @@ export async function getAllUsers(): Promise<User[]> {
     const firestoreMap: Record<string, User> = {};
     querySnapshot.forEach((docSnap) => {
       const data = docSnap.data() as User;
+      data.id = docSnap.id; // Inject document ID
       const key = data.phone || docSnap.id;
       if (key) {
         firestoreMap[key] = data;
@@ -1836,6 +1835,7 @@ export function subscribeToAllUsers(callback: (users: User[]) => void): () => vo
     const firestoreMap: Record<string, User> = {};
     snapshot.forEach((docSnap) => {
       const data = docSnap.data() as User;
+      data.id = docSnap.id; // Inject document ID
       const key = data.phone || docSnap.id;
       if (key) {
         firestoreMap[key] = data;
@@ -2117,11 +2117,28 @@ export async function updateUserByAdmin(phoneOrId: string, updates: Partial<User
 
   // 2. Write to Firestore using setDoc with merge: true to avoid missing document errors
   try {
-    const userRef = doc(db, "users", target);
+    let docId = target;
+    
+    // Attempt to find the real document ID if target doesn't exist or is a phone number
+    // This handles cases where doc ID might be different from the phone number
+    const initialRef = doc(db, "users", target);
+    const snap = await getDoc(initialRef);
+    
+    if (!snap.exists()) {
+      // Search by phone field
+      const q = query(collection(db, "users"), where("phone", "==", target));
+      const qSnap = await getDocs(q);
+      if (!qSnap.empty) {
+        docId = qSnap.docs[0].id;
+      }
+    }
+
+    const userRef = doc(db, "users", docId);
     await setDoc(userRef, finalUpdates, { merge: true });
   } catch (error) {
     console.warn("Firestore updateUserByAdmin error:", error);
     setFallbackMode(true);
+    throw error;
   }
 }
 

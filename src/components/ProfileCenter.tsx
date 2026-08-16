@@ -1389,38 +1389,33 @@ export default function ProfileCenter({
             </div>
 
             {/* Stats Breakdown */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-md text-center">
-                <span className="text-[9px] font-black text-slate-400 uppercase block mb-1">المستوى 1 (مباشر)</span>
-                <span className="text-base font-black text-emerald-600 font-mono">
-                  {teamList.filter(m => (m.teamLevel || 1) === 1).length}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-white p-4 rounded-3xl border border-slate-100 shadow-sm text-center">
+                <span className="text-[10px] font-bold text-slate-500 uppercase block mb-1">أرباح الفريق</span>
+                <span className="text-lg font-black text-blue-800 font-mono">
+                  ${teamList.filter(m => (m.teamLevel || 1) === 1).reduce((sum, m) => sum + ((m.taskIncome || 0) * 0.10), 0).toFixed(2)}
                 </span>
-                <span className="text-[8px] text-slate-400 block mt-0.5">عمولة 10%</span>
               </div>
 
-              <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-md text-center">
-                <span className="text-[9px] font-black text-slate-400 uppercase block mb-1">المستوى 2 و 3 (فرعي)</span>
-                <span className="text-base font-black text-blue-600 font-mono">
-                  {teamList.filter(m => (m.teamLevel || 1) > 1).length}
+              <div className="bg-white p-4 rounded-3xl border border-slate-100 shadow-sm text-center">
+                <span className="text-[10px] font-bold text-slate-500 uppercase block mb-1">نسبة العمولة</span>
+                <span className="text-lg font-black text-blue-800 font-mono">
+                  10%
                 </span>
-                <span className="text-[8px] text-slate-400 block mt-0.5">دعوات الفريق</span>
               </div>
+            </div>
 
-              <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-md text-center">
-                <span className="text-[9px] font-black text-slate-400 uppercase block mb-1">إجمالي الموظفين</span>
-                <span className="text-base font-black text-indigo-700 font-mono">
-                  {teamList.length}
-                </span>
-                <span className="text-[8px] text-slate-400 block mt-0.5">كل المستويات</span>
-              </div>
-
-              <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-md text-center">
-                <span className="text-[9px] font-black text-slate-400 uppercase block mb-1">أرباح العمولات</span>
-                <span className="text-base font-black text-amber-600 font-mono">
-                  ${teamList.reduce((sum, m) => sum + ((m.taskIncome || 0) * 0.10), 0).toFixed(2)}
-                </span>
-                <span className="text-[8px] text-slate-400 block mt-0.5">من مهام الفريق</span>
-              </div>
+            {/* Header for members list */}
+            <div className="flex items-center justify-between mt-6 mb-2">
+              <h3 className="text-base font-bold text-slate-800">
+                الأعضاء ({teamList.filter(m => (m.teamLevel || 1) === 1).length})
+              </h3>
+              <button 
+                onClick={() => { /* Add refresh logic if needed */ }}
+                className="text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
             </div>
 
             {/* Members Section */}
@@ -1462,10 +1457,7 @@ export default function ProfileCenter({
               <div className="space-y-2">
                 <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-2xl overflow-x-auto no-scrollbar text-[11px] font-bold">
                   {[
-                    { id: 'all', label: `الكل (${teamList.length})` },
-                    { id: '1', label: `المستوى 1 (${teamList.filter(m => (m.teamLevel || 1) === 1).length})` },
-                    { id: '2', label: `المستوى 2 (${teamList.filter(m => (m.teamLevel || 1) === 2).length})` },
-                    { id: '3', label: `المستوى 3 (${teamList.filter(m => (m.teamLevel || 1) === 3).length})` }
+                    { id: 'all', label: `الأعضاء (${teamList.filter(m => (m.teamLevel || 1) === 1).length})` }
                   ].map(tab => (
                     <button
                       key={tab.id}
@@ -1543,59 +1535,26 @@ export default function ProfileCenter({
                     return (
                       <div 
                         key={member.phone || member.id || idx} 
-                        className="p-4 bg-slate-50/80 hover:bg-slate-50 rounded-2xl border border-slate-200/80 flex flex-col gap-2.5 transition-all shadow-xs"
+                        className="p-4 bg-white hover:bg-slate-50 rounded-3xl border border-slate-100 flex items-center justify-between transition-all shadow-sm"
                       >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2.5">
-                            <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-blue-600 font-black text-sm border border-slate-200 shadow-sm shrink-0">
-                              {member.username ? member.username.charAt(0).toUpperCase() : 'U'}
-                            </div>
-                            <div>
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-xs font-black text-slate-900 block">{member.username}</span>
-                                <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-md ${
-                                  lvl === 1 
-                                    ? 'bg-emerald-100 text-emerald-800' 
-                                    : lvl === 2 
-                                    ? 'bg-blue-100 text-blue-800' 
-                                    : 'bg-purple-100 text-purple-800'
-                                }`}>
-                                  {lvl === 1 ? 'مستوى 1 مباشر' : lvl === 2 ? 'مستوى 2 فرعي' : 'مستوى 3 فرعي'}
-                                </span>
-                              </div>
-                              <span className="text-[10px] font-mono text-slate-400 block mt-0.5" dir="ltr">
-                                {member.phone ? `${member.phone.substring(0, 4)}****${member.phone.slice(-3)}` : '****'}
-                              </span>
-                            </div>
+                        <div className="flex items-center gap-3">
+                          <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 font-black text-lg border border-slate-200 shrink-0">
+                            👤
                           </div>
-
-                          <div className="text-left space-y-0.5">
-                            <span className={`text-[10px] font-black px-2 py-0.5 rounded-lg inline-block ${
-                              member.vipTier && member.vipTier !== 'الباقة العادية' && member.vipTier !== 'VIP0'
-                                ? 'bg-amber-100 text-amber-900 border border-amber-300'
-                                : 'bg-slate-200 text-slate-700'
-                            }`}>
-                              {member.vipTier || 'الباقة العادية'}
+                          <div className="space-y-0.5">
+                            <span className="text-sm font-black text-blue-900 block">{member.username}</span>
+                            <span className="text-[10px] font-mono text-slate-500 block" dir="ltr">
+                              {member.phone ? `${member.phone.substring(0, 4)}****${member.phone.slice(-3)}` : '****'}
                             </span>
-                            {member.hasDeposited ? (
-                              <span className="text-[9px] font-bold text-emerald-600 block">
-                                ✅ مودع نشط
-                              </span>
-                            ) : (
-                              <span className="text-[9px] font-medium text-slate-400 block">
-                                ⏳ حساب مجاني
-                              </span>
-                            )}
                           </div>
                         </div>
 
-                        {/* Additional stats footer */}
-                        <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between text-[10px] text-slate-500">
-                          <span>
-                            تاريخ التسجيل: {member.createdAt ? new Date(member.createdAt).toLocaleDateString('ar-EG') : 'غير متوفر'}
+                        <div className="text-left space-y-0.5">
+                          <span className="text-sm font-black text-blue-700 block font-mono">
+                            USDT {(member.balance || 0).toFixed(2)}
                           </span>
-                          <span className="font-bold text-blue-600 font-mono">
-                            أرباح المهام: ${(member.taskIncome || 0).toFixed(2)}
+                          <span className="text-[10px] font-bold text-slate-500 block">
+                            {member.vipTier || 'الباقة العادية'}
                           </span>
                         </div>
                       </div>

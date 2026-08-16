@@ -79,6 +79,7 @@ import {
   TrendingUp,
   UserCheck,
   Eye,
+  Unlock,
   Copy,
   Phone,
   ExternalLink,
@@ -121,7 +122,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
   });
   
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'teams' | 'deposits' | 'withdrawals' | 'plans' | 'settings' | 'all' | 'support'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'teams' | 'deposits' | 'withdrawals' | 'plans' | 'settings' | 'all' | 'support' | 'banned'>('overview');
   const [depositFilter, setDepositFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
   const [withdrawalFilter, setWithdrawalFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
 
@@ -215,25 +216,13 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
     // Level 1 (Direct)
     const level1 = directInvitesMap[myCode] || [];
     
-    // Level 2 (Indirect 1)
+    // Level 2 (Indirect 1) -> Empty
     const level2: User[] = [];
-    level1.forEach(m1 => {
-      if (m1.inviteCode) {
-        const sub = directInvitesMap[m1.inviteCode.trim().toUpperCase()] || [];
-        level2.push(...sub);
-      }
-    });
 
-    // Level 3 (Indirect 2)
+    // Level 3 (Indirect 2) -> Empty
     const level3: User[] = [];
-    level2.forEach(m2 => {
-      if (m2.inviteCode) {
-        const sub = directInvitesMap[m2.inviteCode.trim().toUpperCase()] || [];
-        level3.push(...sub);
-      }
-    });
 
-    const all = [...level1, ...level2, ...level3];
+    const all = [...level1];
     const depositedCount = all.filter(m => m.hasDeposited === true).length;
 
     return {
@@ -250,6 +239,13 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
   const filteredTeamUsers = useMemo(() => {
     return users.filter(u => {
       if (!u) return false;
+      
+      // If we are in 'banned' tab, only show banned. Otherwise hide banned.
+      if (activeTab === 'banned') {
+        if (!u.isBanned) return false;
+      } else {
+        if (u.isBanned) return false;
+      }
       const q = teamSearchTerm.trim().toLowerCase();
       const uName = u.username || '';
       const uPhone = u.phone || '';
@@ -840,9 +836,9 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
     if (!selectedUserForEdit) return;
     setUpdating('save_advanced_user');
     try {
+      const targetId = selectedUserForEdit.id || selectedUserForEdit.phone;
       const updatedPlan = editVipTierInput;
-      const targetPhone = selectedUserForEdit.phone || selectedUserForEdit.id;
-      await updateUserByAdmin(targetPhone, {
+      await updateUserByAdmin(targetId, {
         username: editUsernameInput.trim(),
         password: editPasswordInput.trim(),
         vipTier: updatedPlan,
@@ -851,11 +847,13 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
         effectiveDays: Number(editEffectiveDays),
         vipStartDate: new Date().toISOString(),
         isWithdrawalBlocked: editWithdrawalBlocked,
-        bypassHoliday: editBypassHoliday
+        bypassHoliday: editBypassHoliday,
+        isBanned: editIsBanned,
+        banReason: editBanReason
       });
 
       setUsers(prev => prev.map(u => {
-        if (u.phone === targetPhone || u.id === targetPhone) {
+        if (u.phone === targetId || u.id === targetId) {
           return {
             ...u,
             username: editUsernameInput.trim(),
@@ -867,17 +865,49 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
             effectiveDays: Number(editEffectiveDays),
             vipStartDate: new Date().toISOString(),
             isWithdrawalBlocked: editWithdrawalBlocked,
-            bypassHoliday: editBypassHoliday
+            bypassHoliday: editBypassHoliday,
+            isBanned: editIsBanned,
+            banReason: editBanReason
           };
         }
         return u;
       }));
 
-      showToast(`🎉 تم حفظ وتحديث باقة العضو إلى (${updatedPlan}) بنجاح!`);
+      showToast(`🎉 تم حفظ وتحديث بيانات العضو بنجاح!`);
       setSelectedUserForEdit(null);
-      await loadAdminData();
     } catch (err) {
       showToast("حدث خطأ أثناء تحديث بيانات العضو");
+    } finally {
+      setUpdating(null);
+    }
+  };
+
+  const handleQuickBan = async (phone: string, isBanned: boolean, reason: string, id?: string) => {
+    try {
+      const target = id || phone;
+      if (!target) {
+        showToast('❌ عذراً، لا يمكن تحديد معرف العضو');
+        return;
+      }
+      
+      setUpdating(`quick_ban_${target}`);
+      await updateUserByAdmin(target, { isBanned, banReason: reason });
+      
+      showToast(isBanned ? '✅ تم حظر المستخدم بنجاح' : '✅ تم إلغاء حظر المستخدم بنجاح');
+      
+      // Update local state immediately for better UX
+      setUsers(prev => prev.map(u => {
+        const uId = u.id || u.phone;
+        if (uId === target || u.phone === target || u.id === target) {
+          return { ...u, isBanned, banReason: reason };
+        }
+        return u;
+      }));
+
+      // No need to loadAdminData() as subscribeToAllUsers will handle real-time sync
+    } catch (err) {
+      console.error('Quick ban failed:', err);
+      showToast('❌ فشل في تنفيذ العملية، يرجى المحاولة لاحقاً');
     } finally {
       setUpdating(null);
     }
@@ -1289,6 +1319,13 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
   // Filter users based on phone or username search and online status
   const filteredUsers = users.filter(u => {
     if (!u) return false;
+    
+    // Handle banned tab vs regular tabs
+    if (activeTab === 'banned') {
+      if (!u.isBanned) return false;
+    } else {
+      if (u.isBanned) return false;
+    }
     const uName = u.username || '';
     const uPhone = u.phone || '';
     const matchesSearch = uName.toLowerCase().includes((searchQuery || '').toLowerCase()) ||
@@ -1369,12 +1406,12 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
           <div className="flex items-center gap-1.5 py-2.5 min-w-max">
             {[
               { id: 'overview', label: 'الرئيسية والإحصائيات', icon: ShieldAlert, badge: null },
-              { id: 'users', label: 'قائمة الأعضاء', icon: Users, badge: users.length },
+              { id: 'users', label: 'قائمة الأعضاء', icon: Users, badge: users.filter(u => !u.isBanned).length },
               { 
                 id: 'teams', 
                 label: 'الفريق', 
                 icon: Network, 
-                badge: users.filter(u => (directInvitesMap[u.inviteCode?.trim().toUpperCase() || ''] || []).length > 0).length,
+                badge: users.filter(u => !u.isBanned && (directInvitesMap[u.inviteCode?.trim().toUpperCase() || ''] || []).length > 0).length,
                 badgeColor: 'bg-indigo-100 text-indigo-700 font-extrabold'
               },
               { 
@@ -1400,6 +1437,13 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                 icon: MessageSquare, 
                 badge: chats.filter(c => c.unreadByAdmin).length > 0 ? chats.filter(c => c.unreadByAdmin).length : null,
                 badgeColor: 'bg-green-500 text-white animate-pulse font-extrabold'
+              },
+              {
+                id: 'banned',
+                label: 'سجلات المحظورين',
+                icon: ShieldAlert,
+                badge: users.filter(u => u.isBanned).length,
+                badgeColor: 'bg-rose-100 text-rose-700 font-extrabold'
               }
             ].map((tab) => {
               const Icon = tab.icon;
@@ -1438,7 +1482,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
             <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-md hover:shadow-lg transition-all flex flex-col justify-between">
               <span className="text-[10px] font-bold text-slate-400">إجمالي الأعضاء</span>
               <div className="flex items-center justify-between mt-1">
-                <span className="text-xl font-extrabold text-slate-800">{users.length}</span>
+                <span className="text-xl font-extrabold text-slate-800">{users.filter(u => !u.isBanned).length}</span>
                 <Users className="w-5 h-5 text-blue-500" />
               </div>
             </div>
@@ -1483,9 +1527,17 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
               <span className="text-[10px] font-bold text-slate-400">المشتركون في VIP</span>
               <div className="flex items-center justify-between mt-1">
                 <span className="text-xl font-extrabold text-purple-600">
-                  {users.filter(u => u.vipTier && u.vipTier.trim() !== '' && u.vipTier !== 'الباقة العادية' && u.vipTier !== 'العادية').length}
+                  {users.filter(u => !u.isBanned && u.vipTier && u.vipTier.trim() !== '' && u.vipTier !== 'الباقة العادية' && u.vipTier !== 'العادية').length}
                 </span>
                 <Zap className="w-5 h-5 text-purple-500" />
+              </div>
+            </div>
+
+            <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-md hover:shadow-lg transition-all flex flex-col justify-between">
+              <span className="text-[10px] font-bold text-slate-400">أعضاء محظورون</span>
+              <div className="flex items-center justify-between mt-1">
+                <span className="text-xl font-extrabold text-rose-800">{users.filter(u => u.isBanned).length}</span>
+                <ShieldAlert className="w-5 h-5 text-rose-600" />
               </div>
             </div>
           </div>
@@ -1503,7 +1555,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
               >
                 <Users className="w-5 h-5 text-blue-600 mb-1 group-hover:scale-110 transition-transform" />
                 <div className="text-xs font-bold text-slate-800">إدارة الأعضاء</div>
-                <div className="text-[10px] text-slate-500">{users.length} عضو مسجل</div>
+                <div className="text-[10px] text-slate-500">{users.filter(u => !u.isBanned).length} عضو مسجل</div>
               </button>
 
               <button
@@ -1544,6 +1596,15 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                 <Settings className="w-5 h-5 text-slate-700 mb-1 group-hover:scale-110 transition-transform" />
                 <div className="text-xs font-bold text-slate-800">إعدادات المنصة</div>
                 <div className="text-[10px] text-slate-500">الشبكات وساعات العمل</div>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('banned')}
+                className="p-3 bg-rose-50 hover:bg-rose-100/80 border border-rose-200/60 rounded-xl text-right transition-all cursor-pointer group"
+              >
+                <ShieldAlert className="w-5 h-5 text-rose-600 mb-1 group-hover:scale-110 transition-transform" />
+                <div className="text-xs font-bold text-slate-800">سجلات المحظورين</div>
+                <div className="text-[10px] text-slate-500">{users.filter(u => u.isBanned).length} عضو محظور</div>
               </button>
             </div>
           </div>
@@ -1606,7 +1667,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
           <div className={activeTab === 'all' ? 'lg:col-span-2 space-y-6' : 'space-y-6'}>
             
             {/* Table: Registered Users Panel */}
-            {(activeTab === 'users' || activeTab === 'all') && (
+            {(activeTab === 'users' || activeTab === 'all' || activeTab === 'banned') && (
           <div className="bg-white rounded-2xl border border-slate-200 shadow-md hover:shadow-lg transition-all overflow-hidden">
             <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-3">
               <div className="flex items-center gap-2">
@@ -1618,9 +1679,9 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
               <div className="flex items-center gap-1.5 flex-wrap">
                 <div className="flex items-center gap-1 bg-slate-200/80 p-1 rounded-xl text-[10px] font-bold">
                   {[
-                    { id: 'all', label: `الكل (${users.length})` },
-                    { id: 'online', label: `🟢 نشط الآن (${users.filter(u => isUserOnline(u)).length})` },
-                    { id: 'offline', label: `🔴 غير نشط (${users.filter(u => !isUserOnline(u)).length})` }
+                    { id: 'all', label: `الكل (${users.filter(u => !u.isBanned).length})` },
+                    { id: 'online', label: `🟢 نشط الآن (${users.filter(u => !u.isBanned && isUserOnline(u)).length})` },
+                    { id: 'offline', label: `🔴 غير نشط (${users.filter(u => !u.isBanned && !isUserOnline(u)).length})` }
                   ].map(f => (
                     <button
                       key={f.id}
@@ -1678,7 +1739,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-black text-red-950">
-                        تم تحديد {selectedUserPhones.length} عضو من أصل {users.length}
+                        تم تحديد {selectedUserPhones.length} عضو من أصل {users.filter(u => !u.isBanned).length}
                       </span>
                       <span className="bg-red-200/80 text-red-800 text-[10px] font-black px-2 py-0.5 rounded-md">
                         جاهز للحذف الجماعي
@@ -1976,11 +2037,40 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                                     setEditTaskIncome(u.taskIncome);
                                     setEditEffectiveDays(calculateRemainingEffectiveDays(u));
                                     setEditWithdrawalBlocked(!!u.isWithdrawalBlocked);
+                                    setEditIsBanned(!!u.isBanned);
+                                    setEditBanReason(u.banReason || '');
                                   }}
                                   className="px-2 py-1 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded text-[10px] font-bold transition-all cursor-pointer flex items-center justify-center gap-1"
                                 >
                                   <Edit2 className="w-3 h-3" />
                                   <span>تعديل وحذف</span>
+                                </button>
+
+                                <button
+                                  disabled={updating === `quick_ban_${u.id || u.phone}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const confirmMsg = u.isBanned ? `هل تريد إلغاء حظر ${u.username}؟` : `هل تريد حظر ${u.username} نهائياً؟`;
+                                    const confirmBan = window.confirm(confirmMsg);
+                                    if (confirmBan) {
+                                      const reason = u.isBanned ? "" : window.prompt("ادخل سبب الحظر (اختياري):", "مخالفة شروط الاستخدام");
+                                      handleQuickBan(u.phone, !u.isBanned, reason || "", u.id);
+                                    }
+                                  }}
+                                  className={`px-2 py-1 rounded text-[10px] font-bold transition-all cursor-pointer flex items-center justify-center gap-1 ${
+                                    updating === `quick_ban_${u.id || u.phone}` ? 'opacity-50 cursor-wait' : ''
+                                  } ${
+                                    u.isBanned 
+                                      ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100' 
+                                      : 'bg-rose-50 text-rose-600 hover:bg-rose-100'
+                                  }`}
+                                >
+                                  {updating === `quick_ban_${u.id || u.phone}` ? (
+                                    <RefreshCw className="w-3 h-3 animate-spin" />
+                                  ) : (
+                                    u.isBanned ? <Unlock className="w-3 h-3" /> : <ShieldAlert className="w-3 h-3" />
+                                  )}
+                                  <span>{u.isBanned ? 'إلغاء الحظر' : 'حظر نهائي'}</span>
                                 </button>
 
                                 <button
@@ -2017,7 +2107,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                   <h2 className="text-sm font-extrabold text-white flex items-center gap-2">
                     <span>إدارة الفريق وشبكة الإحالات</span>
                     <span className="bg-indigo-500/30 text-indigo-200 text-[10px] px-2 py-0.5 rounded-full border border-indigo-400/30 font-mono">
-                      {users.length} مستخدم
+                      {users.filter(u => !u.isBanned).length} مستخدم
                     </span>
                   </h2>
                   <p className="text-[11px] text-slate-300 font-medium mt-0.5">
@@ -2031,13 +2121,13 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                 <div className="bg-white/10 border border-white/15 px-3 py-1.5 rounded-xl text-center">
                   <span className="block text-[9px] text-indigo-200 font-medium">أصحاب الفرق</span>
                   <span className="text-xs font-black text-amber-300">
-                    {users.filter(u => getUserTeamBreakdown(u).totalCount > 0).length} قائد
+                    {users.filter(u => !u.isBanned && getUserTeamBreakdown(u).totalCount > 0).length} قائد
                   </span>
                 </div>
                 <div className="bg-white/10 border border-white/15 px-3 py-1.5 rounded-xl text-center">
                   <span className="block text-[9px] text-indigo-200 font-medium">المشتركين المودعين</span>
                   <span className="text-xs font-black text-emerald-400">
-                    {users.filter(u => u.hasDeposited === true).length} عضو
+                    {users.filter(u => !u.isBanned && u.hasDeposited === true).length} عضو
                   </span>
                 </div>
               </div>
@@ -2048,10 +2138,10 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
               {/* Filter Pills */}
               <div className="flex flex-wrap items-center gap-1.5 bg-slate-200/80 p-1 rounded-xl text-[11px] font-bold">
                 {[
-                  { id: 'has_team', label: `👥 أصحاب الفرق (${users.filter(u => getUserTeamBreakdown(u).totalCount > 0).length})` },
-                  { id: 'all', label: `📋 كل الأعضاء (${users.length})` },
-                  { id: 'vip', label: `⭐ باقات VIP (${users.filter(u => u.vipTier && u.vipTier !== 'الباقة العادية' && u.vipTier !== 'VIP0').length})` },
-                  { id: 'deposited', label: `💎 مودعين (${users.filter(u => u.hasDeposited === true).length})` }
+                  { id: 'has_team', label: `👥 أصحاب الفرق (${users.filter(u => !u.isBanned && getUserTeamBreakdown(u).totalCount > 0).length})` },
+                  { id: 'all', label: `📋 كل الأعضاء (${users.filter(u => !u.isBanned).length})` },
+                  { id: 'vip', label: `⭐ باقات VIP (${users.filter(u => !u.isBanned && u.hasDeposited === true && u.vipTier && u.vipTier !== 'الباقة العادية' && u.vipTier !== 'VIP0').length})` },
+                  { id: 'deposited', label: `💎 مودعين (${users.filter(u => !u.isBanned && u.hasDeposited === true).length})` }
                 ].map(f => (
                   <button
                     key={f.id}
@@ -2111,7 +2201,9 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                       </td>
                     </tr>
                   ) : (
-                    filteredTeamUsers.map((u, index) => {
+                    filteredTeamUsers
+                      .filter(u => getUserTeamBreakdown(u).directCount > 0)
+                      .map((u, index) => {
                       const teamInfo = getUserTeamBreakdown(u);
                       const inviterUser = u.referrerCode ? inviteCodeToUserMap[u.referrerCode.trim().toUpperCase()] : null;
                       const hasActiveTeam = teamInfo.totalCount > 0;
@@ -2278,11 +2370,58 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                                 )}
                                 <button
                                   onClick={() => openTeamModal(u)}
-                                  className="px-3 py-1.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-sm hover:shadow flex items-center justify-center gap-1.5 active:scale-95"
+                                  className="px-2 py-1.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white rounded-xl text-[10px] font-bold transition-all cursor-pointer shadow-sm flex-1 flex items-center justify-center gap-1"
                                 >
                                   <Eye className="w-3.5 h-3.5" />
-                                  <span>شجرة الفريق</span>
+                                  <span>شجرة</span>
                                 </button>
+                                <div className="flex items-center justify-center gap-1 w-full mt-1">
+                                  <button
+                                    onClick={() => {
+                                      setSelectedUserForEdit(u);
+                                      setEditUsernameInput(u.username);
+                                      setEditPhoneInput(u.phone);
+                                      setEditPasswordInput(u.rawPassword || u.password || '');
+                                      setEditVipTierInput(u.vipTier || 'الباقة العادية');
+                                      setEditEarnings(u.earnings);
+                                      setEditTaskIncome(u.taskIncome);
+                                      setEditEffectiveDays(calculateRemainingEffectiveDays(u));
+                                      setEditWithdrawalBlocked(!!u.isWithdrawalBlocked);
+                                      setEditIsBanned(!!u.isBanned);
+                                      setEditBanReason(u.banReason || '');
+                                    }}
+                                    className="p-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg border border-blue-100 transition-all cursor-pointer"
+                                    title="تعديل وحذف"
+                                  >
+                                    <Edit2 className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    disabled={updating === `quick_ban_${u.id || u.phone}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const confirmMsg = u.isBanned ? `هل تريد إلغاء حظر ${u.username}؟` : `هل تريد حظر ${u.username} نهائياً؟`;
+                                      const confirmBan = window.confirm(confirmMsg);
+                                      if (confirmBan) {
+                                        const reason = u.isBanned ? "" : window.prompt("ادخل سبب الحظر (اختياري):", "مخالفة شروط الاستخدام");
+                                        handleQuickBan(u.phone, !u.isBanned, reason || "", u.id);
+                                      }
+                                    }}
+                                    className={`p-1.5 rounded-lg border transition-all cursor-pointer ${
+                                      updating === `quick_ban_${u.id || u.phone}` ? 'opacity-50 cursor-wait' : ''
+                                    } ${
+                                      u.isBanned 
+                                        ? 'bg-emerald-50 text-emerald-600 border-emerald-100 hover:bg-emerald-100' 
+                                        : 'bg-rose-50 text-rose-600 border-rose-100 hover:bg-rose-100'
+                                    }`}
+                                    title={u.isBanned ? 'إلغاء الحظر' : 'حظر نهائي'}
+                                  >
+                                    {updating === `quick_ban_${u.id || u.phone}` ? (
+                                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                    ) : (
+                                      u.isBanned ? <Unlock className="w-3.5 h-3.5" /> : <ShieldAlert className="w-3.5 h-3.5" />
+                                    )}
+                                  </button>
+                                </div>
                               </div>
                             </td>
                           </tr>
@@ -2443,14 +2582,16 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                         </td>
                         <td className="p-3">
                           {dep.screenshotUrl ? (
-                            <div className="flex items-center gap-1.5">
+                            <div 
+                              className="flex items-center gap-1.5 cursor-pointer group"
+                              onClick={() => setActiveLightboxImage(dep.screenshotUrl!)}
+                            >
                               <img
                                 src={dep.screenshotUrl}
                                 alt="Screenshot"
-                                className="w-10 h-10 object-cover rounded-lg border border-slate-200 shadow-sm hover:scale-105 transition-transform duration-200 cursor-pointer"
-                                onClick={() => setActiveLightboxImage(dep.screenshotUrl!)}
+                                className="w-10 h-10 object-cover rounded-lg border border-slate-200 shadow-sm group-hover:scale-110 transition-transform duration-200 cursor-zoom-in"
                               />
-                              <span className="text-[9px] text-slate-400 font-bold">(اضغط للتكبير)</span>
+                              <span className="text-[9px] text-slate-400 font-bold group-hover:text-blue-600 transition-colors">(اضغط للتكبير)</span>
                             </div>
                           ) : dep.txHash ? (
                             <span className="font-mono text-[10px] text-slate-500 select-all block max-w-[150px] truncate" dir="ltr" title={dep.txHash}>
@@ -3552,7 +3693,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                 </div>
               ) : (
                 settings.vipPlans.map((plan, idx) => {
-                  const planSubscribers = users.filter(u => u.vipTier === plan.name).length;
+                  const planSubscribers = users.filter(u => !u.isBanned && u.vipTier === plan.name).length;
                   return (
                   <div key={plan.id} className="bg-[#070D19] p-3 rounded-xl border border-blue-900/20 flex flex-wrap items-center justify-between gap-2 text-xs font-medium">
                     <div className="flex items-center gap-2 text-right">
@@ -5113,19 +5254,11 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
               </div>
 
               <div className="bg-white p-3 rounded-2xl border border-slate-200/80 shadow-sm text-center">
-                <span className="block text-[10px] font-bold text-slate-500 mb-0.5">المستوى 2 و 3 (فرعي)</span>
-                <span className="text-base sm:text-lg font-black text-blue-600 font-mono">
-                  {selectedUserTeam.level2.length + selectedUserTeam.level3.length}
-                </span>
-                <span className="text-[9px] text-slate-400 block">إحالات غير مباشرة</span>
-              </div>
-
-              <div className="bg-white p-3 rounded-2xl border border-slate-200/80 shadow-sm text-center">
-                <span className="block text-[10px] font-bold text-slate-500 mb-0.5">إجمالي الفريق بالكامل</span>
+                <span className="block text-[10px] font-bold text-slate-500 mb-0.5">إجمالي الفريق</span>
                 <span className="text-base sm:text-lg font-black text-indigo-700 font-mono">
                   {selectedUserTeam.totalCount}
                 </span>
-                <span className="text-[9px] text-slate-400 block">جميع المستويات 1-3</span>
+                <span className="text-[9px] text-slate-400 block">جميع الأعضاء المباشرين</span>
               </div>
 
               <div className="bg-white p-3 rounded-2xl border border-slate-200/80 shadow-sm text-center">
@@ -5143,9 +5276,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
               <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-bold overflow-x-auto no-scrollbar">
                 {[
                   { id: 'all', label: `الكل (${selectedUserTeam.totalCount})` },
-                  { id: '1', label: `المستوى 1 (${selectedUserTeam.directCount})` },
-                  { id: '2', label: `المستوى 2 (${selectedUserTeam.level2.length})` },
-                  { id: '3', label: `المستوى 3 (${selectedUserTeam.level3.length})` }
+                  { id: '1', label: `المستوى 1 (${selectedUserTeam.directCount})` }
                 ].map(tab => (
                   <button
                     key={tab.id}
@@ -5207,14 +5338,8 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                         {/* Top Ribbon / Level Badge */}
                         <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-slate-100">
                           <div className="flex items-center gap-2">
-                            <span className={`px-2 py-0.5 rounded-lg text-[10px] font-black ${
-                              item.level === 1 
-                                ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                                : item.level === 2
-                                ? 'bg-blue-100 text-blue-800 border border-blue-300'
-                                : 'bg-purple-100 text-purple-800 border border-purple-300'
-                            }`}>
-                              {item.level === 1 ? 'المستوى 1 (مباشر)' : item.level === 2 ? 'المستوى 2 (فرعي)' : 'المستوى 3 (فرعي)'}
+                            <span className={`px-2 py-0.5 rounded-lg text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300`}>
+                              المستوى 1 (مباشر)
                             </span>
                             <span className="text-[10px] font-mono text-slate-400">#{idx + 1}</span>
                           </div>
