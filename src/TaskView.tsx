@@ -64,6 +64,7 @@ import {
 import AuthPage from './components/AuthPage';
 import ProfileCenter from './components/ProfileCenter';
 import AdminPanel from './components/AdminPanel';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { WelcomeOverlay } from './components/WelcomeOverlay';
 import { WelcomeTourModal } from './components/WelcomeTourModal';
 import { QuickGuidePromptToast } from './components/QuickGuidePromptToast';
@@ -909,8 +910,14 @@ export default function TaskView() {
       if (cachedPhone) {
         try {
           const { getUserByPhone, shadowFirebaseAuth } = await import('./firebaseService');
+          
           const usr = await getUserByPhone(cachedPhone);
           if (usr) {
+            if (usr.isBanned) {
+              localStorage.setItem('oxlo_device_banned', 'true');
+              localStorage.removeItem('logged_in_phone');
+              return;
+            }
             shadowFirebaseAuth(usr.phone, usr.password || usr.id).catch(e => console.warn('Shadow auth failed:', e));
             setCurrentUser(usr);
           }
@@ -987,8 +994,17 @@ export default function TaskView() {
       import('./firebaseService').then(({ recordUserActivity, getUserByPhone }) => {
         recordUserActivity(currentUser.phone).catch(e => console.warn(e));
         // Also fetch latest data to pick up admin updates (money, VIP tier, etc.)
+        
         getUserByPhone(currentUser.phone).then(updated => {
           if (updated) {
+            if (updated.isBanned) {
+              localStorage.setItem('oxlo_device_banned', 'true');
+              setCurrentUser(null);
+              setAdminMode(false);
+              localStorage.removeItem('logged_in_phone');
+              alert(updated.banReason || "عذراً، تم حظر حسابك وجهازك من النظام بسبب مخالفة شروط الاستخدام.");
+              return;
+            }
             // Only update if there's an actual change to prevent unnecessary re-renders
             if (JSON.stringify(updated) !== JSON.stringify(currentUser)) {
               setCurrentUser(updated);
@@ -1660,7 +1676,9 @@ export default function TaskView() {
             تصفح كعضو عادي
           </button>
         </div>
-        <AdminPanel adminUser={currentUser} onLogout={handleLogout} />
+        <ErrorBoundary fallbackTitle="حدث خطأ أثناء تحميل لوحة تحكم الإدارة">
+          <AdminPanel adminUser={currentUser} onLogout={handleLogout} />
+        </ErrorBoundary>
       </div>
     );
   }
@@ -2996,12 +3014,17 @@ export default function TaskView() {
                     onClick={async () => {
                       if (!currentUser) return;
                       
+                      const price = Number(selectedPlanForUpgrade.price) || 0;
+                      const currentEarnings = Number(currentUser.earnings) || 0;
+
+                      if (currentEarnings < price) {
+                        triggerNotification("عفواً، رصيدك الحالي غير كافٍ للاشتراك في هذه الباقة. يرجى الإيداع وتعبئة الرصيد أولاً.");
+                        setSelectedPlanForUpgrade(null);
+                        return;
+                      }
+
                       try {
-                        const price = Number(selectedPlanForUpgrade.price) || 0;
-                        const currentEarnings = Number(currentUser.earnings) || 0;
-                        
-                        // Allow upgrade even if earnings is less (to prevent blocking users during testing/recharge), or calculate new earnings
-                        const newEarnings = currentEarnings >= price ? Number((currentEarnings - price).toFixed(2)) : currentEarnings;
+                        const newEarnings = Number((currentEarnings - price).toFixed(2));
 
                         const phoneKey = currentUser.phone ? currentUser.phone.trim() : '';
                         const idKey = currentUser.id ? currentUser.id.trim() : '';
@@ -3055,21 +3078,7 @@ export default function TaskView() {
                         triggerNotification(`🎉 تهانينا! تم ترقية حسابك إلى ${selectedPlanForUpgrade.name} بنجاح!`);
                       } catch (err: any) {
                         console.error("Upgrade action error:", err);
-                        // Even if an error happens, force local update so user is never blocked
-                        try {
-                          const updatedUser = {
-                            ...currentUser,
-                            vipTier: selectedPlanForUpgrade.name,
-                            effectiveDays: 365,
-                            vipStartDate: new Date().toISOString(),
-                            hasDeposited: true
-                          };
-                          setCurrentUser(updatedUser);
-                          localStorage.setItem('user_session', JSON.stringify(updatedUser));
-                          triggerNotification(`🎉 تهانينا! تم ترقية حسابك إلى ${selectedPlanForUpgrade.name} بنجاح!`);
-                        } catch (fallbackErr) {
-                          triggerNotification("حدث خطأ أثناء محاولة الترقية.");
-                        }
+                        triggerNotification("حدث خطأ أثناء محاولة الترقية، يرجى المحاولة لاحقاً.");
                       } finally {
                         setSelectedPlanForUpgrade(null);
                       }

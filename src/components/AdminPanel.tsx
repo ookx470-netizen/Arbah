@@ -249,10 +249,13 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
 
   const filteredTeamUsers = useMemo(() => {
     return users.filter(u => {
+      if (!u) return false;
       const q = teamSearchTerm.trim().toLowerCase();
+      const uName = u.username || '';
+      const uPhone = u.phone || '';
       const matchesSearch = !q || 
-        u.username.toLowerCase().includes(q) || 
-        u.phone.includes(q) || 
+        uName.toLowerCase().includes(q) || 
+        uPhone.includes(q) || 
         (u.inviteCode && u.inviteCode.toLowerCase().includes(q)) ||
         (u.referrerCode && u.referrerCode.toLowerCase().includes(q));
 
@@ -304,11 +307,16 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
 
     if (modalMemberSearch.trim()) {
       const q = modalMemberSearch.trim().toLowerCase();
-      list = list.filter(item => 
-        item.member.username.toLowerCase().includes(q) ||
-        item.member.phone.includes(q) ||
-        (item.member.inviteCode && item.member.inviteCode.toLowerCase().includes(q))
-      );
+      list = list.filter(item => {
+        if (!item?.member) return false;
+        const uName = item.member.username || '';
+        const uPhone = item.member.phone || '';
+        return (
+          uName.toLowerCase().includes(q) ||
+          uPhone.includes(q) ||
+          (item.member.inviteCode && item.member.inviteCode.toLowerCase().includes(q))
+        );
+      });
     }
 
     return list;
@@ -456,6 +464,8 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
   const [editVipTierInput, setEditVipTierInput] = useState<string>('');
   const [editWithdrawalBlocked, setEditWithdrawalBlocked] = useState<boolean>(false);
   const [editBypassHoliday, setEditBypassHoliday] = useState<boolean>(false);
+  const [editIsBanned, setEditIsBanned] = useState<boolean>(false);
+  const [editBanReason, setEditBanReason] = useState<string>('');
 
   // States for Manual Withdrawal modal
   const [selectedUserForWithdrawal, setSelectedUserForWithdrawal] = useState<User | null>(null);
@@ -608,29 +618,30 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
   useEffect(() => {
     loadAdminData();
 
+    let heartbeatInterval: any = null;
     if (adminUser?.phone) {
       recordUserActivity(adminUser.phone).catch(e => console.warn(e));
-      const heartbeatInterval = setInterval(() => {
+      heartbeatInterval = setInterval(() => {
         recordUserActivity(adminUser.phone).catch(e => console.warn(e));
       }, 45000);
-      return () => clearInterval(heartbeatInterval);
     }
 
     // Subscribe to live updates so new registrations or actions from any device appear instantly
     const unsubUsers = subscribeToAllUsers((updatedUsers) => {
-      setUsers(updatedUsers);
+      if (Array.isArray(updatedUsers)) setUsers(updatedUsers);
     });
     const unsubDepos = subscribeToAllDeposits((updatedDepos) => {
-      setDeposits(updatedDepos);
+      if (Array.isArray(updatedDepos)) setDeposits(updatedDepos);
     });
     const unsubWiths = subscribeToAllWithdrawals((updatedWiths) => {
-      setWithdrawals(updatedWiths);
+      if (Array.isArray(updatedWiths)) setWithdrawals(updatedWiths);
     });
 
     return () => {
-      unsubUsers();
-      unsubDepos();
-      unsubWiths();
+      if (heartbeatInterval) clearInterval(heartbeatInterval);
+      if (unsubUsers) unsubUsers();
+      if (unsubDepos) unsubDepos();
+      if (unsubWiths) unsubWiths();
     };
   }, [adminUser?.phone]);
 
@@ -1277,8 +1288,11 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
 
   // Filter users based on phone or username search and online status
   const filteredUsers = users.filter(u => {
-    const matchesSearch = u.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      u.phone.includes(searchQuery);
+    if (!u) return false;
+    const uName = u.username || '';
+    const uPhone = u.phone || '';
+    const matchesSearch = uName.toLowerCase().includes((searchQuery || '').toLowerCase()) ||
+      uPhone.includes(searchQuery || '');
     if (!matchesSearch) return false;
 
     if (userOnlineFilter === 'online') {
@@ -1289,17 +1303,17 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
     return true;
   });
 
-  const filteredDeposits = deposits.filter(d => depositFilter === 'all' ? true : d.status === depositFilter);
+  const filteredDeposits = deposits.filter(d => d && (depositFilter === 'all' ? true : d.status === depositFilter));
   const sortedDeposits = [...filteredDeposits].sort((a, b) => {
-    const tA = new Date(a.createdAt || 0).getTime();
-    const tB = new Date(b.createdAt || 0).getTime();
+    const tA = new Date(a?.createdAt || 0).getTime();
+    const tB = new Date(b?.createdAt || 0).getTime();
     return depositSortOrder === 'newest' ? tB - tA : tA - tB;
   });
 
-  const filteredWithdrawals = withdrawals.filter(w => withdrawalFilter === 'all' ? true : w.status === withdrawalFilter);
+  const filteredWithdrawals = withdrawals.filter(w => w && (withdrawalFilter === 'all' ? true : w.status === withdrawalFilter));
   const sortedWithdrawals = [...filteredWithdrawals].sort((a, b) => {
-    const tA = new Date(a.createdAt || 0).getTime();
-    const tB = new Date(b.createdAt || 0).getTime();
+    const tA = new Date(a?.createdAt || 0).getTime();
+    const tB = new Date(b?.createdAt || 0).getTime();
     return withdrawalSortOrder === 'newest' ? tB - tA : tA - tB;
   });
 
@@ -1738,12 +1752,12 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                       </td>
                     </tr>
                   ) : (
-                    filteredUsers.map((u) => {
+                    filteredUsers.map((u, idx) => {
                       const isEditing = editingUserId === u.id;
                       const isSelected = selectedUserPhones.includes(u.phone);
                       return (
                         <tr 
-                          key={u.id} 
+                          key={`${u.phone || u.id}_${idx}`} 
                           className={`transition-colors ${
                             isSelected 
                               ? 'bg-red-50/60 hover:bg-red-50/80 border-r-4 border-r-red-500' 
@@ -2104,7 +2118,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                       const isExpanded = !!expandedLeaderPhones[u.phone];
 
                       return (
-                        <React.Fragment key={u.phone || u.id || index}>
+                        <React.Fragment key={`${u.phone || u.id}_${index}`}>
                           <tr 
                             className={`hover:bg-indigo-50/40 transition-colors ${
                               hasActiveTeam ? 'bg-white font-medium' : 'bg-slate-50/40'
@@ -2292,7 +2306,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                                   </div>
                                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
                                     {teamInfo.level1.map((m, mIdx) => (
-                                      <div key={m.phone || m.id || mIdx} className="p-2.5 bg-slate-50 rounded-xl border border-slate-200/70 flex items-center justify-between text-xs">
+                                      <div key={`${m.phone || m.id}_${mIdx}`} className="p-2.5 bg-slate-50 rounded-xl border border-slate-200/70 flex items-center justify-between text-xs">
                                         <div>
                                           <div className="font-extrabold text-slate-800">{m.username}</div>
                                           <div className="font-mono text-[10px] text-slate-400" dir="ltr">{m.phone}</div>
@@ -3879,9 +3893,12 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                 {(() => {
                   const filtered = chats
                     .filter(c => {
+                      if (!c) return false;
                       const q = chatSearchQuery.trim().toLowerCase();
                       if (!q) return true;
-                      return c.phone.toLowerCase().includes(q) || c.username.toLowerCase().includes(q);
+                      const cPhone = c.phone || '';
+                      const cName = c.username || '';
+                      return cPhone.toLowerCase().includes(q) || cName.toLowerCase().includes(q);
                     })
                     .filter(c => {
                       if (chatFilter === 'unread') return c.unreadByAdmin;
@@ -4421,6 +4438,59 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                 )}
               </div>
 
+              
+              {/* Ban Device Section */}
+              <div className="p-3 bg-rose-50/50 border border-rose-200/60 rounded-xl space-y-2 mt-2">
+                <span className="block text-[10px] text-rose-800 font-extrabold flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-1">
+                    <ShieldAlert className="w-4 h-4 text-rose-600" />
+                    حظر الجهاز والحساب نهائياً (Ban):
+                  </div>
+                </span>
+                <div className="flex gap-2 mb-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditIsBanned(false);
+                      setEditBanReason('');
+                    }}
+                    className={`flex-1 py-2 px-3 rounded-lg border font-bold text-[11px] transition-all cursor-pointer text-center ${
+                      !editIsBanned
+                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm font-extrabold'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    حساب سليم ومصرح له بالدخول
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditIsBanned(true)}
+                    className={`flex-1 py-2 px-3 rounded-lg border font-bold text-[11px] transition-all cursor-pointer text-center ${
+                      editIsBanned
+                        ? 'bg-rose-600 text-white border-rose-600 shadow-sm font-extrabold'
+                        : 'bg-white text-rose-600 border-slate-200 hover:bg-rose-50'
+                    }`}
+                  >
+                    حظر وطرد نهائي 🚫
+                  </button>
+                </div>
+                {editIsBanned && (
+                  <div className="space-y-2 mt-2 animate-fadeIn">
+                    <label className="block text-[10px] text-rose-800 font-bold">سبب الحظر (يظهر للمستخدم):</label>
+                    <input
+                      type="text"
+                      value={editBanReason}
+                      onChange={(e) => setEditBanReason(e.target.value)}
+                      placeholder="مثال: مخالفة شروط الاستخدام..."
+                      className="w-full px-3 py-2 bg-white border border-rose-200 rounded-lg font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-rose-500 text-xs"
+                    />
+                    <p className="text-[9px] text-rose-600 leading-relaxed font-bold">
+                      ⚠️ بمجرد تفعيل الحظر وحفظ التعديلات، سيتم طرد العضو من النظام تلقائياً ولن يتمكن من الدخول إلى حسابه من نفس الهاتف نهائياً.
+                    </p>
+                  </div>
+                )}
+              </div>
+
               {/* Buttons action layout */}
               <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row gap-2">
                 <button
@@ -4504,8 +4574,8 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 focus:outline-none mb-2"
                   >
                     <option value="">-- اختر العضو من القائمة --</option>
-                    {users.map(u => (
-                      <option key={u.id} value={u.phone}>
+                    {users.map((u, i) => (
+                      <option key={`${u.phone || u.id}_${i}`} value={u.phone}>
                         {u.username} ({u.phone})
                       </option>
                     ))}
@@ -4617,8 +4687,8 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 focus:outline-none mb-2"
                   >
                     <option value="">-- اختر العضو من القائمة --</option>
-                    {users.map(u => (
-                      <option key={u.id} value={u.phone}>
+                    {users.map((u, i) => (
+                      <option key={`${u.phone || u.id}_${i}`} value={u.phone}>
                         {u.username} ({u.phone})
                       </option>
                     ))}
@@ -5131,7 +5201,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
 
                     return (
                       <div 
-                        key={m.phone || m.id || idx}
+                        key={`${m.phone || m.id}_${idx}`}
                         className="bg-white rounded-2xl border border-slate-200 p-3.5 shadow-sm hover:shadow-md transition-all relative overflow-hidden"
                       >
                         {/* Top Ribbon / Level Badge */}
@@ -5339,7 +5409,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                 </span>
                 <div className="max-h-56 overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-2xl bg-slate-50/50">
                   {users.filter(u => selectedUserPhones.includes(u.phone)).map((u, idx) => (
-                    <div key={u.id || u.phone} className="p-2.5 flex items-center justify-between gap-2 hover:bg-white transition-colors">
+                    <div key={`${u.phone || u.id}_${idx}`} className="p-2.5 flex items-center justify-between gap-2 hover:bg-white transition-colors">
                       <div className="flex items-center gap-2.5 min-w-0">
                         <span className="text-[10px] font-mono text-slate-400 w-4 text-center">{idx + 1}</span>
                         <div className="min-w-0">

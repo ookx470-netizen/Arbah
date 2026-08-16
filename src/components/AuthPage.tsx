@@ -92,7 +92,15 @@ export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
       return;
     }
 
-    if (!isLogin) {
+    
+      // Check if device is banned
+      if (localStorage.getItem('oxlo_device_banned') === 'true') {
+        setErrorMsg("لا يمكنك إنشاء حساب جديد، هذا الجهاز محظور من استخدام المنصة.");
+        setLoading(false);
+        return;
+      }
+
+      if (!isLogin) {
       const phoneCheck = selectedCountry.validate(phoneInput);
       if (!phoneCheck.isValid) {
         setErrorMsg(phoneCheck.message || "رقم الهاتف غير صحيح للدولة المحددة");
@@ -124,6 +132,14 @@ export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
 
         if (!user) {
           throw new Error("رقم الهاتف غير مسجل في النظام!");
+        }
+
+        
+        if (user.isBanned) {
+          localStorage.setItem('oxlo_device_banned', 'true');
+          setErrorMsg(user.banReason || "عذراً، تم حظر حسابك وجهازك من النظام بسبب مخالفة شروط الاستخدام.");
+          setLoading(false);
+          return;
         }
 
         const hashedEnteredPassword = await hashPassword(password);
