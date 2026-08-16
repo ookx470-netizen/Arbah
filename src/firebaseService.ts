@@ -50,12 +50,11 @@ export async function hashPassword(password: string): Promise<string> {
   }
 }
 
-// Let's keep a state flag for Local Storage fallback mode
+// State flag for in-memory Local Storage fallback mode during active quota errors
 let useLocalStorageFallback = false;
 try {
-  if (localStorage.getItem('oxlo_quota_fallback_active') === 'true') {
-    useLocalStorageFallback = true;
-  }
+  // Clear any stale quota fallback flag so fresh page loads always connect to live Firestore
+  localStorage.removeItem('oxlo_quota_fallback_active');
 } catch (e) {
   console.warn(e);
 }
@@ -1546,92 +1545,260 @@ export async function updateWithdrawalStatus(withdrawalId: string, status: 'appr
   }
 }
 
-// 8. Team (Invited users query)
-export async function getReferralTeam(myInviteCode: string): Promise<User[]> {
-  if (!myInviteCode) return [];
-  const cleanCode = myInviteCode.trim().toUpperCase();
-  const teamMap: Record<string, User> = {};
+// 8. Team (Invited users query - multi-level 1, 2, 3 supported)
+export async function getReferralTeam(myInviteCodeOrPhone: string): Promise<(User & { teamLevel?: number })[]> {
+  if (!myInviteCodeOrPhone) return [];
+  const cleanInput = myInviteCodeOrPhone.trim().toUpperCase();
+  const allUsersMap: Record<string, User> = {};
 
-  // Always sync local storage matching
+  // 1. Gather all local users
   const localUsers = getLocalUsers();
   Object.values(localUsers).forEach(u => {
-    if (u.referrerCode && u.referrerCode.trim().toUpperCase() === cleanCode) {
-      const key = u.phone || u.id;
-      if (key) teamMap[key] = u;
+    const key = u.phone || u.id;
+    if (key) allUsersMap[key] = u;
+  });
+
+  // 2. Fetch from Firestore
+  try {
+    const snap = await getDocs(collection(db, "users"));
+    snap.forEach(d => {
+      const u = d.data() as User;
+      const key = u.phone || u.id || d.id;
+      if (key) allUsersMap[key] = u;
+    });
+  } catch (err) {
+    console.warn("Firestore getReferralTeam fetch all users warning:", err);
+  }
+
+  // 3. Find inviter user and gather all alias identifiers
+  const allUsers = Object.values(allUsersMap);
+  const targetUser = allUsers.find(u => 
+    (u.inviteCode && u.inviteCode.trim().toUpperCase() === cleanInput) ||
+    (u.phone && u.phone.trim().toUpperCase() === cleanInput) ||
+    (u.id && u.id.trim().toUpperCase() === cleanInput) ||
+    (u.username && u.username.trim().toUpperCase() === cleanInput)
+  );
+
+  const inviterKeys = new Set<string>([cleanInput]);
+  if (targetUser) {
+    if (targetUser.inviteCode) inviterKeys.add(targetUser.inviteCode.trim().toUpperCase());
+    if (targetUser.phone) {
+      inviterKeys.add(targetUser.phone.trim().toUpperCase());
+      const digits = targetUser.phone.replace(/\D/g, '');
+      if (digits) inviterKeys.add(digits);
+    }
+    if (targetUser.id) inviterKeys.add(targetUser.id.trim().toUpperCase());
+    if (targetUser.username) inviterKeys.add(targetUser.username.trim().toUpperCase());
+  }
+
+  // Build lookup map of referrer codes
+  const directMap: Record<string, User[]> = {};
+  allUsers.forEach(u => {
+    if (u.referrerCode) {
+      const ref = u.referrerCode.trim().toUpperCase();
+      if (!directMap[ref]) directMap[ref] = [];
+      directMap[ref].push(u);
     }
   });
 
-  if (useLocalStorageFallback) {
-    return Object.values(teamMap).sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-  }
-
-  try {
-    // 1. Direct match in Firestore using efficient query
-    const q = query(collection(db, "users"), where("referrerCode", "==", myInviteCode.trim()));
-    const snap = await getDocs(q);
-    snap.forEach((d) => {
-      const u = d.data() as User;
-      const key = u.phone || u.id || d.id;
-      if (key) teamMap[key] = u;
+  // Level 1: users referred by any inviter key
+  const level1UsersMap = new Map<string, User>();
+  inviterKeys.forEach(key => {
+    const directMatches = directMap[key] || [];
+    directMatches.forEach(u => {
+      const uid = u.phone || u.id;
+      if (uid && !inviterKeys.has(uid.trim().toUpperCase())) {
+        level1UsersMap.set(uid, u);
+      }
     });
+  });
+  const level1 = Array.from(level1UsersMap.values());
 
-    // 2. Uppercase match if different
-    if (cleanCode !== myInviteCode.trim()) {
-      const q2 = query(collection(db, "users"), where("referrerCode", "==", cleanCode));
-      const snap2 = await getDocs(q2);
-      snap2.forEach((d) => {
-        const u = d.data() as User;
-        const key = u.phone || u.id || d.id;
-        if (key) teamMap[key] = u;
-      });
+  // Level 2
+  const level1Keys = new Set<string>();
+  level1.forEach(u => {
+    if (u.inviteCode) level1Keys.add(u.inviteCode.trim().toUpperCase());
+    if (u.phone) {
+      level1Keys.add(u.phone.trim().toUpperCase());
+      const digits = u.phone.replace(/\D/g, '');
+      if (digits) level1Keys.add(digits);
     }
+    if (u.id) level1Keys.add(u.id.trim().toUpperCase());
+  });
 
-    // 3. REMOVED expensive full collection scan to save quota!
+  const level2UsersMap = new Map<string, User>();
+  level1Keys.forEach(key => {
+    const directMatches = directMap[key] || [];
+    directMatches.forEach(u => {
+      const uid = u.phone || u.id;
+      if (uid && !inviterKeys.has(uid.trim().toUpperCase()) && !level1UsersMap.has(uid)) {
+        level2UsersMap.set(uid, u);
+      }
+    });
+  });
+  const level2 = Array.from(level2UsersMap.values());
 
-    const result = Object.values(teamMap).sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-    return result;
-  } catch (error) {
-    console.warn("Firestore getReferralTeam error, returning cached team:", error);
-    return Object.values(teamMap).sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-  }
+  // Level 3
+  const level2Keys = new Set<string>();
+  level2.forEach(u => {
+    if (u.inviteCode) level2Keys.add(u.inviteCode.trim().toUpperCase());
+    if (u.phone) {
+      level2Keys.add(u.phone.trim().toUpperCase());
+      const digits = u.phone.replace(/\D/g, '');
+      if (digits) level2Keys.add(digits);
+    }
+    if (u.id) level2Keys.add(u.id.trim().toUpperCase());
+  });
+
+  const level3UsersMap = new Map<string, User>();
+  level2Keys.forEach(key => {
+    const directMatches = directMap[key] || [];
+    directMatches.forEach(u => {
+      const uid = u.phone || u.id;
+      if (uid && !inviterKeys.has(uid.trim().toUpperCase()) && !level1UsersMap.has(uid) && !level2UsersMap.has(uid)) {
+        level3UsersMap.set(uid, u);
+      }
+    });
+  });
+  const level3 = Array.from(level3UsersMap.values());
+
+  const teamList: (User & { teamLevel?: number })[] = [
+    ...level1.map(m => ({ ...m, teamLevel: 1 })),
+    ...level2.map(m => ({ ...m, teamLevel: 2 })),
+    ...level3.map(m => ({ ...m, teamLevel: 3 }))
+  ];
+
+  return teamList.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
 }
 
-export function subscribeToReferralTeam(myInviteCode: string, callback: (team: User[]) => void): () => void {
-  if (!myInviteCode) {
+export function subscribeToReferralTeam(myInviteCodeOrPhone: string, callback: (team: (User & { teamLevel?: number })[]) => void): () => void {
+  if (!myInviteCodeOrPhone) {
     callback([]);
     return () => {};
   }
-  const cleanCode = myInviteCode.trim().toUpperCase();
+  const cleanInput = myInviteCodeOrPhone.trim().toUpperCase();
 
   const handleFallback = () => {
-    getReferralTeam(myInviteCode).then(list => callback(list)).catch(() => {});
+    getReferralTeam(myInviteCodeOrPhone).then(list => callback(list)).catch(() => {});
   };
 
   // Initial fetch immediately
-  getReferralTeam(myInviteCode).then(list => callback(list)).catch(() => {});
+  getReferralTeam(myInviteCodeOrPhone).then(list => callback(list)).catch(() => {});
 
-  // Optimization: use filtered query instead of listening to all users to save quota
-  const q = query(collection(db, "users"), where("referrerCode", "==", myInviteCode.trim()));
-  
-  return safeOnSnapshot(q, (snapshot) => {
-    const teamMap: Record<string, User> = {};
+  // Listen to users collection in real-time to compute the active tree dynamically
+  return safeOnSnapshot(collection(db, "users"), (snapshot) => {
+    const allUsersMap: Record<string, User> = {};
 
+    // Firestore users
     snapshot.forEach((docSnap) => {
       const u = docSnap.data() as User;
       const key = u.phone || u.id || docSnap.id;
-      if (key) teamMap[key] = u;
+      if (key) allUsersMap[key] = u;
     });
 
     // Merge local storage fallback
     const localUsers = getLocalUsers();
     Object.values(localUsers).forEach(u => {
-      if (u.referrerCode && u.referrerCode.trim().toUpperCase() === cleanCode) {
-        const key = u.phone || u.id;
-        if (key) teamMap[key] = u;
+      const key = u.phone || u.id;
+      if (key) {
+        allUsersMap[key] = { ...allUsersMap[key], ...u };
       }
     });
 
-    const result = Object.values(teamMap).sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+    const allUsers = Object.values(allUsersMap);
+    const targetUser = allUsers.find(u => 
+      (u.inviteCode && u.inviteCode.trim().toUpperCase() === cleanInput) ||
+      (u.phone && u.phone.trim().toUpperCase() === cleanInput) ||
+      (u.id && u.id.trim().toUpperCase() === cleanInput) ||
+      (u.username && u.username.trim().toUpperCase() === cleanInput)
+    );
+
+    const inviterKeys = new Set<string>([cleanInput]);
+    if (targetUser) {
+      if (targetUser.inviteCode) inviterKeys.add(targetUser.inviteCode.trim().toUpperCase());
+      if (targetUser.phone) {
+        inviterKeys.add(targetUser.phone.trim().toUpperCase());
+        const digits = targetUser.phone.replace(/\D/g, '');
+        if (digits) inviterKeys.add(digits);
+      }
+      if (targetUser.id) inviterKeys.add(targetUser.id.trim().toUpperCase());
+      if (targetUser.username) inviterKeys.add(targetUser.username.trim().toUpperCase());
+    }
+
+    const directMap: Record<string, User[]> = {};
+    allUsers.forEach(u => {
+      if (u.referrerCode) {
+        const ref = u.referrerCode.trim().toUpperCase();
+        if (!directMap[ref]) directMap[ref] = [];
+        directMap[ref].push(u);
+      }
+    });
+
+    const level1UsersMap = new Map<string, User>();
+    inviterKeys.forEach(key => {
+      const directMatches = directMap[key] || [];
+      directMatches.forEach(u => {
+        const uid = u.phone || u.id;
+        if (uid && !inviterKeys.has(uid.trim().toUpperCase())) {
+          level1UsersMap.set(uid, u);
+        }
+      });
+    });
+    const level1 = Array.from(level1UsersMap.values());
+
+    const level1Keys = new Set<string>();
+    level1.forEach(u => {
+      if (u.inviteCode) level1Keys.add(u.inviteCode.trim().toUpperCase());
+      if (u.phone) {
+        level1Keys.add(u.phone.trim().toUpperCase());
+        const digits = u.phone.replace(/\D/g, '');
+        if (digits) level1Keys.add(digits);
+      }
+      if (u.id) level1Keys.add(u.id.trim().toUpperCase());
+    });
+
+    const level2UsersMap = new Map<string, User>();
+    level1Keys.forEach(key => {
+      const directMatches = directMap[key] || [];
+      directMatches.forEach(u => {
+        const uid = u.phone || u.id;
+        if (uid && !inviterKeys.has(uid.trim().toUpperCase()) && !level1UsersMap.has(uid)) {
+          level2UsersMap.set(uid, u);
+        }
+      });
+    });
+    const level2 = Array.from(level2UsersMap.values());
+
+    const level2Keys = new Set<string>();
+    level2.forEach(u => {
+      if (u.inviteCode) level2Keys.add(u.inviteCode.trim().toUpperCase());
+      if (u.phone) {
+        level2Keys.add(u.phone.trim().toUpperCase());
+        const digits = u.phone.replace(/\D/g, '');
+        if (digits) level2Keys.add(digits);
+      }
+      if (u.id) level2Keys.add(u.id.trim().toUpperCase());
+    });
+
+    const level3UsersMap = new Map<string, User>();
+    level2Keys.forEach(key => {
+      const directMatches = directMap[key] || [];
+      directMatches.forEach(u => {
+        const uid = u.phone || u.id;
+        if (uid && !inviterKeys.has(uid.trim().toUpperCase()) && !level1UsersMap.has(uid) && !level2UsersMap.has(uid)) {
+          level3UsersMap.set(uid, u);
+        }
+      });
+    });
+    const level3 = Array.from(level3UsersMap.values());
+
+    const teamList: (User & { teamLevel?: number })[] = [
+      ...level1.map(m => ({ ...m, teamLevel: 1 })),
+      ...level2.map(m => ({ ...m, teamLevel: 2 })),
+      ...level3.map(m => ({ ...m, teamLevel: 3 }))
+    ];
+
+    const result = teamList.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
     callback(result);
   }, (err) => {
     console.warn("subscribeToReferralTeam onSnapshot error:", err);

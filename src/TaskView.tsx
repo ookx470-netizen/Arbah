@@ -873,10 +873,11 @@ export default function TaskView() {
 
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
-    if (currentUser?.inviteCode) {
+    const invCodeOrPhone = currentUser?.inviteCode || currentUser?.phone;
+    if (invCodeOrPhone) {
       setTeamLoading(true);
       import('./firebaseService').then(({ subscribeToReferralTeam }) => {
-        unsubscribe = subscribeToReferralTeam(currentUser.inviteCode, (list) => {
+        unsubscribe = subscribeToReferralTeam(invCodeOrPhone, (list) => {
           setTeamList(list || []);
           setTeamLoading(false);
         });
@@ -888,7 +889,7 @@ export default function TaskView() {
     return () => {
       if (unsubscribe) unsubscribe();
     };
-  }, [currentUser?.inviteCode, activeBottomTab]);
+  }, [currentUser?.inviteCode, currentUser?.phone, activeBottomTab]);
 
   // Default initial tasks matching the system
   const defaultTasks: Task[] = [];

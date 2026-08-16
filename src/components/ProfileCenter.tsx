@@ -55,7 +55,8 @@ import {
   Share2,
   FileText,
   Printer,
-  Sparkles
+  Sparkles,
+  Search
 } from 'lucide-react';
 import { PromoBannerModal } from './PromoBannerModal';
 import { AccountStatementModal } from './AccountStatementModal';
@@ -111,7 +112,9 @@ export default function ProfileCenter({
   }, [propSettings]);
   const [deposits, setDeposits] = useState<Deposit[]>([]);
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
-  const [teamList, setTeamList] = useState<User[]>([]);
+  const [teamList, setTeamList] = useState<(User & { teamLevel?: number })[]>([]);
+  const [teamLevelFilter, setTeamLevelFilter] = useState<'all' | '1' | '2' | '3'>('all');
+  const [teamSearchQuery, setTeamSearchQuery] = useState<string>('');
 
   // Notifications State
   const [notifications, setNotifications] = useState<UserNotification[]>([]);
@@ -342,7 +345,8 @@ export default function ProfileCenter({
           const list = await getUserWithdrawals(currentUser.phone);
           setWithdrawals(list);
         } else if (activeSubView === 'team' || activeSubView === 'jobs') {
-          unsubTeam = subscribeToReferralTeam(currentUser.inviteCode, (list) => {
+          const userCode = currentUser.inviteCode || currentUser.phone || currentUser.id || '';
+          unsubTeam = subscribeToReferralTeam(userCode, (list) => {
             setTeamList(list);
           });
         }
@@ -1384,52 +1388,220 @@ export default function ProfileCenter({
               </div>
             </div>
 
-            {/* Stats */}
-            <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-xl grid grid-cols-2 gap-4">
-              <div className="bg-slate-50 p-5 rounded-[2rem] border border-slate-100 space-y-1">
-                <span className="text-[9px] font-black text-slate-400 uppercase">نسبة العمولة</span>
-                <span className="text-sm font-black text-slate-900">10%</span>
-              </div>
-              <div className="bg-slate-50 p-5 rounded-[2rem] border border-slate-100 space-y-1">
-                <span className="text-[9px] font-black text-slate-400 uppercase">أرباح الفريق</span>
-                <span className="text-sm font-black text-blue-600">
-                  {teamList.reduce((sum, m) => sum + ((m.taskIncome || 0) * 0.10), 0).toFixed(2)}
+            {/* Stats Breakdown */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-md text-center">
+                <span className="text-[9px] font-black text-slate-400 uppercase block mb-1">المستوى 1 (مباشر)</span>
+                <span className="text-base font-black text-emerald-600 font-mono">
+                  {teamList.filter(m => (m.teamLevel || 1) === 1).length}
                 </span>
+                <span className="text-[8px] text-slate-400 block mt-0.5">عمولة 10%</span>
+              </div>
+
+              <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-md text-center">
+                <span className="text-[9px] font-black text-slate-400 uppercase block mb-1">المستوى 2 و 3 (فرعي)</span>
+                <span className="text-base font-black text-blue-600 font-mono">
+                  {teamList.filter(m => (m.teamLevel || 1) > 1).length}
+                </span>
+                <span className="text-[8px] text-slate-400 block mt-0.5">دعوات الفريق</span>
+              </div>
+
+              <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-md text-center">
+                <span className="text-[9px] font-black text-slate-400 uppercase block mb-1">إجمالي الموظفين</span>
+                <span className="text-base font-black text-indigo-700 font-mono">
+                  {teamList.length}
+                </span>
+                <span className="text-[8px] text-slate-400 block mt-0.5">كل المستويات</span>
+              </div>
+
+              <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-md text-center">
+                <span className="text-[9px] font-black text-slate-400 uppercase block mb-1">أرباح العمولات</span>
+                <span className="text-base font-black text-amber-600 font-mono">
+                  ${teamList.reduce((sum, m) => sum + ((m.taskIncome || 0) * 0.10), 0).toFixed(2)}
+                </span>
+                <span className="text-[8px] text-slate-400 block mt-0.5">من مهام الفريق</span>
               </div>
             </div>
 
-            {/* List */}
-            <div className="bg-white p-2 rounded-[2.5rem] border border-slate-100 shadow-xl space-y-2">
-              <div className="flex items-center justify-between p-6 pb-2">
-                <h4 className="text-[11px] font-black text-slate-900 uppercase">الأعضاء ({teamList.length})</h4>
-                <RefreshCw className={`w-4 h-4 text-slate-300 ${loading ? 'animate-spin' : ''}`} />
+            {/* Members Section */}
+            <div className="bg-white p-4 rounded-[2.5rem] border border-slate-100 shadow-xl space-y-4">
+              <div className="flex items-center justify-between px-2 pt-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
+                    <Users className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black text-slate-900">سجل الموظفين والأعضاء</h4>
+                    <p className="text-[9px] text-slate-400 font-medium">قائمة المسجلين برمز ورابط دعوتك</p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setLoading(true);
+                    try {
+                      const userCode = currentUser.inviteCode || currentUser.phone || currentUser.id || '';
+                      const freshTeam = await getReferralTeam(userCode);
+                      setTeamList(freshTeam);
+                    } catch (e) {
+                      console.warn(e);
+                    } finally {
+                      setLoading(false);
+                    }
+                  }}
+                  className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-[10px] font-extrabold flex items-center gap-1 transition-all cursor-pointer"
+                  title="تحديث القائمة"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+                  <span>تحديث</span>
+                </button>
               </div>
 
-              <div className="space-y-1">
-                {teamList.length === 0 ? (
-                  <div className="p-10 text-center space-y-2">
-                    <Users className="w-8 h-8 text-slate-100 mx-auto" />
-                    <p className="text-[10px] font-black text-slate-300">لا يوجد أعضاء في فريقك حالياً</p>
-                  </div>
-                ) : (
-                  teamList.map((member) => (
-                    <div key={member.id} className="p-5 bg-slate-50 rounded-[2rem] border border-slate-100 flex items-center justify-between mx-2 mb-2">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-slate-400 border border-slate-100 shadow-sm">
-                          <UserIcon className="w-5 h-5" />
+              {/* Level Filter Tabs & Search */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-2xl overflow-x-auto no-scrollbar text-[11px] font-bold">
+                  {[
+                    { id: 'all', label: `الكل (${teamList.length})` },
+                    { id: '1', label: `المستوى 1 (${teamList.filter(m => (m.teamLevel || 1) === 1).length})` },
+                    { id: '2', label: `المستوى 2 (${teamList.filter(m => (m.teamLevel || 1) === 2).length})` },
+                    { id: '3', label: `المستوى 3 (${teamList.filter(m => (m.teamLevel || 1) === 3).length})` }
+                  ].map(tab => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setTeamLevelFilter(tab.id as any)}
+                      className={`flex-1 py-1.5 px-2.5 rounded-xl transition-all whitespace-nowrap text-center ${
+                        teamLevelFilter === tab.id
+                          ? 'bg-blue-600 text-white font-black shadow-sm'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Search Box inside team */}
+                <div className="relative">
+                  <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
+                  <input
+                    type="text"
+                    placeholder="ابحث بالاسم أو رقم الهاتف..."
+                    value={teamSearchQuery}
+                    onChange={(e) => setTeamSearchQuery(e.target.value)}
+                    className="w-full pl-3 pr-8 py-2 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50"
+                  />
+                  {teamSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setTeamSearchQuery('')}
+                      className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Members List */}
+              <div className="space-y-2 pt-1">
+                {(() => {
+                  let filtered = teamList;
+                  if (teamLevelFilter === '1') {
+                    filtered = filtered.filter(m => (m.teamLevel || 1) === 1);
+                  } else if (teamLevelFilter === '2') {
+                    filtered = filtered.filter(m => (m.teamLevel || 1) === 2);
+                  } else if (teamLevelFilter === '3') {
+                    filtered = filtered.filter(m => (m.teamLevel || 1) === 3);
+                  }
+
+                  if (teamSearchQuery.trim()) {
+                    const q = teamSearchQuery.trim().toLowerCase();
+                    filtered = filtered.filter(m => 
+                      (m.username || '').toLowerCase().includes(q) ||
+                      (m.phone || '').includes(q)
+                    );
+                  }
+
+                  if (filtered.length === 0) {
+                    return (
+                      <div className="p-8 text-center space-y-2 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                        <Users className="w-8 h-8 text-slate-300 mx-auto" />
+                        <p className="text-[11px] font-black text-slate-400">
+                          {teamSearchQuery ? 'لا توجد نتائج مطابقة لبحثك' : 'لا يوجد أعضاء في هذا القسم حالياً'}
+                        </p>
+                        <p className="text-[9px] text-slate-400">
+                          شارك كود ورابط دعوتك مع أصدقائك لبدء تكوين فريقك وجني العمولات اليومية!
+                        </p>
+                      </div>
+                    );
+                  }
+
+                  return filtered.map((member, idx) => {
+                    const lvl = member.teamLevel || 1;
+                    return (
+                      <div 
+                        key={member.phone || member.id || idx} 
+                        className="p-4 bg-slate-50/80 hover:bg-slate-50 rounded-2xl border border-slate-200/80 flex flex-col gap-2.5 transition-all shadow-xs"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-blue-600 font-black text-sm border border-slate-200 shadow-sm shrink-0">
+                              {member.username ? member.username.charAt(0).toUpperCase() : 'U'}
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs font-black text-slate-900 block">{member.username}</span>
+                                <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-md ${
+                                  lvl === 1 
+                                    ? 'bg-emerald-100 text-emerald-800' 
+                                    : lvl === 2 
+                                    ? 'bg-blue-100 text-blue-800' 
+                                    : 'bg-purple-100 text-purple-800'
+                                }`}>
+                                  {lvl === 1 ? 'مستوى 1 مباشر' : lvl === 2 ? 'مستوى 2 فرعي' : 'مستوى 3 فرعي'}
+                                </span>
+                              </div>
+                              <span className="text-[10px] font-mono text-slate-400 block mt-0.5" dir="ltr">
+                                {member.phone ? `${member.phone.substring(0, 4)}****${member.phone.slice(-3)}` : '****'}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="text-left space-y-0.5">
+                            <span className={`text-[10px] font-black px-2 py-0.5 rounded-lg inline-block ${
+                              member.vipTier && member.vipTier !== 'الباقة العادية' && member.vipTier !== 'VIP0'
+                                ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                                : 'bg-slate-200 text-slate-700'
+                            }`}>
+                              {member.vipTier || 'الباقة العادية'}
+                            </span>
+                            {member.hasDeposited ? (
+                              <span className="text-[9px] font-bold text-emerald-600 block">
+                                ✅ مودع نشط
+                              </span>
+                            ) : (
+                              <span className="text-[9px] font-medium text-slate-400 block">
+                                ⏳ حساب مجاني
+                              </span>
+                            )}
+                          </div>
                         </div>
-                        <div>
-                          <span className="text-[11px] font-black text-slate-900 block">{member.username}</span>
-                          <span className="text-[9px] font-bold text-slate-400 block" dir="ltr">{member.phone.substring(0, 7)}****</span>
+
+                        {/* Additional stats footer */}
+                        <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between text-[10px] text-slate-500">
+                          <span>
+                            تاريخ التسجيل: {member.createdAt ? new Date(member.createdAt).toLocaleDateString('ar-EG') : 'غير متوفر'}
+                          </span>
+                          <span className="font-bold text-blue-600 font-mono">
+                            أرباح المهام: ${(member.taskIncome || 0).toFixed(2)}
+                          </span>
                         </div>
                       </div>
-                      <div className="text-left">
-                        <span className="text-[10px] font-black text-blue-600 block">{Number(member.earnings || 0).toFixed(2)} USDT</span>
-                        <span className="text-[9px] font-bold text-slate-400 block">{member.vipTier || 'باقة عادية'}</span>
-                      </div>
-                    </div>
-                  ))
-                )}
+                    );
+                  });
+                })()}
               </div>
             </div>
           </div>

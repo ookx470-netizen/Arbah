@@ -62,6 +62,7 @@ import {
   ArrowDown,
   ChevronsUp,
   ChevronsDown,
+  ChevronDown,
   Sun,
   Moon,
   MapPin,
@@ -126,11 +127,53 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
 
   // Team Management & Referral Tree States
   const [selectedUserForTeamModal, setSelectedUserForTeamModal] = useState<User | null>(null);
+  const [teamModalHistory, setTeamModalHistory] = useState<User[]>([]);
+  const [expandedLeaderPhones, setExpandedLeaderPhones] = useState<Record<string, boolean>>({});
   const [teamSearchTerm, setTeamSearchTerm] = useState<string>('');
-  const [teamListFilter, setTeamListFilter] = useState<'all' | 'has_team' | 'vip' | 'deposited'>('all');
+  const [teamListFilter, setTeamListFilter] = useState<'has_team' | 'all' | 'vip' | 'deposited'>('has_team');
   const [modalLevelFilter, setModalLevelFilter] = useState<'all' | '1' | '2' | '3'>('all');
   const [modalMemberSearch, setModalMemberSearch] = useState<string>('');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  const toggleLeaderExpand = (phone: string) => {
+    setExpandedLeaderPhones(prev => ({
+      ...prev,
+      [phone]: !prev[phone]
+    }));
+  };
+
+  const openTeamModal = (user: User) => {
+    setTeamModalHistory([user]);
+    setSelectedUserForTeamModal(user);
+    setModalLevelFilter('all');
+    setModalMemberSearch('');
+  };
+
+  const drillDownToMember = (member: User) => {
+    setTeamModalHistory(prev => [...prev, member]);
+    setSelectedUserForTeamModal(member);
+    setModalLevelFilter('all');
+    setModalMemberSearch('');
+  };
+
+  const goBackInTeamModal = () => {
+    setTeamModalHistory(prev => {
+      if (prev.length <= 1) {
+        setSelectedUserForTeamModal(null);
+        return [];
+      }
+      const nextHistory = prev.slice(0, -1);
+      setSelectedUserForTeamModal(nextHistory[nextHistory.length - 1]);
+      setModalLevelFilter('all');
+      setModalMemberSearch('');
+      return nextHistory;
+    });
+  };
+
+  const closeTeamModal = () => {
+    setTeamModalHistory([]);
+    setSelectedUserForTeamModal(null);
+  };
 
   const handleCopyText = (text: string, key: string) => {
     navigator.clipboard.writeText(text);
@@ -1927,52 +1970,12 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                                 </button>
 
                                 <button
-                                  onClick={() => {
-                                    setSelectedUserForDeposit(u);
-                                    setManualDepAmount(25);
-                                    setManualDepCurrency('USDT (Polygon)');
-                                    setManualDepStatus('approved');
-                                    setManualDepDate(new Date().toISOString().substring(0, 16));
-                                  }}
-                                  className="px-2 py-1 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded text-[10px] font-bold transition-all cursor-pointer flex items-center justify-center gap-1"
-                                >
-                                  <ArrowDownCircle className="w-3 h-3 text-emerald-600" />
-                                  <span>إيداع يدوي</span>
-                                </button>
-
-                                <button
-                                  onClick={() => {
-                                    setSelectedUserForWithdrawal(u);
-                                    setManualWithAmount(10);
-                                    setManualWithWallet(u.walletAddress || '');
-                                    setManualWithStatus('approved');
-                                    setManualWithDate(new Date().toISOString().substring(0, 16));
-                                  }}
-                                  className="px-2 py-1 bg-amber-50 text-amber-700 hover:bg-amber-100 rounded text-[10px] font-bold transition-all cursor-pointer flex items-center justify-center gap-1"
-                                >
-                                  <CreditCard className="w-3 h-3" />
-                                  <span>سحب يدوي</span>
-                                </button>
-
-                                <button
-                                  onClick={() => {
-                                    setSelectedUserForTeamModal(u);
-                                    setModalLevelFilter('all');
-                                    setModalMemberSearch('');
-                                  }}
+                                  onClick={() => openTeamModal(u)}
                                   className="px-2 py-1 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded text-[10px] font-bold transition-all cursor-pointer flex items-center justify-center gap-1"
-                                  title="عرض شجرة وأعضاء الفريق"
+                                  title="عرض شجرة وفريق هذا المستخدم"
                                 >
-                                  <Network className="w-3 h-3 text-indigo-600" />
-                                  <span>عرض الفريق</span>
-                                </button>
-
-                                <button
-                                  onClick={() => handleEditUserClick(u)}
-                                  className="px-2 py-0.5 bg-slate-100 text-slate-600 hover:bg-slate-200 rounded text-[9px] font-bold transition-all cursor-pointer"
-                                  title="تعديل الأرصدة السريع"
-                                >
-                                  تعديل سريع
+                                  <Users className="w-3 h-3" />
+                                  <span>فريق المستخدم</span>
                                 </button>
                               </div>
                             )}
@@ -1982,13 +1985,13 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                     })
                   )}
                 </tbody>
-              </table>
+                </table>
+              </div>
             </div>
-          </div>
           )}
 
           {/* Panel: Team Tree & Referral Network (إدارة الفريق وشبكة الإحالات) */}
-          {(activeTab === 'teams' || activeTab === 'all') && (
+          {activeTab === 'teams' && (
           <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden animate-fadeIn">
             {/* Header */}
             <div className="p-4 bg-gradient-to-r from-indigo-900 via-slate-900 to-slate-900 text-white flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -2031,8 +2034,8 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
               {/* Filter Pills */}
               <div className="flex flex-wrap items-center gap-1.5 bg-slate-200/80 p-1 rounded-xl text-[11px] font-bold">
                 {[
-                  { id: 'all', label: `الكل (${users.length})` },
-                  { id: 'has_team', label: `👥 لديهم فريق (${users.filter(u => getUserTeamBreakdown(u).totalCount > 0).length})` },
+                  { id: 'has_team', label: `👥 أصحاب الفرق (${users.filter(u => getUserTeamBreakdown(u).totalCount > 0).length})` },
+                  { id: 'all', label: `📋 كل الأعضاء (${users.length})` },
                   { id: 'vip', label: `⭐ باقات VIP (${users.filter(u => u.vipTier && u.vipTier !== 'الباقة العادية' && u.vipTier !== 'VIP0').length})` },
                   { id: 'deposited', label: `💎 مودعين (${users.filter(u => u.hasDeposited === true).length})` }
                 ].map(f => (
@@ -2082,7 +2085,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                     <th className="p-3 text-center min-w-[110px]">الفريق المباشر (L1)</th>
                     <th className="p-3 text-center min-w-[120px]">إجمالي الفريق (L1-L3)</th>
                     <th className="p-3 text-center min-w-[110px]">الباقة الحالية</th>
-                    <th className="p-3 text-center min-w-[120px]">الإجراءات</th>
+                    <th className="p-3 text-center min-w-[140px]">الإجراءات</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -2098,173 +2101,221 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                       const teamInfo = getUserTeamBreakdown(u);
                       const inviterUser = u.referrerCode ? inviteCodeToUserMap[u.referrerCode.trim().toUpperCase()] : null;
                       const hasActiveTeam = teamInfo.totalCount > 0;
+                      const isExpanded = !!expandedLeaderPhones[u.phone];
 
                       return (
-                        <tr 
-                          key={u.phone || u.id} 
-                          className={`hover:bg-indigo-50/40 transition-colors ${
-                            hasActiveTeam ? 'bg-white font-medium' : 'bg-slate-50/40'
-                          }`}
-                        >
-                          {/* Index */}
-                          <td className="p-3 text-center text-slate-400 font-mono text-[10px]">
-                            {index + 1}
-                          </td>
+                        <React.Fragment key={u.phone || u.id || index}>
+                          <tr 
+                            className={`hover:bg-indigo-50/40 transition-colors ${
+                              hasActiveTeam ? 'bg-white font-medium' : 'bg-slate-50/40'
+                            }`}
+                          >
+                            {/* Index */}
+                            <td className="p-3 text-center text-slate-400 font-mono text-[10px]">
+                              {index + 1}
+                            </td>
 
-                          {/* User Details (Clickable) */}
-                          <td className="p-3">
-                            <div 
-                              onClick={() => {
-                                setSelectedUserForTeamModal(u);
-                                setModalLevelFilter('all');
-                                setModalMemberSearch('');
-                              }}
-                              className="group cursor-pointer flex items-center gap-2.5"
-                            >
-                              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center font-bold text-xs shadow-sm shrink-0 group-hover:scale-105 transition-transform">
-                                {u.username ? u.username.charAt(0).toUpperCase() : 'U'}
-                              </div>
-                              <div>
-                                <div className="flex items-center gap-1.5">
-                                  <span className="font-extrabold text-slate-900 group-hover:text-indigo-600 transition-colors underline decoration-dotted underline-offset-4">
-                                    {u.username}
-                                  </span>
-                                  {isUserOnline(u) && (
-                                    <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" title="نشط الآن"></span>
-                                  )}
+                            {/* User Details (Clickable) */}
+                            <td className="p-3">
+                              <div 
+                                onClick={() => openTeamModal(u)}
+                                className="group cursor-pointer flex items-center gap-2.5"
+                              >
+                                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center font-bold text-xs shadow-sm shrink-0 group-hover:scale-105 transition-transform">
+                                  {u.username ? u.username.charAt(0).toUpperCase() : 'U'}
                                 </div>
-                                <div className="flex items-center gap-1.5 mt-0.5">
-                                  <span className="font-mono text-[10px] text-slate-500" dir="ltr">{u.phone}</span>
+                                <div>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-extrabold text-slate-900 group-hover:text-indigo-600 transition-colors underline decoration-dotted underline-offset-4">
+                                      {u.username}
+                                    </span>
+                                    {isUserOnline(u) && (
+                                      <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" title="نشط الآن"></span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-1.5 mt-0.5">
+                                    <span className="font-mono text-[10px] text-slate-500" dir="ltr">{u.phone}</span>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleCopyText(u.phone, `phone_${u.phone}`);
+                                      }}
+                                      className="text-slate-400 hover:text-indigo-600 p-0.5 rounded cursor-pointer"
+                                      title="نسخ رقم الهاتف"
+                                    >
+                                      {copiedKey === `phone_${u.phone}` ? (
+                                        <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                      ) : (
+                                        <Copy className="w-3 h-3" />
+                                      )}
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            </td>
+
+                            {/* Invite Code */}
+                            <td className="p-3">
+                              {u.inviteCode ? (
+                                <div className="flex items-center gap-1">
+                                  <span className="bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-md font-mono font-black text-[11px]">
+                                    {u.inviteCode}
+                                  </span>
                                   <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleCopyText(u.phone, `phone_${u.phone}`);
-                                    }}
+                                    onClick={() => handleCopyText(u.inviteCode || '', `inv_${u.phone}`)}
                                     className="text-slate-400 hover:text-indigo-600 p-0.5 rounded cursor-pointer"
-                                    title="نسخ رقم الهاتف"
+                                    title="نسخ كود الدعوة"
                                   >
-                                    {copiedKey === `phone_${u.phone}` ? (
+                                    {copiedKey === `inv_${u.phone}` ? (
                                       <CheckCircle2 className="w-3 h-3 text-emerald-600" />
                                     ) : (
                                       <Copy className="w-3 h-3" />
                                     )}
                                   </button>
                                 </div>
-                              </div>
-                            </div>
-                          </td>
+                              ) : (
+                                <span className="text-slate-400 text-[10px]">--</span>
+                              )}
+                            </td>
 
-                          {/* Invite Code */}
-                          <td className="p-3">
-                            {u.inviteCode ? (
-                              <div className="flex items-center gap-1">
-                                <span className="bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-md font-mono font-black text-[11px]">
-                                  {u.inviteCode}
-                                </span>
-                                <button
-                                  onClick={() => handleCopyText(u.inviteCode || '', `inv_${u.phone}`)}
-                                  className="text-slate-400 hover:text-indigo-600 p-0.5 rounded cursor-pointer"
-                                  title="نسخ كود الدعوة"
+                            {/* Referrer Info (تمت دعوته بواسطة) */}
+                            <td className="p-3">
+                              {inviterUser ? (
+                                <div 
+                                  onClick={() => openTeamModal(inviterUser)}
+                                  className="cursor-pointer hover:bg-slate-100 p-1 rounded-lg transition-colors inline-block"
+                                  title="عرض فريق الراعي"
                                 >
-                                  {copiedKey === `inv_${u.phone}` ? (
-                                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                                  ) : (
-                                    <Copy className="w-3 h-3" />
+                                  <span className="font-bold text-slate-800 text-xs block hover:text-indigo-600">
+                                    {inviterUser.username}
+                                  </span>
+                                  <span className="font-mono text-[10px] text-slate-500 block" dir="ltr">
+                                    {inviterUser.phone}
+                                  </span>
+                                </div>
+                              ) : u.referrerCode ? (
+                                <span className="font-mono text-[10px] text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">
+                                  كود: {u.referrerCode}
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full font-medium">
+                                  تسجيل مباشر
+                                </span>
+                              )}
+                            </td>
+
+                            {/* Level 1 Direct Team Count */}
+                            <td className="p-3 text-center">
+                              {teamInfo.directCount > 0 ? (
+                                <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1 rounded-xl font-black text-xs">
+                                  <UserCheck className="w-3.5 h-3.5" />
+                                  <span>{teamInfo.directCount} عضو</span>
+                                </span>
+                              ) : (
+                                <span className="text-slate-400 text-[11px]">0</span>
+                              )}
+                            </td>
+
+                            {/* Total Multi-level Team Count */}
+                            <td className="p-3 text-center">
+                              {teamInfo.totalCount > 0 ? (
+                                <div className="inline-flex flex-col items-center">
+                                  <span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 border border-indigo-200 px-2.5 py-1 rounded-xl font-black text-xs shadow-sm">
+                                    <Network className="w-3.5 h-3.5" />
+                                    <span>{teamInfo.totalCount} عضو</span>
+                                  </span>
+                                  {teamInfo.depositedCount > 0 && (
+                                    <span className="text-[9px] text-emerald-600 font-extrabold mt-0.5">
+                                      ({teamInfo.depositedCount} مودع نشط)
+                                    </span>
                                   )}
+                                </div>
+                              ) : (
+                                <span className="text-slate-400 text-[11px]">0</span>
+                              )}
+                            </td>
+
+                            {/* VIP Tier */}
+                            <td className="p-3 text-center">
+                              <span className={`inline-block px-2.5 py-1 rounded-xl text-[10px] font-extrabold ${
+                                u.vipTier && u.vipTier !== 'الباقة العادية' && u.vipTier !== 'VIP0'
+                                  ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                                  : 'bg-slate-100 text-slate-600'
+                              }`}>
+                                {u.vipTier || 'الباقة العادية'}
+                              </span>
+                            </td>
+
+                            {/* Actions Button */}
+                            <td className="p-3 text-center">
+                              <div className="flex items-center justify-center gap-1.5">
+                                {teamInfo.directCount > 0 && (
+                                  <button
+                                    onClick={() => toggleLeaderExpand(u.phone)}
+                                    className={`p-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                                      isExpanded 
+                                        ? 'bg-indigo-100 text-indigo-800 border-indigo-300' 
+                                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border-slate-200'
+                                    }`}
+                                    title={isExpanded ? 'طي الأعضاء' : 'توسيع الأعضاء المباشرين'}
+                                  >
+                                    <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => openTeamModal(u)}
+                                  className="px-3 py-1.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-sm hover:shadow flex items-center justify-center gap-1.5 active:scale-95"
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                  <span>شجرة الفريق</span>
                                 </button>
                               </div>
-                            ) : (
-                              <span className="text-slate-400 text-[10px]">--</span>
-                            )}
-                          </td>
+                            </td>
+                          </tr>
 
-                          {/* Referrer Info (تمت دعوته بواسطة) */}
-                          <td className="p-3">
-                            {inviterUser ? (
-                              <div 
-                                onClick={() => {
-                                  setSelectedUserForTeamModal(inviterUser);
-                                  setModalLevelFilter('all');
-                                  setModalMemberSearch('');
-                                }}
-                                className="cursor-pointer hover:bg-slate-100 p-1 rounded-lg transition-colors inline-block"
-                                title="عرض فريق الراعي"
-                              >
-                                <span className="font-bold text-slate-800 text-xs block hover:text-indigo-600">
-                                  {inviterUser.username}
-                                </span>
-                                <span className="font-mono text-[10px] text-slate-500 block" dir="ltr">
-                                  {inviterUser.phone}
-                                </span>
-                              </div>
-                            ) : u.referrerCode ? (
-                              <span className="font-mono text-[10px] text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">
-                                كود: {u.referrerCode}
-                              </span>
-                            ) : (
-                              <span className="text-[10px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full font-medium">
-                                تسجيل مباشر
-                              </span>
-                            )}
-                          </td>
-
-                          {/* Level 1 Direct Team Count */}
-                          <td className="p-3 text-center">
-                            {teamInfo.directCount > 0 ? (
-                              <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1 rounded-xl font-black text-xs">
-                                <UserCheck className="w-3.5 h-3.5" />
-                                <span>{teamInfo.directCount} عضو</span>
-                              </span>
-                            ) : (
-                              <span className="text-slate-400 text-[11px]">0</span>
-                            )}
-                          </td>
-
-                          {/* Total Multi-level Team Count */}
-                          <td className="p-3 text-center">
-                            {teamInfo.totalCount > 0 ? (
-                              <div className="inline-flex flex-col items-center">
-                                <span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 border border-indigo-200 px-2.5 py-1 rounded-xl font-black text-xs shadow-sm">
-                                  <Network className="w-3.5 h-3.5" />
-                                  <span>{teamInfo.totalCount} عضو</span>
-                                </span>
-                                {teamInfo.depositedCount > 0 && (
-                                  <span className="text-[9px] text-emerald-600 font-extrabold mt-0.5">
-                                    ({teamInfo.depositedCount} مودع نشط)
-                                  </span>
-                                )}
-                              </div>
-                            ) : (
-                              <span className="text-slate-400 text-[11px]">0</span>
-                            )}
-                          </td>
-
-                          {/* VIP Tier */}
-                          <td className="p-3 text-center">
-                            <span className={`inline-block px-2.5 py-1 rounded-xl text-[10px] font-extrabold ${
-                              u.vipTier && u.vipTier !== 'الباقة العادية' && u.vipTier !== 'VIP0'
-                                ? 'bg-amber-100 text-amber-900 border border-amber-300'
-                                : 'bg-slate-100 text-slate-600'
-                            }`}>
-                              {u.vipTier || 'الباقة العادية'}
-                            </span>
-                          </td>
-
-                          {/* Actions Button */}
-                          <td className="p-3 text-center">
-                            <button
-                              onClick={() => {
-                                setSelectedUserForTeamModal(u);
-                                setModalLevelFilter('all');
-                                setModalMemberSearch('');
-                              }}
-                              className="px-3 py-1.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-sm hover:shadow flex items-center justify-center gap-1.5 mx-auto active:scale-95"
-                            >
-                              <Eye className="w-3.5 h-3.5" />
-                              <span>عرض الفريق</span>
-                            </button>
-                          </td>
-                        </tr>
+                          {/* Inline Expansion of Direct Team Members */}
+                          {isExpanded && (
+                            <tr className="bg-indigo-50/20 border-b border-indigo-100">
+                              <td colSpan={8} className="p-3 pr-8">
+                                <div className="bg-white rounded-xl border border-indigo-100 p-3 shadow-xs space-y-2">
+                                  <div className="flex items-center justify-between text-xs font-black text-indigo-900 border-b border-slate-100 pb-1.5">
+                                    <span className="flex items-center gap-1.5">
+                                      <UserCheck className="w-4 h-4 text-emerald-600" />
+                                      <span>الأعضاء المباشرين للقائد ({u.username}): {teamInfo.directCount} عضو</span>
+                                    </span>
+                                    <button
+                                      onClick={() => openTeamModal(u)}
+                                      className="text-indigo-600 hover:underline text-[11px]"
+                                    >
+                                      عرض شجرة الفريق كاملة ⬅
+                                    </button>
+                                  </div>
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                                    {teamInfo.level1.map((m, mIdx) => (
+                                      <div key={m.phone || m.id || mIdx} className="p-2.5 bg-slate-50 rounded-xl border border-slate-200/70 flex items-center justify-between text-xs">
+                                        <div>
+                                          <div className="font-extrabold text-slate-800">{m.username}</div>
+                                          <div className="font-mono text-[10px] text-slate-400" dir="ltr">{m.phone}</div>
+                                        </div>
+                                        <div className="text-left space-y-0.5">
+                                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 font-bold block">{m.vipTier || 'عادي'}</span>
+                                          {getUserTeamBreakdown(m).totalCount > 0 && (
+                                            <button
+                                              onClick={() => openTeamModal(m)}
+                                              className="text-[9px] text-indigo-600 hover:underline font-bold"
+                                            >
+                                              فريقه ({getUserTeamBreakdown(m).totalCount})
+                                            </button>
+                                          )}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
                       );
                     })
                   )}
