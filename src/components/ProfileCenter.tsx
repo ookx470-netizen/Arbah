@@ -3,6 +3,7 @@ import {
   getSystemSettings, 
   updateUserWallet, 
   updateUserPassword,
+  updateUserProfile,
   createDeposit, 
   createWithdrawal, 
   getUserDeposits, 
@@ -259,46 +260,58 @@ export default function ProfileCenter({
     }
   };
 
-  // Password Change Form states
+  // Profile & Password Edit states
+  const [editUsername, setEditUsername] = useState<string>(currentUser.username || '');
+  const [editAvatar, setEditAvatar] = useState<string>(currentUser.avatar || '');
   const [oldPassword, setOldPassword] = useState<string>('');
   const [newPassword, setNewPassword] = useState<string>('');
   const [confirmPassword, setConfirmPassword] = useState<string>('');
-  const [passError, setPassError] = useState<string | null>(null);
-  const [passSuccess, setPassSuccess] = useState<string | null>(null);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [profileSuccess, setProfileSuccess] = useState<string | null>(null);
 
-  const handleChangePassword = async (e: React.FormEvent) => {
+  const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    setPassError(null);
-    setPassSuccess(null);
-
-    if (!oldPassword.trim()) {
-      setPassError("الرجاء إدخال كلمة المرور الحالية.");
-      return;
-    }
-    if (!newPassword || newPassword.length < 6) {
-      setPassError("يجب أن تتكون كلمة المرور الجديدة من 6 خانات على الأقل.");
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      setPassError("كلمتا المرور الجديدة وتأكيدها غير متطابقتين.");
-      return;
-    }
+    setProfileError(null);
+    setProfileSuccess(null);
 
     setLoading(true);
     try {
-      const updatedUser = await updateUserPassword(currentUser.phone, oldPassword, newPassword);
+      let updatedUser = await updateUserProfile(currentUser.phone, {
+        username: editUsername,
+        avatar: editAvatar
+      });
+
+      if (newPassword.trim()) {
+        if (!oldPassword.trim()) {
+          setProfileError("الرجاء إدخال كلمة المرور الحالية لتغيير كلمة المرور.");
+          setLoading(false);
+          return;
+        }
+        if (newPassword.length < 6) {
+          setProfileError("يجب أن تتكون كلمة المرور الجديدة من 6 خانات على الأقل.");
+          setLoading(false);
+          return;
+        }
+        if (newPassword !== confirmPassword) {
+          setProfileError("كلمتا المرور الجديدة وتأكيدها غير متطابقتين.");
+          setLoading(false);
+          return;
+        }
+        updatedUser = await updateUserPassword(currentUser.phone, oldPassword, newPassword);
+      }
+
       onUpdateUser(updatedUser);
       localStorage.setItem('user_session', JSON.stringify(updatedUser));
-      setPassSuccess("🎉 تم تغيير كلمة المرور بنجاح!");
+      setProfileSuccess("✨ تم تحديث الملف الشخصي وإعدادات الحساب بنجاح!");
       setOldPassword('');
       setNewPassword('');
       setConfirmPassword('');
       setTimeout(() => {
-        setPassSuccess(null);
+        setProfileSuccess(null);
         setActiveSubView('menu');
       }, 1500);
     } catch (err: any) {
-      setPassError(err.message || "حدث خطأ أثناء تغيير كلمة المرور.");
+      setProfileError(err.message || "حدث خطأ أثناء تحديث البيانات.");
     } finally {
       setLoading(false);
     }
@@ -890,34 +903,13 @@ export default function ProfileCenter({
                 </button>
               ))}
 
-              {/* Support */}
+              {/* Profile & Account Settings (Username, Avatar, Password) */}
               <button
-                onClick={() => setActiveSubView('support')}
-                className="w-full p-6 flex items-center justify-between hover:bg-slate-50 transition-all group active:bg-slate-100"
-              >
-                <div className="flex items-center gap-4">
-                  <div className="w-11 h-11 bg-emerald-50 rounded-xl flex items-center justify-center text-emerald-600 shrink-0 shadow-sm border border-white/50 relative">
-                    <MessageSquare className="w-5 h-5 stroke-[2.5]" />
-                    {supportChat?.unreadByUser && (
-                      <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white animate-pulse"></span>
-                    )}
-                  </div>
-                  <div className="text-right">
-                    <span className="text-xs font-black text-slate-900 block">الدعم الفني</span>
-                    <span className="text-[9px] font-bold text-slate-400 block mt-0.5 uppercase tracking-wider">محادثة مباشرة 24/7</span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  {supportChat?.unreadByUser && (
-                    <span className="bg-rose-500 text-white text-[8px] font-black px-2 py-1 rounded-lg uppercase tracking-tighter animate-bounce">New</span>
-                  )}
-                  <ChevronLeft className="w-4 h-4 text-slate-300 group-hover:translate-x-[-4px] transition-transform" />
-                </div>
-              </button>
-
-              {/* Password */}
-              <button
-                onClick={() => setActiveSubView('change_pass')}
+                onClick={() => {
+                  setEditUsername(currentUser.username || '');
+                  setEditAvatar(currentUser.avatar || '');
+                  setActiveSubView('change_pass');
+                }}
                 className="w-full p-6 flex items-center justify-between hover:bg-slate-50 transition-all group active:bg-slate-100"
               >
                 <div className="flex items-center gap-4">
@@ -925,8 +917,8 @@ export default function ProfileCenter({
                     <ShieldCheck className="w-5 h-5 stroke-[2.5]" />
                   </div>
                   <div className="text-right">
-                    <span className="text-xs font-black text-slate-900 block">تأمين الحساب</span>
-                    <span className="text-[9px] font-bold text-slate-400 block mt-0.5 uppercase tracking-wider">تغيير كلمة المرور</span>
+                    <span className="text-xs font-black text-slate-900 block">تعديل الملف الشخصي والحساب</span>
+                    <span className="text-[9px] font-bold text-slate-400 block mt-0.5 uppercase tracking-wider">تغيير الاسم، الصورة، وكلمة المرور</span>
                   </div>
                 </div>
                 <ChevronLeft className="w-4 h-4 text-slate-300 group-hover:translate-x-[-4px] transition-transform" />
@@ -1635,7 +1627,7 @@ export default function ProfileCenter({
         </div>
       )}
 
-      {/* Sub View: Change Password (تغيير كلمة المرور) */}
+      {/* Sub View: Edit Profile & Account Settings (تعديل الملف الشخصي والحساب) */}
       {activeSubView === 'change_pass' && (
         <div className="animate-fadeIn pb-10">
           {/* Header */}
@@ -1645,35 +1637,95 @@ export default function ProfileCenter({
               <button onClick={() => setActiveSubView('menu')} className="w-11 h-11 bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 flex items-center justify-center transition-all">
                 <ChevronLeft className="w-6 h-6 rotate-180 text-white" />
               </button>
-              <h3 className="text-sm font-black tracking-tight">كلمة المرور</h3>
+              <h3 className="text-sm font-black tracking-tight">تعديل الملف الشخصي والحساب</h3>
               <div className="w-11"></div>
             </div>
           </div>
 
           <div className="px-5 -mt-6 relative z-20 space-y-6">
-            <form onSubmit={handleChangePassword} className="bg-white p-7 rounded-[2.5rem] border border-slate-100 shadow-xl space-y-6">
+            <form onSubmit={handleSaveProfile} className="bg-white p-7 rounded-[2.5rem] border border-slate-100 shadow-xl space-y-6">
               <div className="space-y-2 px-1">
-                <h4 className="text-[11px] font-black text-slate-900">تغيير كلمة المرور</h4>
+                <h4 className="text-[11px] font-black text-slate-900">إعدادات الحساب والملف الشخصي</h4>
                 <p className="text-[9px] font-bold text-slate-400 leading-relaxed">
-                  تأكد من اختيار كلمة مرور قوية لحماية حسابك وأرباحك.
+                  يمكنك تعديل اسم المستخدم، الصورة الشخصية، وتغيير كلمة المرور من مكان واحد بكل سهولة.
                 </p>
               </div>
 
-              {passError && (
+              {profileError && (
                 <div className="bg-rose-50 p-4 rounded-2xl border border-rose-100 text-rose-600 text-[10px] font-black flex gap-2">
                   <AlertCircle className="w-4 h-4 shrink-0" />
-                  <span>{passError}</span>
+                  <span>{profileError}</span>
                 </div>
               )}
 
-              {passSuccess && (
+              {profileSuccess && (
                 <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-100 text-emerald-600 text-[10px] font-black flex gap-2">
                   <BadgeCheck className="w-4 h-4 shrink-0" />
-                  <span>{passSuccess}</span>
+                  <span>{profileSuccess}</span>
                 </div>
               )}
 
-              <div className="space-y-4">
+              {/* Username field */}
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-500 px-1">اسم المستخدم / الاسم</label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    required
+                    value={editUsername}
+                    onChange={(e) => setEditUsername(e.target.value)}
+                    placeholder="أدخل اسمك"
+                    className="w-full h-14 bg-slate-50 border border-slate-100 rounded-2xl px-12 text-xs font-black text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600/10 focus:bg-white transition-all text-right"
+                  />
+                  <UserIcon className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300" />
+                </div>
+              </div>
+
+              {/* Avatar field */}
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-500 px-1">الصورة الشخصية (Avatar)</label>
+                <div className="flex items-center gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                  <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 overflow-hidden shrink-0 flex items-center justify-center shadow-sm">
+                    {editAvatar ? (
+                      <img src={editAvatar} alt="Avatar" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    ) : (
+                      <UserIcon className="w-7 h-7 text-slate-300" />
+                    )}
+                  </div>
+                  <div className="flex-1 space-y-2">
+                    <input
+                      type="text"
+                      placeholder="رابط الصورة أو رفع صورة"
+                      value={editAvatar}
+                      onChange={(e) => setEditAvatar(e.target.value)}
+                      className="w-full h-10 bg-white border border-slate-200 rounded-xl px-3 text-[11px] font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600/10 text-right"
+                    />
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          const reader = new FileReader();
+                          reader.onloadend = async () => {
+                            try {
+                              const compressed = await compressBase64Image(reader.result as string, 300, 300, 0.7);
+                              setEditAvatar(compressed);
+                            } catch (err) {
+                              showToast("فشل معالجة الصورة");
+                            }
+                          };
+                          reader.readAsDataURL(file);
+                        }
+                      }}
+                      className="text-[9px] text-slate-500 file:py-1 file:px-2.5 file:rounded-lg file:border-0 file:text-[9px] file:font-black file:bg-blue-50 file:text-blue-600 hover:file:bg-blue-100 cursor-pointer"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-slate-100 space-y-4">
+                <h5 className="text-[10px] font-black text-slate-700">تغيير كلمة المرور (اختياري)</h5>
                 {[
                   { label: 'كلمة المرور الحالية', value: oldPassword, setter: setOldPassword, icon: Lock },
                   { label: 'كلمة المرور الجديدة', value: newPassword, setter: setNewPassword, icon: KeyRound },
@@ -1684,9 +1736,9 @@ export default function ProfileCenter({
                     <div className="relative">
                       <input
                         type="password"
-                        required
                         value={field.value}
                         onChange={(e) => field.setter(e.target.value)}
+                        placeholder={idx === 0 ? "أدخل كلمة المرور الحالية لتغييرها" : "6 خانات على الأقل"}
                         className="w-full h-14 bg-slate-50 border border-slate-100 rounded-2xl px-12 text-xs font-black text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600/10 focus:bg-white transition-all text-right"
                       />
                       <field.icon className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300" />
@@ -1698,10 +1750,10 @@ export default function ProfileCenter({
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full h-14 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl font-black text-[11px] shadow-lg transition-all flex items-center justify-center gap-3 active:scale-95 disabled:opacity-50"
+                className="w-full h-14 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl font-black text-[11px] shadow-lg transition-all flex items-center justify-center gap-3 active:scale-95 disabled:opacity-50 cursor-pointer"
               >
                 {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
-                <span>تحديث كلمة المرور</span>
+                <span>حفظ التغييرات</span>
               </button>
             </form>
           </div>

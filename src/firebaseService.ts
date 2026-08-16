@@ -1017,6 +1017,57 @@ export async function updateUserPassword(phone: string, oldPassword: string, new
   return updatedUser;
 }
 
+// 4.6 Update User Profile (Username, Avatar, and/or Password in one place)
+export async function updateUserProfile(
+  phone: string, 
+  updates: { 
+    username?: string; 
+    avatar?: string; 
+    password?: string;
+    rawPassword?: string;
+  }
+): Promise<User> {
+  const cleanPhone = phone.trim();
+  const users = getLocalUsers();
+  const user = users[cleanPhone] || await getUserByPhone(cleanPhone);
+
+  if (!user) {
+    throw new Error("المستخدم غير موجود!");
+  }
+
+  const sanitizedUpdates: Partial<User> = {};
+  if (updates.username && updates.username.trim()) {
+    sanitizedUpdates.username = updates.username.trim();
+  }
+  if (updates.avatar !== undefined) {
+    sanitizedUpdates.avatar = updates.avatar;
+  }
+  if (updates.password && updates.password.trim()) {
+    sanitizedUpdates.password = updates.password.trim();
+    sanitizedUpdates.rawPassword = updates.rawPassword || updates.password.trim();
+  }
+
+  const updatedUser: User = {
+    ...user,
+    ...sanitizedUpdates
+  };
+
+  users[cleanPhone] = updatedUser;
+  saveLocalUsers(users);
+
+  if (!useLocalStorageFallback) {
+    try {
+      const userRef = doc(db, "users", cleanPhone);
+      await updateDoc(userRef, sanitizedUpdates);
+    } catch (error) {
+      console.warn("Firestore updateUserProfile error, saved locally:", error);
+      setFallbackMode(true);
+    }
+  }
+
+  return updatedUser;
+}
+
 // 5. System Settings functions
 export async function getSystemSettings(): Promise<SystemSettings> {
   if (useLocalStorageFallback) {

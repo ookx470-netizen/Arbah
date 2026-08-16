@@ -82,6 +82,37 @@ export const LeaderBonusModal: React.FC<LeaderBonusModalProps> = ({
           {/* Modal Content Scroll Area */}
           <div className="p-5 overflow-y-auto space-y-6 flex-1 text-right leading-relaxed">
             
+            {/* Official Salary Schedule for Leaders (6th, 16th, and 26th) */}
+            <div className="space-y-3 bg-amber-500/5 p-4 rounded-2xl border border-amber-500/20">
+              <div className="flex items-center gap-2 border-b pb-1.5 border-amber-500/20">
+                <div className="w-6 h-6 rounded-lg bg-amber-500/20 flex items-center justify-center text-amber-600 font-bold text-xs">📅</div>
+                <h4 className="text-xs font-black text-amber-600 dark:text-amber-400">
+                  جدول ومواعيد تسليم رواتب القادة الشهرية الثابتة
+                </h4>
+              </div>
+              <p className="text-[10px] font-bold text-slate-600 leading-relaxed">
+                تلتزم المنصة بدفع وتسليم رواتب الأوسام والحوافز القيادية للقادة والمشرفين بانتظام تام في المواعيد المحددة أدناه من كل شهر ميلادي:
+              </p>
+              
+              <div className="grid grid-cols-3 gap-2 pt-1">
+                <div className="bg-white p-3 rounded-xl border border-amber-200 text-center shadow-xs">
+                  <span className="text-[9px] font-bold text-slate-400 block mb-0.5">الدفعة الأولى</span>
+                  <span className="text-xs font-black text-amber-600 block">يوم 6</span>
+                  <span className="text-[8px] font-semibold text-emerald-600 mt-1 block">مستمر ودائم</span>
+                </div>
+                <div className="bg-white p-3 rounded-xl border border-amber-200 text-center shadow-xs">
+                  <span className="text-[9px] font-bold text-slate-400 block mb-0.5">الدفعة الثانية</span>
+                  <span className="text-xs font-black text-amber-600 block">يوم 16</span>
+                  <span className="text-[8px] font-semibold text-emerald-600 mt-1 block">مستمر ودائم</span>
+                </div>
+                <div className="bg-white p-3 rounded-xl border border-amber-200 text-center shadow-xs">
+                  <span className="text-[9px] font-bold text-slate-400 block mb-0.5">الدفعة الثالثة</span>
+                  <span className="text-xs font-black text-amber-600 block">يوم 26</span>
+                  <span className="text-[8px] font-semibold text-emerald-600 mt-1 block">مستمر ودائم</span>
+                </div>
+              </div>
+            </div>
+
             {/* Guide intro */}
             <p className={`text-[11px] font-bold ${isDarkMode ? 'text-slate-300' : 'text-slate-600'} leading-relaxed`}>
               الريادة والقيادة في منصتنا تمنحك مزايا استثنائية! بمجرد نجاحك في دعوة الأصدقاء للترقية وبناء شبكتك الخاصة، ستحصل تلقائياً على مكافآت فورية ورواتب ثابتة وحوافز تصرف بانتظام.

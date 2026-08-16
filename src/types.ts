@@ -12,6 +12,7 @@ export interface User {
   taskIncome: number; // دخل المهمه
   effectiveDays: number; // يوم العمل الفعال فقط
   role: 'admin' | 'user';
+  avatar?: string; // رابط أو صورة الأفاتار للمستخدم
   createdAt: string;
   vipTier?: string; // نوع الباقة المشترك بها (مثل VIP 1, VIP 2, إلخ)
   vipStartDate?: string; // تاريخ بدء سريان الباقة (لحساب الأيام المتبقية)
