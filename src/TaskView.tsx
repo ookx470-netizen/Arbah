@@ -918,6 +918,10 @@ export default function TaskView() {
               localStorage.removeItem('logged_in_phone');
               return;
             }
+            // If user is unbanned, clear device flag
+            if (localStorage.getItem('oxlo_device_banned') === 'true') {
+              localStorage.removeItem('oxlo_device_banned');
+            }
             shadowFirebaseAuth(usr.phone, usr.password || usr.id).catch(e => console.warn('Shadow auth failed:', e));
             setCurrentUser(usr);
           }
@@ -1005,6 +1009,12 @@ export default function TaskView() {
               alert(updated.banReason || "عذراً، تم حظر حسابك وجهازك من النظام بسبب مخالفة شروط الاستخدام.");
               return;
             }
+            
+            // If user is found to be unbanned, clear device flag
+            if (localStorage.getItem('oxlo_device_banned') === 'true') {
+              localStorage.removeItem('oxlo_device_banned');
+            }
+
             // Only update if there's an actual change to prevent unnecessary re-renders
             if (JSON.stringify(updated) !== JSON.stringify(currentUser)) {
               setCurrentUser(updated);

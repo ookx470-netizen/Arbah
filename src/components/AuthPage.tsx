@@ -92,13 +92,13 @@ export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
       return;
     }
 
-    
-      // Check if device is banned
-      if (localStorage.getItem('oxlo_device_banned') === 'true') {
-        setErrorMsg("لا يمكنك إنشاء حساب جديد، هذا الجهاز محظور من استخدام المنصة.");
-        setLoading(false);
-        return;
-      }
+    // Check if device is banned - ONLY block registration. 
+    // For login, we allow the attempt to verify if the ban has been lifted in the database.
+    if (!isLogin && localStorage.getItem('oxlo_device_banned') === 'true') {
+      setErrorMsg("لا يمكنك إنشاء حساب جديد، هذا الجهاز محظور من استخدام المنصة.");
+      setLoading(false);
+      return;
+    }
 
       if (!isLogin) {
       const phoneCheck = selectedCountry.validate(phoneInput);
@@ -140,6 +140,11 @@ export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
           setErrorMsg(user.banReason || "عذراً، تم حظر حسابك وجهازك من النظام بسبب مخالفة شروط الاستخدام.");
           setLoading(false);
           return;
+        }
+
+        // If user is NOT banned but the device was previously flagged, clear the flag
+        if (localStorage.getItem('oxlo_device_banned') === 'true') {
+          localStorage.removeItem('oxlo_device_banned');
         }
 
         const hashedEnteredPassword = await hashPassword(password);
