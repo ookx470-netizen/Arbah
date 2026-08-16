@@ -709,7 +709,7 @@ export default function ProfileCenter({
               {/* Profile image with circular layout */}
               <div className="w-16 h-16 rounded-2xl border-2 border-white/10 bg-slate-800 overflow-hidden shadow-xl rotate-3">
                 <img
-                  src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&h=150&q=80"
+                  src={currentUser.avatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&h=150&q=80"}
                   alt="User Avatar"
                   className="w-full h-full object-cover"
                 />
