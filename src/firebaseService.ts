@@ -204,6 +204,31 @@ async function updateDoc(ref: any, data: any): Promise<any> {
     }
     return await withTimeout(rawUpdateDoc(ref, data));
   } catch (error: any) {
+    const errMsg = error?.message || String(error);
+    const errCode = error?.code || '';
+    if (
+      errMsg.includes('No document to update') ||
+      errMsg.includes('NOT_FOUND') ||
+      errMsg.includes('not-found') ||
+      errCode === 'not-found'
+    ) {
+      try {
+        console.warn("⚠️ Document does not exist in Firestore for updateDoc, creating via setDoc merge:", ref?.path || ref?.id);
+        let payload = data;
+        if (ref?.id) {
+          try {
+            const localUsers = getLocalUsers();
+            if (localUsers && localUsers[ref.id]) {
+              payload = { ...localUsers[ref.id], ...data };
+            }
+          } catch (_) {}
+        }
+        return await withTimeout(rawSetDoc(ref, payload, { merge: true }));
+      } catch (mergeError: any) {
+        checkForQuotaExceeded(mergeError);
+        throw mergeError;
+      }
+    }
     checkForQuotaExceeded(error);
     throw error;
   }
