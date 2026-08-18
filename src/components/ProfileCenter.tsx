@@ -706,53 +706,72 @@ export default function ProfileCenter({
         <div className="animate-fadeIn pb-28">
           
           {/* Top Banner with refined gradient and typography */}
-          <div className="bg-slate-900 pt-10 pb-16 px-6 text-white flex items-center justify-between relative rounded-b-[3rem] shadow-2xl">
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-stops))] from-blue-600/20 via-transparent to-transparent opacity-50"></div>
+          <div className="bg-slate-900 pt-8 pb-14 px-5 text-white relative rounded-b-[2.5rem] shadow-2xl overflow-hidden">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-stops))] from-blue-600/20 via-transparent to-transparent opacity-50 pointer-events-none"></div>
             
-            <div className="relative z-10 flex items-center gap-4">
-              {/* Profile image with circular layout */}
-              <div className="w-16 h-16 rounded-2xl border-2 border-white/10 bg-slate-800 overflow-hidden shadow-xl rotate-3">
-                <img
-                  src={currentUser.avatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&h=150&q=80"}
-                  alt="User Avatar"
-                  className="w-full h-full object-cover"
-                />
-              </div>
+            <div className="relative z-10 flex items-center justify-between gap-3">
+              {/* Profile image with info */}
+              <div className="flex items-center gap-3.5 min-w-0 flex-1">
+                <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl border-2 border-white/10 bg-slate-800 overflow-hidden shadow-xl shrink-0">
+                  <img
+                    src={currentUser.avatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&h=150&q=80"}
+                    alt="User Avatar"
+                    className="w-full h-full object-cover"
+                  />
+                </div>
 
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <h2 className="text-base font-black tracking-tight" dir="ltr">{getMaskedPhone()}</h2>
-                  <div className={`px-2 py-0.5 rounded-full text-[8px] font-black border ${
-                    calculateRemainingEffectiveDays(currentUser) > 0 
-                      ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' 
-                      : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
-                  }`}>
-                    {calculateRemainingEffectiveDays(currentUser) > 0 ? 'نشط' : 'غير نشط'}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <h2 className="text-sm sm:text-base font-black tracking-tight truncate" dir="ltr">{getMaskedPhone()}</h2>
+                    <div className={`px-2 py-0.5 rounded-full text-[8px] font-black border shrink-0 ${
+                      calculateRemainingEffectiveDays(currentUser) > 0 
+                        ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' 
+                        : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                    }`}>
+                      {calculateRemainingEffectiveDays(currentUser) > 0 ? 'نشط' : 'غير نشط'}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[10px] font-bold text-slate-400 truncate max-w-[100px]">@{currentUser.username}</span>
+                    <div className="h-1 w-1 bg-slate-700 rounded-full shrink-0"></div>
+                    <span className="text-[10px] font-black text-amber-400 shrink-0">
+                      {currentUser.vipTier || 'العضوية العادية'}
+                    </span>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-bold text-slate-400">@{currentUser.username}</span>
-                  <div className="h-1 w-1 bg-slate-700 rounded-full"></div>
-                  <span className="text-[10px] font-black text-amber-400">
-                    {currentUser.vipTier || 'العضوية العادية'}
-                  </span>
-                </div>
+              </div>
+
+              {/* Notification Bell Button */}
+              <div className="shrink-0">
+                <button
+                  onClick={() => setShowNotifModal(true)}
+                  className="relative w-10 h-10 sm:w-11 sm:h-11 bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 transition-all cursor-pointer active:scale-95 flex items-center justify-center group"
+                >
+                  <Bell className="w-5 h-5 text-slate-300 group-hover:text-white transition-colors" />
+                  {notifications.filter(n => !n.read).length > 0 && (
+                    <span className="absolute -top-1 -right-1 bg-rose-600 text-white font-black text-[9px] min-w-[18px] h-[18px] rounded-full flex items-center justify-center px-1 border-2 border-slate-900 shadow-lg animate-pulse">
+                      {notifications.filter(n => !n.read).length}
+                    </span>
+                  )}
+                </button>
               </div>
             </div>
 
-            <div className="relative z-10 flex items-center gap-3">
-              <button
-                onClick={() => setShowNotifModal(true)}
-                className="relative w-11 h-11 bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 transition-all cursor-pointer active:scale-95 flex items-center justify-center group"
-              >
-                <Bell className="w-5 h-5 text-slate-300 group-hover:text-white transition-colors" />
-                {notifications.filter(n => !n.read).length > 0 && (
-                  <span className="absolute -top-1 -right-1 bg-rose-600 text-white font-black text-[9px] min-w-[18px] h-[18px] rounded-full flex items-center justify-center px-1 border-2 border-slate-900 shadow-lg">
-                    {notifications.filter(n => !n.read).length}
+            {/* Email verification bar beneath user info */}
+            {currentUser.email && (
+              <div className="relative z-10 mt-3 pt-2.5 border-t border-white/5 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                  <span className="text-sky-400 text-xs shrink-0">✉️</span>
+                  <span className="text-[10.5px] font-mono text-slate-300 truncate font-semibold select-all" dir="ltr">
+                    {currentUser.email}
                   </span>
-                )}
-              </button>
-            </div>
+                </div>
+                <div className="inline-flex items-center gap-1 bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[9px] font-black px-2 py-0.5 rounded-full shrink-0 shadow-sm">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                  تم التوثيق
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Overlapping Primary Stats Card */}
@@ -1795,6 +1814,28 @@ export default function ProfileCenter({
                   <span>{profileSuccess}</span>
                 </div>
               )}
+
+              {/* Email field (Read-only verified) */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between px-1">
+                  <label className="text-[10px] font-black text-slate-500">البريد الإلكتروني الموثق</label>
+                  <span className="text-[9px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-100 flex items-center gap-1">
+                    <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                    مؤكد بالرمز
+                  </span>
+                </div>
+                <div className="relative">
+                  <input
+                    type="text"
+                    disabled
+                    value={currentUser.email || 'لم يتم تسجيل بريد إلكتروني'}
+                    className="w-full h-14 bg-slate-100 border border-slate-200/80 rounded-2xl px-12 text-xs font-black text-slate-700 font-mono transition-all text-left cursor-not-allowed opacity-90"
+                    dir="ltr"
+                  />
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-xs">✉️</span>
+                  <Lock className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                </div>
+              </div>
 
               {/* Username field */}
               <div className="space-y-2">

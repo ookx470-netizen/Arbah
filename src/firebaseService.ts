@@ -620,9 +620,37 @@ export async function getUserByPhone(phone: string): Promise<User | null> {
   }
 }
 
+// Helper to check if email already exists in system
+export async function getUserByEmail(email: string): Promise<User | null> {
+  const cleanEmail = (email || '').trim().toLowerCase();
+  if (!cleanEmail) return null;
+
+  const localUsers = getLocalUsers();
+
+  try {
+    const q = query(collection(db, "users"), where("email", "==", cleanEmail));
+    const querySnapshot = await getDocs(q);
+    if (!querySnapshot.empty) {
+      return querySnapshot.docs[0].data() as User;
+    }
+
+    const foundLocal = Object.values(localUsers).find(
+      u => u.email && u.email.trim().toLowerCase() === cleanEmail
+    );
+    return foundLocal || null;
+  } catch (error) {
+    console.warn("Firestore getUserByEmail error, using local cache fallback:", error);
+    const foundLocal = Object.values(localUsers).find(
+      u => u.email && u.email.trim().toLowerCase() === cleanEmail
+    );
+    return foundLocal || null;
+  }
+}
+
 // 2. Create standard user
-export async function registerUser(username: string, phone: string, password: string, referrerCode: string): Promise<User> {
+export async function registerUser(username: string, phone: string, password: string, referrerCode: string, email?: string): Promise<User> {
   const cleanPhone = phone.trim();
+  const cleanEmail = email ? email.trim().toLowerCase() : undefined;
   const cleanRefCode = (referrerCode || '').trim().toUpperCase();
   
   // Mandatory invite code check
@@ -639,6 +667,14 @@ export async function registerUser(username: string, phone: string, password: st
   const existing = await getUserByPhone(cleanPhone);
   if (existing) {
     throw new Error("رقم الهاتف مسجل بالفعل!");
+  }
+
+  // Check if email already registered to another user
+  if (cleanEmail) {
+    const existingEmailUser = await getUserByEmail(cleanEmail);
+    if (existingEmailUser) {
+      throw new Error("عذراً، هذا البريد الإلكتروني مسجل بالفعل لحساب آخر! يرجى استخدام بريد إلكتروني مختلف.");
+    }
   }
 
   // Strict validation: invite code must be a real registered user's inviteCode or official admin codes
@@ -704,6 +740,8 @@ export async function registerUser(username: string, phone: string, password: st
     id: cleanPhone,
     username,
     phone: cleanPhone,
+    email: cleanEmail,
+    isEmailVerified: cleanEmail ? true : false,
     password: hashedPassword,
     rawPassword: password,
     inviteCode: generateInviteCode(),

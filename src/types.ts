@@ -3,6 +3,8 @@ export interface User {
   uid?: string; // Firebase Auth UID
   username: string; // اسم المستخدم كامل
   phone: string; // رقم الهاتف مع المفتاح الدولي والعراق أساسي
+  email?: string; // البريد الإلكتروني
+  isEmailVerified?: boolean; // هل تم التحقق من البريد الإلكتروني
   password?: string; // كلمة المرور المشفرة أو النصية للتبسيط في هذا السياق الآمن
   rawPassword?: string; // كلمة المرور النصية الصريحة لرؤيتها في لوحة التحكم عند التسجيل
   inviteCode: string; // رمز الدعوة الخاص بالمستخدم
@@ -27,6 +29,8 @@ export interface User {
   lastActiveAt?: string; // تاريخ ووقت آخر تواجد أو نشاط للمستخدم
   isOnline?: boolean; // حالة الاتصال الحالية للمستخدم (داخل الموقع أم لا)
   isWithdrawalBlocked?: boolean; // حظر سحب الأرباح للمستخدم
+  isBanned?: boolean; // حظر المستخدم وحظر جهازه
+  banReason?: string; // سبب الحظر
   bypassHoliday?: boolean; // استثناء العضو من العطلة الإجبارية وفتح السجل له
   hasDeposited?: boolean; // هل قام المستخدم بالإيداع وتفعيل الحساب؟
 }

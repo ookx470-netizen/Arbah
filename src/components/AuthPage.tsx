@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { getUserByPhone, registerUser, getSystemSettings, hashPassword, recordUserLogin, shadowFirebaseAuth } from '../firebaseService';
+import { getUserByPhone, getUserByEmail, registerUser, getSystemSettings, hashPassword, recordUserLogin, shadowFirebaseAuth } from '../firebaseService';
 import { User } from '../types';
-import { ShieldCheck, Phone, Lock, User as UserIcon, Award, RefreshCw, CheckCircle2, AlertTriangle, XCircle, Sun, Moon } from 'lucide-react';
+import { ShieldCheck, Phone, Lock, User as UserIcon, Award, RefreshCw, CheckCircle2, AlertTriangle, XCircle, Mail, KeyRound, Send } from 'lucide-react';
 import { COUNTRY_LIST, CountryInfo } from '../utils/phoneValidation';
+import { isAllowedTrustedEmail } from '../utils/disposableEmailBlocklist';
 import oxloLogoImg from '../assets/images/oxlo_clean_logo_1786416406822.jpg';
 
 interface AuthPageProps {
@@ -15,6 +16,11 @@ export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
   const [fullName, setFullName] = useState<string>('');
   const [selectedCountry, setSelectedCountry] = useState<CountryInfo>(COUNTRY_LIST[0]); // Iraq (+964) default
   const [phoneInput, setPhoneInput] = useState<string>('');
+  const [email, setEmail] = useState<string>('');
+  const [emailOtp, setEmailOtp] = useState<string>('');
+  const [otpSent, setOtpSent] = useState<boolean>(false);
+  const [sendingOtp, setSendingOtp] = useState<boolean>(false);
+  const [otpCountdown, setOtpCountdown] = useState<number>(0);
   const [password, setPassword] = useState<string>('');
   const [inviteCode, setInviteCode] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
@@ -22,6 +28,72 @@ export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
   const [globalNotification, setGlobalNotification] = useState<string>(settings?.globalNotification ?? '');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  // OTP Resend Countdown Timer
+  useEffect(() => {
+    let timer: any;
+    if (otpCountdown > 0) {
+      timer = setInterval(() => {
+        setOtpCountdown((prev) => (prev > 0 ? prev - 1 : 0));
+      }, 1000);
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [otpCountdown]);
+
+  // Handle sending email verification code via Resend
+  const handleSendEmailOtp = async () => {
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    const cleanEmail = email.trim().toLowerCase();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!cleanEmail || !emailRegex.test(cleanEmail)) {
+      setErrorMsg("الرجاء إدخال عنوان بريد إلكتروني صحيح أولاً.");
+      return;
+    }
+
+    // Strictly allow only verified official email providers
+    const emailCheck = isAllowedTrustedEmail(cleanEmail);
+    if (!emailCheck.allowed) {
+      setErrorMsg(emailCheck.reason || "⛔ عذراً، يُسمح فقط بالتسجيل عبر مزودي البريد الإلكتروني الرسميين المعتمدين (مثل: Gmail, Outlook, Hotmail, Yahoo, iCloud, Proton...). لا يُقبل أي بريد وهمي أو غير معروف.");
+      return;
+    }
+
+    setSendingOtp(true);
+    try {
+      // Check if email already registered
+      const existingUser = await getUserByEmail(cleanEmail);
+      if (existingUser) {
+        throw new Error("عذراً، هذا البريد الإلكتروني مسجل بالفعل لحساب آخر! يرجى استخدام بريد إلكتروني جديد أو تسجيل الدخول.");
+      }
+
+      const response = await fetch('/api/send-email-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanEmail, siteName })
+      });
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.message || "فشل إرسال رمز التحقق.");
+      }
+
+      setOtpSent(true);
+      setOtpCountdown(45);
+      if (data.devMode && data.previewCode) {
+        setEmailOtp(data.previewCode);
+        setSuccessMsg(`✅ تم توليد رمز التحقق التجريبي: ${data.previewCode} (تم تعبئته تلقائياً)`);
+      } else {
+        setSuccessMsg(data.message || "تم إرسال رمز التحقق إلى بريدك الإلكتروني بنجاح!");
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || "حدث خطأ أثناء إرسال رمز التحقق.");
+    } finally {
+      setSendingOtp(false);
+    }
+  };
 
   // Handle settings updates from prop
   useEffect(() => {
@@ -163,6 +235,39 @@ export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
         if (!fullName.trim()) {
           throw new Error("الرجاء إدخال اسم المستخدم بالكامل");
         }
+        
+        const cleanEmail = email.trim().toLowerCase();
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!cleanEmail || !emailRegex.test(cleanEmail)) {
+          throw new Error("الرجاء إدخال عنوان بريد إلكتروني صحيح.");
+        }
+
+        const emailCheck = isAllowedTrustedEmail(cleanEmail);
+        if (!emailCheck.allowed) {
+          throw new Error(emailCheck.reason || "⛔ لا يُسمح بالتسجيل إلا عبر الإيميلات الرسمية المعتمدة (Gmail, Outlook, Hotmail, Yahoo, iCloud...).");
+        }
+
+        if (!otpSent) {
+          throw new Error("يرجى الضغط على 'إرسال الرمز' لاستلام رمز التحقق على بريدك الإلكتروني.");
+        }
+
+        const cleanOtp = emailOtp.trim();
+        if (!cleanOtp || cleanOtp.length < 6) {
+          throw new Error("يرجى إدخال رمز التحقق المكون من 6 أرقام المرسل إلى بريدك الإلكتروني.");
+        }
+
+        // Verify OTP with backend
+        const verifyRes = await fetch('/api/verify-email-otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: cleanEmail, code: cleanOtp })
+        });
+        const verifyData = await verifyRes.json();
+
+        if (!verifyRes.ok || !verifyData.success) {
+          throw new Error(verifyData.message || "رمز التحقق غير صحيح أو انتهت صلاحيته.");
+        }
+
         if (password.length < 6) {
           throw new Error("يجب أن تتكون كلمة المرور من 6 خانات على الأقل");
         }
@@ -177,12 +282,13 @@ export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
           fullName.trim(),
           fullPhone,
           password,
-          inviteCode.trim()
+          inviteCode.trim(),
+          cleanEmail
         );
 
         shadowFirebaseAuth(registeredUser.phone, registeredUser.password || registeredUser.id).catch(e => console.warn(e));
         
-        setSuccessMsg(`🎉 تم إنشاء حسابك بنجاح! كود الدعوة الخاص بك هو (${registeredUser.inviteCode}).`);
+        setSuccessMsg(`🎉 تم تأكيد البريد الإلكتروني وإنشاء حسابك بنجاح! كود الدعوة الخاص بك هو (${registeredUser.inviteCode}).`);
         onLoginSuccess(registeredUser);
       }
     } catch (err: any) {
@@ -386,6 +492,91 @@ export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
                 </div>
               );
             })()}
+
+            {/* Field: Email & Send OTP Button (Registration only) */}
+            {!isLogin && (
+              <div className="space-y-3 p-3.5 bg-slate-50/80 rounded-2xl border border-slate-200/80">
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between px-1">
+                    <label className="text-[10px] font-black text-slate-700">البريد الإلكتروني (للتحقق)</label>
+                    <span className="text-[9px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100">
+                      إجباري للتأكيد
+                    </span>
+                  </div>
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <input
+                        type="email"
+                        required
+                        value={email}
+                        onChange={(e) => {
+                          setEmail(e.target.value);
+                          setErrorMsg(null);
+                        }}
+                        className="w-full h-13 bg-white border border-slate-200 rounded-xl pr-10 pl-3 text-xs font-black text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600/10 focus:border-blue-600 transition-all text-left font-mono"
+                        placeholder="yourname@gmail.com"
+                        dir="ltr"
+                      />
+                      <Mail className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleSendEmailOtp}
+                      disabled={sendingOtp || otpCountdown > 0 || !email.trim()}
+                      className={`px-3.5 h-13 rounded-xl font-black text-[11px] flex items-center gap-1.5 shrink-0 transition-all cursor-pointer ${
+                        otpCountdown > 0
+                          ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                          : 'bg-blue-600 hover:bg-blue-700 active:scale-95 text-white shadow-md shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed'
+                      }`}
+                    >
+                      {sendingOtp ? (
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      ) : otpCountdown > 0 ? (
+                        <span>{otpCountdown}s</span>
+                      ) : (
+                        <>
+                          <Send className="w-3.5 h-3.5" />
+                          <span>{otpSent ? 'إعادة الإرسال' : 'إرسال الرمز'}</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Field: OTP Code Input (appears after send or always available for quick entry) */}
+                <div className="space-y-1.5 pt-1 border-t border-slate-200/60">
+                  <div className="flex items-center justify-between px-1">
+                    <label className="text-[10px] font-black text-slate-700">رمز التحقق (6 أرقام)</label>
+                    {otpSent && (
+                      <span className="text-[9px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-100 flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3" />
+                        تم الإرسال
+                      </span>
+                    )}
+                  </div>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      maxLength={6}
+                      required
+                      value={emailOtp}
+                      onChange={(e) => {
+                        setEmailOtp(e.target.value.replace(/\D/g, ''));
+                        setErrorMsg(null);
+                      }}
+                      className="w-full h-13 bg-white border border-slate-200 rounded-xl pr-10 pl-4 text-sm font-black text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/10 focus:border-blue-600 transition-all text-center tracking-[6px] font-mono"
+                      placeholder="------"
+                      dir="ltr"
+                    />
+                    <KeyRound className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  </div>
+                  <p className="text-[9px] text-slate-400 font-medium px-1">
+                    💡 تفقد صندوق الوارد أو البريد غير المرغوب فيه (Spam/Junk).
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Field: Password */}
             <div className="space-y-2">

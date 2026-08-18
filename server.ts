@@ -2,6 +2,7 @@ import express from "express";
 import path from "path";
 import dotenv from "dotenv";
 import { GoogleGenAI } from "@google/genai";
+import { Resend } from "resend";
 import { createServer as createViteServer } from "vite";
 import multer from "multer";
 import fs from "fs";
@@ -12,6 +13,270 @@ const app = express();
 const PORT = 3000;
 
 app.use(express.json());
+
+// Resend Email Client Lazy Initialization
+let resendClient: Resend | null = null;
+function getResendClient(): Resend | null {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) return null;
+  if (!resendClient) {
+    resendClient = new Resend(apiKey);
+  }
+  return resendClient;
+}
+
+// In-memory OTP Store for email verifications
+interface EmailOtpRecord {
+  code: string;
+  expiresAt: number;
+  lastSentAt: number;
+  attempts: number;
+}
+const emailOtpStore = new Map<string, EmailOtpRecord>();
+
+// Clean up expired OTPs periodically (every 5 minutes)
+setInterval(() => {
+  const now = Date.now();
+  for (const [email, record] of emailOtpStore.entries()) {
+    if (record.expiresAt < now) {
+      emailOtpStore.delete(email);
+    }
+  }
+}, 5 * 60 * 1000);
+
+// Strict Trusted Providers List (Whitelist)
+const TRUSTED_EMAIL_DOMAINS = new Set([
+  'gmail.com', 'googlemail.com',
+  'outlook.com', 'hotmail.com', 'live.com', 'msn.com', 'passport.com',
+  'outlook.sa', 'outlook.ae', 'outlook.fr', 'outlook.de', 'outlook.es', 'outlook.co.uk',
+  'hotmail.co.uk', 'hotmail.fr', 'hotmail.de', 'hotmail.es', 'live.fr', 'live.co.uk',
+  'yahoo.com', 'yahoo.fr', 'yahoo.co.uk', 'yahoo.es', 'yahoo.de', 'yahoo.it', 'yahoo.ca',
+  'yahoo.com.br', 'yahoo.com.mx', 'yahoo.com.ar', 'yahoo.co.in', 'yahoo.co.jp', 'ymail.com', 'rocketmail.com',
+  'icloud.com', 'me.com', 'mac.com',
+  'proton.me', 'protonmail.com', 'pm.me', 'tutanota.com', 'tuta.io', 'tuta.com',
+  'zoho.com', 'zohomail.com', 'aol.com', 'aim.com', 'mail.com', 'gmx.com', 'gmx.net', 'gmx.de',
+  'web.de', 'freenet.de', 't-online.de',
+  'yandex.com', 'yandex.ru', 'ya.ru', 'mail.ru', 'bk.ru', 'inbox.ru', 'list.ru',
+  'qq.com', '163.com', '126.com', 'sina.com', 'sohu.com',
+  'naver.com', 'daum.net', 'hanmail.net',
+  'orange.fr', 'wanadoo.fr', 'free.fr', 'sfr.fr', 'laposte.net',
+  'libero.it', 'virgilio.it', 'tiscali.it', 'alice.it',
+  'terra.com.br', 'uol.com.br', 'bol.com.br',
+  'rediffmail.com'
+]);
+
+function isAllowedEmailServer(email: string): boolean {
+  if (!email || !email.includes('@')) return false;
+  const parts = email.trim().toLowerCase().split('@');
+  if (parts.length !== 2) return false;
+  const domain = parts[1].trim();
+  if (!domain || !domain.includes('.')) return false;
+
+  if (TRUSTED_EMAIL_DOMAINS.has(domain)) return true;
+  if (domain.endsWith('.edu') || domain.includes('.edu.') || domain.includes('.ac.') || domain.endsWith('.gov') || domain.includes('.gov.')) {
+    return true;
+  }
+  return false;
+}
+
+// API Endpoint: Send Email OTP Verification Code
+app.post("/api/send-email-otp", async (req, res) => {
+  try {
+    const { email, siteName = "OXLO" } = req.body;
+    const cleanEmail = (email || "").trim().toLowerCase();
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!cleanEmail || !emailRegex.test(cleanEmail)) {
+      return res.status(400).json({ success: false, message: "يرجى إدخال عنوان بريد إلكتروني صحيح وصالح." });
+    }
+
+    // Strictly allow only verified official email providers
+    if (!isAllowedEmailServer(cleanEmail)) {
+      return res.status(400).json({
+        success: false,
+        message: "⛔ عذراً، يُسمح فقط بالتسجيل عبر مزودي البريد الإلكتروني الرسميين المعتمدين (مثل: Gmail, Outlook, Hotmail, Yahoo, iCloud, Proton...). لا يُقبل أي بريد وهمي أو غير معروف."
+      });
+    }
+
+    const now = Date.now();
+    const existing = emailOtpStore.get(cleanEmail);
+
+    // Rate limit: 45 seconds cooldown between resends
+    if (existing && now - existing.lastSentAt < 45 * 1000) {
+      const waitSeconds = Math.ceil((45 * 1000 - (now - existing.lastSentAt)) / 1000);
+      return res.status(429).json({
+        success: false,
+        message: `يرجى الانتظار ${waitSeconds} ثانية قبل طلب رمز جديد.`
+      });
+    }
+
+    // Generate random 6-digit OTP code
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = now + 10 * 60 * 1000; // 10 minutes
+
+    emailOtpStore.set(cleanEmail, {
+      code: otpCode,
+      expiresAt,
+      lastSentAt: now,
+      attempts: 0
+    });
+
+    const resend = getResendClient();
+    if (!resend) {
+      // In development or when RESEND_API_KEY is not set yet
+      console.warn(`[DEV MODE] RESEND_API_KEY is not set. Simulated OTP for ${cleanEmail} is: ${otpCode}`);
+      return res.json({
+        success: true,
+        devMode: true,
+        previewCode: otpCode,
+        message: "تم توليد رمز التحقق! (لتفعيل الإرسال الحقيقي عبر الإيميل، يرجى وضع مفتاح RESEND_API_KEY في الإعدادات)."
+      });
+    }
+
+    // Modern HTML email template for OXLO
+    const htmlContent = `
+      <div dir="rtl" style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #0b0f19; color: #ffffff; padding: 40px 20px; border-radius: 16px; max-width: 520px; margin: auto; border: 1px solid #1e293b;">
+        <div style="text-align: center; margin-bottom: 24px;">
+          <div style="display: inline-block; background: linear-gradient(135deg, #2563eb, #4f46e5); color: #ffffff; font-size: 20px; font-weight: 900; padding: 12px 28px; border-radius: 12px; letter-spacing: 2px;">
+            ${siteName}
+          </div>
+          <p style="color: #94a3b8; font-size: 13px; margin-top: 8px; font-weight: 600;">منصة الاستثمار الرقمي المعتمدة</p>
+        </div>
+        
+        <div style="background-color: #111827; border: 1px solid #1f2937; border-radius: 16px; padding: 28px; text-align: center;">
+          <h2 style="color: #f8fafc; font-size: 18px; margin-bottom: 12px; font-weight: 800;">رمز التحقق لتسجيل الحساب</h2>
+          <p style="color: #cbd5e1; font-size: 14px; line-height: 1.6; margin-bottom: 20px;">
+            مرحباً بك! استخدم الرمز السري أدناه لتأكيد بريدك الإلكتروني وإكمال إنشاء حسابك:
+          </p>
+          
+          <div style="background: linear-gradient(180deg, #1e293b, #0f172a); border: 2px dashed #3b82f6; border-radius: 12px; padding: 16px 24px; margin: 20px auto; display: inline-block;">
+            <span style="font-family: monospace; font-size: 32px; font-weight: 900; letter-spacing: 8px; color: #38bdf8;">
+              ${otpCode}
+            </span>
+          </div>
+
+          <p style="color: #f59e0b; font-size: 12px; font-weight: 700; margin-top: 16px;">
+            ⏱️ هذا الرمز صالح لمدة 10 دقائق فقط.
+          </p>
+        </div>
+
+        <div style="text-align: center; margin-top: 24px; color: #64748b; font-size: 11px; line-height: 1.5;">
+          <p>إذا لم تكن قد طلبت هذا الرمز، يمكنك تجاهل هذا البريد بأمان.</p>
+          <p style="margin-top: 4px;">© ${new Date().getFullYear()} ${siteName}. جميع الحقوق محفوظة.</p>
+        </div>
+      </div>
+    `;
+
+    // Use verified domain sender (Domain added in Resend is "oxlo.store")
+    const customFrom = process.env.RESEND_FROM_EMAIL;
+    const fromAddress = customFrom || `OXLO Security <auth@oxlo.store>`;
+    
+    let sendResult = await resend.emails.send({
+      from: fromAddress,
+      to: [cleanEmail],
+      subject: `رمز التحقق الخاص بك لمنصة ${siteName}: ${otpCode}`,
+      html: htmlContent
+    });
+
+    // If oxlo.store primary fails, try verify@send.oxlo.store or support@oxlo.store
+    if (sendResult.error) {
+      console.warn("Retrying with support@oxlo.store:", sendResult.error);
+      sendResult = await resend.emails.send({
+        from: `OXLO Security <support@oxlo.store>`,
+        to: [cleanEmail],
+        subject: `رمز التحقق الخاص بك لمنصة ${siteName}: ${otpCode}`,
+        html: htmlContent
+      });
+    }
+
+    if (sendResult.error) {
+      console.error("Resend API error:", sendResult.error);
+      
+      let userFriendlyMsg = sendResult.error.message || "حدث خطأ أثناء إرسال البريد الإلكتروني.";
+      
+      // Check for Resend testing domain restriction
+      if (sendResult.error.message && (sendResult.error.message.includes('testing emails') || sendResult.error.message.includes('verify a domain') || sendResult.error.message.includes('own email address'))) {
+        userFriendlyMsg = "⚠️ إشعار: حساب Resend قيد التحقق حالياً. في الوضع التجريبي يسمح بإرسال الرموز إلى إيميل صاحب الحساب فقط. سيتاح لجميع الإيميلات فور اكتمال توثيق الدومين.";
+      }
+
+      return res.status(400).json({
+        success: false,
+        message: userFriendlyMsg
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: "تم إرسال رمز التحقق بنجاح إلى بريدك الإلكتروني! تفقد صندوق الوارد أو البريد غير المرغوب فيه (Spam)."
+    });
+  } catch (err: any) {
+    console.error("Error in /api/send-email-otp:", err);
+    return res.status(500).json({
+      success: false,
+      message: err.message || "حدث خطأ غير متوقع في الخادم أثناء إرسال رمز التحقق."
+    });
+  }
+});
+
+// API Endpoint: Verify Email OTP Code
+app.post("/api/verify-email-otp", (req, res) => {
+  try {
+    const { email, code } = req.body;
+    const cleanEmail = (email || "").trim().toLowerCase();
+    const cleanCode = (code || "").trim();
+
+    if (!cleanEmail || !cleanCode) {
+      return res.status(400).json({ success: false, message: "يرجى إدخال البريد الإلكتروني ورمز التحقق." });
+    }
+
+    const record = emailOtpStore.get(cleanEmail);
+    if (!record) {
+      return res.status(400).json({
+        success: false,
+        message: "لم يتم العثور على رمز تحقق لهذا البريد أو انتهت صلاحيته. يرجى طلب رمز جديد."
+      });
+    }
+
+    if (Date.now() > record.expiresAt) {
+      emailOtpStore.delete(cleanEmail);
+      return res.status(400).json({
+        success: false,
+        message: "انتهت صلاحية رمز التحقق (مرت 10 دقائق). يرجى طلب رمز جديد."
+      });
+    }
+
+    if (record.attempts >= 5) {
+      emailOtpStore.delete(cleanEmail);
+      return res.status(400).json({
+        success: false,
+        message: "تم تجاوز الحد الأقصى للمحاولات الخاطئة. يرجى طلب رمز تحقق جديد."
+      });
+    }
+
+    if (record.code !== cleanCode) {
+      record.attempts += 1;
+      return res.status(400).json({
+        success: false,
+        message: `رمز التحقق غير صحيح! (المحاولات المتبقية: ${5 - record.attempts})`
+      });
+    }
+
+    // Code is valid! Remove OTP record to prevent reuse
+    emailOtpStore.delete(cleanEmail);
+
+    return res.json({
+      success: true,
+      message: "تم التحقق من البريد الإلكتروني بنجاح!"
+    });
+  } catch (err: any) {
+    console.error("Error in /api/verify-email-otp:", err);
+    return res.status(500).json({
+      success: false,
+      message: err.message || "حدث خطأ غير متوقع أثناء التحقق من الرمز."
+    });
+  }
+});
 
 // Ensure the uploads directory exists
 const uploadDir = path.join(process.cwd(), "uploads");

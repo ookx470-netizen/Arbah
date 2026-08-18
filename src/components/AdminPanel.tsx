@@ -1842,6 +1842,28 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                               <span className="bg-slate-100 px-1 py-0.5 rounded font-bold text-slate-600">الهاتف:</span>
                               <span>{u.phone}</span>
                             </div>
+                            {u.email && (
+                              <div className="text-[10px] text-blue-700 bg-blue-50/80 border border-blue-200/70 px-1.5 py-0.5 rounded flex items-center justify-between gap-1 mt-0.5" dir="ltr">
+                                <div className="flex items-center gap-1 truncate">
+                                  <span className="text-[10px]">✉️</span>
+                                  <span className="font-mono text-[9.5px] font-bold truncate">{u.email}</span>
+                                </div>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleCopyText(u.email || '', `email_${u.phone}`);
+                                  }}
+                                  className="text-slate-400 hover:text-blue-600 p-0.5 rounded cursor-pointer shrink-0"
+                                  title="نسخ البريد الإلكتروني"
+                                >
+                                  {copiedKey === `email_${u.phone}` ? (
+                                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                  ) : (
+                                    <Copy className="w-3 h-3" />
+                                  )}
+                                </button>
+                              </div>
+                            )}
                             <div className="text-[10px] text-rose-600 flex items-center gap-1 flex-wrap" dir="rtl">
                               <span className="bg-rose-50 border border-rose-100 px-1 py-0.5 rounded font-bold">الباسورد:</span>
                               <span className="font-mono font-extrabold bg-amber-50 text-amber-900 border border-amber-200 px-1.5 py-0.5 rounded text-[11px] select-all" dir="ltr">
@@ -2256,6 +2278,11 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                                       )}
                                     </button>
                                   </div>
+                                  {u.email && (
+                                    <div className="flex items-center gap-1 text-[9.5px] text-indigo-700 bg-indigo-50/80 border border-indigo-200/60 px-1 py-0.5 rounded mt-0.5" dir="ltr">
+                                      <span className="truncate max-w-[130px] font-mono font-medium">{u.email}</span>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             </td>
