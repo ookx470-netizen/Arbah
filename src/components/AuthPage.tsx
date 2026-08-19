@@ -253,8 +253,10 @@ export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
         // وإلا يفشل جلب البيانات بصمت في أي جلسة/متصفح جديد بدون كاش قديم
         try {
           await shadowFirebaseAuth(user.phone, user.password || user.id);
-        } catch (authErr) {
+        } catch (authErr: any) {
           console.warn("Shadow auth on login failed:", authErr);
+          // تشخيص مؤقت: نظهر الخطأ الحقيقي بالواجهة عشان نعرف السبب بالضبط
+          setErrorMsg(`تحذير تشخيصي (Shadow Auth): ${authErr?.code || ''} ${authErr?.message || String(authErr)}`);
         }
         recordUserLogin(user.phone || user.id).catch(e => console.warn(e));
         setSuccessMsg("تم تسجيل الدخول بنجاح!");
