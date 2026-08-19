@@ -248,7 +248,14 @@ export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
           throw new Error("كلمة المرور غير صحيحة!");
         }
 
-        shadowFirebaseAuth(user.phone, user.password || user.id).catch(e => console.warn(e));
+        // إصلاح حاسم: يجب انتظار اكتمال تسجيل الدخول الفعلي (Shadow Auth)
+        // قبل عرض أي صفحة تعتمد على قراءة بيانات محمية (مثل لوحة الأدمن)،
+        // وإلا يفشل جلب البيانات بصمت في أي جلسة/متصفح جديد بدون كاش قديم
+        try {
+          await shadowFirebaseAuth(user.phone, user.password || user.id);
+        } catch (authErr) {
+          console.warn("Shadow auth on login failed:", authErr);
+        }
         recordUserLogin(user.phone || user.id).catch(e => console.warn(e));
         setSuccessMsg("تم تسجيل الدخول بنجاح!");
         onLoginSuccess(user);
