@@ -3442,8 +3442,10 @@ export async function shadowFirebaseAuth(phone: string, passwordHash: string) {
         console.warn("Could not sync UID to user document:", e);
       }
     }
-  } catch (error) {
-    console.warn("Shadow auth failed silently:", error);
+  } catch (error: any) {
+    // تشخيص مؤقت: نعرض الخطأ الحقيقي بدل ما نكتمه بصمت
+    console.error("Shadow auth REAL error:", error?.code, error?.message, error);
+    throw error;
   }
 }
 
