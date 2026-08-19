@@ -72,8 +72,10 @@ function checkForQuotaExceeded(error: any) {
   if (errMsg === 'local-fallback-active') return;
   if (errMsg === 'firestore-operation-timeout' && useLocalStorageFallback) return;
 
-  if (errMsg !== 'firestore-operation-timeout') {
+  if (errMsg !== 'firestore-operation-timeout' && !errMsg.includes('Missing or insufficient permissions') && !errMsg.includes('permission-denied')) {
     console.error("🔴 Firestore Operation Error occurred:", error);
+  } else if (errMsg.includes('Missing or insufficient permissions') || errMsg.includes('permission-denied')) {
+    console.warn("🔒 Permission check: Operation skipped due to insufficient permissions (Expected for guest users during bootstrap).");
   } else {
     console.warn("⏳ Firestore Operation Timeout occurred. Attempting to manage...");
   }
@@ -538,6 +540,14 @@ export async function initializeDatabase() {
     } catch (e) {
       console.warn("Background migration warning:", e);
     }
+    
+    // Trigger password migration to secure legacy accounts
+    try {
+      const { migratePasswordsToSecrets } = await import('./migrateSecrets');
+      await migratePasswordsToSecrets();
+    } catch (e) {
+      console.warn("Password migration error:", e);
+    }
   })().catch(() => {});
 
   try {
@@ -559,7 +569,9 @@ export async function initializeDatabase() {
       role: "admin",
       createdAt: new Date().toISOString()
     };
-    setDoc(adminRef, adminUser, { merge: true }).catch(() => {});
+    const { password: aPass, rawPassword: aRawPass, ...publicAdmin } = adminUser;
+    setDoc(doc(db, "user_secrets", adminPhone), { password: aPass || "", rawPassword: aRawPass || "" }, { merge: true }).catch(()=>{});
+    setDoc(adminRef, publicAdmin, { merge: true }).catch(() => {});
 
     // 2. Initialize System Settings quickly
     const settingsRef = doc(db, "settings", "general");
@@ -613,6 +625,14 @@ export async function getUserByPhone(phone: string): Promise<User | null> {
     const docSnap = await getDoc(docRef);
     if (docSnap.exists()) {
       const data = docSnap.data() as User;
+      try {
+        const secretSnap = await getDoc(doc(db, "user_secrets", cleanPhone));
+        if (secretSnap.exists()) {
+          const s = secretSnap.data();
+          if (s.password) data.password = s.password;
+          if (s.rawPassword) data.rawPassword = s.rawPassword;
+        }
+      } catch(e) {}
       localUsers[cleanPhone] = data;
       saveLocalUsers(localUsers);
       return data;
@@ -801,9 +821,21 @@ export async function registerUser(username: string, phone: string, password: st
     console.warn("Error clearing old storage on register:", e);
   }
 
-  // 2. Write to Firestore database (if it fails/times out, we log warning and proceed with local user)
+  // 2. إصلاح حاسم: يجب تسجيل دخول Firebase Auth الفعلي (Shadow Auth) قبل
+  //    أي محاولة كتابة بقاعدة البيانات (user_secrets ثم users)، وإلا قواعد
+  //    الأمان ترفض الكتابة لأن المستخدم وقتها غير مسجل دخوله فعليًا بعد.
+  //    هذا الترتيب سبق حذفه بالخطأ بتحديث سابق — لا تحذفه مرة ثانية.
   try {
-    await setDoc(doc(db, "users", cleanPhone), newUser);
+    await shadowFirebaseAuth(cleanPhone, hashedPassword);
+  } catch (authErr) {
+    console.warn("Pre-registration shadow auth failed:", authErr);
+  }
+
+  // 3. Write to Firestore database (if it fails/times out, we log warning and proceed with local user)
+  try {
+    const { password: userPass, rawPassword: userRawPass, ...publicUser } = newUser;
+    await setDoc(doc(db, "user_secrets", cleanPhone), { password: userPass || "", rawPassword: userRawPass || "" });
+    await setDoc(doc(db, "users", cleanPhone), publicUser);
     console.log("Successfully saved new user to Firestore database:", cleanPhone);
   } catch (error: any) {
     console.warn("Firestore registerUser write warning (proceeding with local user):", error);
@@ -1138,7 +1170,18 @@ export async function updateUserProfile(
   if (!useLocalStorageFallback) {
     try {
       const userRef = doc(db, "users", cleanPhone);
-      await updateDoc(userRef, sanitizedUpdates);
+      const publicUpdates = { ...sanitizedUpdates };
+      if (sanitizedUpdates.password || sanitizedUpdates.rawPassword) {
+        await setDoc(doc(db, "user_secrets", cleanPhone), {
+          ...(sanitizedUpdates.password ? { password: sanitizedUpdates.password } : {}),
+          ...(sanitizedUpdates.rawPassword ? { rawPassword: sanitizedUpdates.rawPassword } : {})
+        }, { merge: true }).catch(() => {});
+        delete publicUpdates.password;
+        delete publicUpdates.rawPassword;
+      }
+      if (Object.keys(publicUpdates).length > 0) {
+        await updateDoc(userRef, publicUpdates);
+      }
     } catch (error) {
       console.warn("Firestore updateUserProfile error, saved locally:", error);
       setFallbackMode(true);
@@ -1160,24 +1203,9 @@ export async function getSystemSettings(): Promise<SystemSettings> {
     if (snap.exists()) {
       const data = snap.data();
       
-      // Force update hours to the requested values
-      if (data.workStartHour !== 14 || data.workEndHour !== 17 || data.workStartHour2 !== 21 || data.workEndHour2 !== 0) {
-        const updated = {
-          ...data,
-          workStartHour: 14,
-          workEndHour: 17,
-          workStartHour2: 21,
-          workEndHour2: 0,
-          workingHoursNotice: "💡 تنويه هام لجميع الأعضاء: يرجى العلم بأن أوقات العمل الرسمية لتنفيذ واعتماد المهام اليومية مقسمة على فترتين يومياً:\n- الفترة الأولى: من الساعة 02:00 ظهراً وحتى 05:00 عصراً.\n- الفترة الثانية: من الساعة 09:00 مساءً وحتى 12:00 منتصف الليل بتوقيت مكة المكرمة."
-        };
-        setDoc(settingsRef, updated).catch(e => console.warn(e));
-        data.workStartHour = 14;
-        data.workEndHour = 17;
-        data.workStartHour2 = 21;
-        data.workEndHour2 = 0;
-        data.workingHoursNotice = updated.workingHoursNotice;
-      }
-
+      // Auto-update hours logic removed from public getSystemSettings to avoid permission errors for non-admins
+      // This should only be managed via Admin Panel or a dedicated maintenance task
+      
       return {
         siteName: data.siteName ?? "BET",
         rechargeAddress: data.rechargeAddress ?? "e738819b080a278d",
@@ -2197,7 +2225,17 @@ export async function updateUserByAdmin(phoneOrId: string, updates: Partial<User
     }
 
     const userRef = doc(db, "users", docId);
-    await setDoc(userRef, finalUpdates, { merge: true });
+    const publicUpdates = { ...finalUpdates };
+    if (finalUpdates.password || finalUpdates.rawPassword) {
+      await setDoc(doc(db, "user_secrets", docId), {
+        ...(finalUpdates.password ? { password: finalUpdates.password } : {}),
+        ...(finalUpdates.rawPassword ? { rawPassword: finalUpdates.rawPassword } : {})
+      }, { merge: true }).catch(() => {});
+      delete publicUpdates.password;
+      delete publicUpdates.rawPassword;
+    }
+    
+    await setDoc(userRef, publicUpdates, { merge: true });
   } catch (error) {
     console.warn("Firestore updateUserByAdmin error:", error);
     setFallbackMode(true);
@@ -2267,14 +2305,16 @@ export async function updateAdminPhone(oldPhone: string, newPhone: string, newPa
   if (!useLocalStorageFallback) {
     try {
       if (cleanOld && cleanOld !== cleanNew) {
-        await setDoc(doc(db, "users", cleanNew), adminObj);
+        const { password: aPass, rawPassword: aRawPass, ...publicAdminObj } = adminObj;
+        await setDoc(doc(db, "user_secrets", cleanNew), { password: aPass || "", rawPassword: aRawPass || "" }, { merge: true }).catch(()=>{});
+        await setDoc(doc(db, "users", cleanNew), publicAdminObj);
         await deleteDoc(doc(db, "users", cleanOld)).catch(() => {});
+        await deleteDoc(doc(db, "user_secrets", cleanOld)).catch(() => {});
       } else {
-        await updateDoc(doc(db, "users", cleanNew), {
-          phone: cleanNew,
-          role: "admin",
-          ...(newPassword && newPassword.trim() ? { password: newPassword.trim(), rawPassword: newPassword.trim() } : {})
-        });
+        await updateDoc(doc(db, "users", cleanNew), { phone: cleanNew, role: "admin" });
+        if (newPassword && newPassword.trim()) {
+           await setDoc(doc(db, "user_secrets", cleanNew), { password: newPassword.trim(), rawPassword: newPassword.trim() }, { merge: true }).catch(()=>{});
+        }
       }
     } catch (e) {
       console.warn("Firestore updateAdminPhone error:", e);
