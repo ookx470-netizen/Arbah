@@ -91,8 +91,11 @@ export function isHourInShift(currentHour: number, start: number, end: number): 
 
 /**
  * Calculate the remaining effective days for a user based on vipStartDate or createdAt.
+ * إصلاح: أيام العطلة تُقرأ ديناميكيًا من إعدادات الإدارة (settings.holidayDays)
+ * بدل ما تكون مثبّتة بالكود — أي تغيير بيوم العطلة من لوحة الأدمن ينعكس هنا
+ * تلقائيًا بدون الحاجة لتعديل الكود مستقبلاً.
  */
-export function calculateRemainingEffectiveDays(user: any): number {
+export function calculateRemainingEffectiveDays(user: any, holidayDays: number[] = [5]): number {
   if (!user || typeof user.effectiveDays !== 'number') return 0;
   
   const startDateStr = user.vipStartDate || user.createdAt;
@@ -112,8 +115,8 @@ export function calculateRemainingEffectiveDays(user: any): number {
     while (current < nowDay) {
       current.setDate(current.getDate() + 1);
       const dayOfWeek = current.getDay();
-      // 5 is Friday, 6 is Saturday
-      if (dayOfWeek !== 5 && dayOfWeek !== 6) {
+      // أيام العطل المحددة من الإدارة لا تُخصم من رصيد الأيام
+      if (!holidayDays.includes(dayOfWeek)) {
         workingDaysPassed++;
       }
     }
