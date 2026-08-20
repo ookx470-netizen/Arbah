@@ -1037,7 +1037,8 @@ export default function TaskView() {
           }
         }).catch(() => {});
       });
-    }, 90000); // every 90 seconds (reduced from 45s to save quota)
+    }, 15000); // إصلاح: قللت المدة من 90 ثانية لـ15 ثانية — تحديث أسرع بكثير
+               // للرصيد والباقة بعد أي تعديل من الإدارة، بدون حاجة لرفريش يدوي
 
     return () => {
       clearInterval(interval);
