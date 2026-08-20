@@ -368,6 +368,21 @@ export function getRiyadhOperationalDateStr(): string {
   return `${year}-${month}-${day}`;
 }
 
+// التاريخ الحقيقي (يتغير عند منتصف الليل فعليًا 12:00 AM بتوقيت مكة/الرياض)
+// يُستخدم حصريًا لتحديد صلاحية تسليم المهام — أي مهمة "قيد التنفيذ" من تاريخ
+// غير تاريخ اليوم الحقيقي هذا تفقد صلاحيتها ولا يمكن تسليمها بعد الآن
+export function getRiyadhMidnightDateStr(): string {
+  const now = new Date();
+  const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
+  const riyadhMs = utcMs + (3 * 60 * 60 * 1000);
+  const riyadhDate = new Date(riyadhMs);
+
+  const year = riyadhDate.getFullYear();
+  const month = String(riyadhDate.getMonth() + 1).padStart(2, '0');
+  const day = String(riyadhDate.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 function getDailyAvailableTasksForDate(dateStr: string, limit: number = 4) {
   // Convert date string (e.g. "2026-08-02") into days count since epoch to guarantee a unique 24h rotation
   const dateObj = new Date(dateStr);
@@ -580,7 +595,7 @@ export default function TaskView() {
     
     const correctCode = (settings.tasksCode || '').trim();
     const attempt = tasksCodeAttempt.trim();
-    const today = getRiyadhOperationalDateStr();
+    const today = getRiyadhMidnightDateStr();
 
     if (!correctCode) {
       setLastVerifiedCode('');
@@ -1035,13 +1050,30 @@ export default function TaskView() {
       setTasks([]); // Clear state immediately on user change to prevent task leaks from prior accounts
       if (currentUser?.phone) {
         try {
-          const { getUserTasks } = await import('./firebaseService');
+          const { getUserTasks, saveUserTasks: persistTasks } = await import('./firebaseService');
           const fetched = await getUserTasks(currentUser.phone);
-          const clean = fetched.filter((t: any) => t && t.id && !t.id.startsWith('task-')).map((t: Task) => ({
+          let clean = fetched.filter((t: any) => t && t.id && !t.id.startsWith('task-')).map((t: Task) => ({
             ...t,
             reviewLink: sanitizeTaskReviewLink(t.reviewLink, t.category)
           }));
+
+          // إصلاح: أي مهمة "قيد التنفيذ" من يوم سابق (بعد منتصف الليل الحقيقي)
+          // تفقد صلاحيتها تلقائيًا ولا تتراكم مع مهام اليوم الجديد
+          const todayReal = getRiyadhMidnightDateStr();
+          let expiredCount = 0;
+          clean = clean.map((t: Task) => {
+            if (t.status === 'in_progress' && t.claimDate !== todayReal) {
+              expiredCount++;
+              return { ...t, status: 'withdrawn' as const };
+            }
+            return t;
+          });
+
           setTasks(clean);
+
+          if (expiredCount > 0) {
+            persistTasks(currentUser.phone, clean).catch(() => {});
+          }
         } catch (e) {
           console.error("Error fetching tasks from database:", e);
         }
@@ -1172,7 +1204,7 @@ export default function TaskView() {
     };
   })();
 
-  const todayStr = getRiyadhOperationalDateStr();
+  const todayStr = getRiyadhMidnightDateStr();
   const todayClaimedCount = tasks.filter(t => t.claimDate === todayStr).length;
   const dailyTasksForToday = getDailyAvailableTasksForDate(todayStr, userPlanDetails.tasksLimit);
 
@@ -1491,6 +1523,12 @@ export default function TaskView() {
     }
     if (targetTask.status !== 'in_progress') {
       triggerNotification("⚠️ يمكن تقديم المهام القيد التقدم فقط.");
+      return;
+    }
+    // إصلاح: منع تسليم مهمة بدأت بيوم سابق بعد مرور منتصف الليل الحقيقي —
+    // تحمي من حالة كون الصفحة مفتوحة من قبل منتصف الليل بدون إعادة تحميل
+    if (targetTask.claimDate !== getRiyadhMidnightDateStr()) {
+      triggerNotification("⚠️ انتهت صلاحية هذه المهمة لأنها من يوم سابق. يرجى البدء بمهام اليوم الجديد.");
       return;
     }
     if (!targetTask.uploadedScreenshot) {
