@@ -724,6 +724,20 @@ export async function registerUser(username: string, phone: string, password: st
     }
   }
 
+  // Hash password before storing
+  const hashedPassword = await hashPassword(password);
+
+  // إصلاح حاسم: يجب تسجيل دخول Firebase Auth الفعلي (Shadow Auth) قبل أي
+  // استعلام أو كتابة بقاعدة البيانات — بما فيها التحقق من رمز الدعوة نفسه،
+  // الذي يحتاج قراءة كل الأعضاء (list) وهذا يتطلب تسجيل دخول فعلي حسب قواعد
+  // الأمان. بدون هذا، التحقق من رمز الدعوة يفشل بصمت في أي جلسة/متصفح جديد
+  // بدون كاش محلي قديم (يظهر خطأ "رمز الدعوة غير صحيح" حتى لو كان صحيحاً)
+  try {
+    await shadowFirebaseAuth(cleanPhone, hashedPassword);
+  } catch (authErr) {
+    console.warn("Pre-registration shadow auth (referral check) failed:", authErr);
+  }
+
   // Strict validation: invite code must be a real registered user's inviteCode or official admin codes
   const localUsers = getLocalUsers();
   let finalReferrer: string | undefined = undefined;
@@ -758,9 +772,6 @@ export async function registerUser(username: string, phone: string, password: st
       }
     }
   }
-
-  // Hash password before storing
-  const hashedPassword = await hashPassword(password);
 
   // Detect location silently at registration (timeout 1.5s to avoid slowness)
   let locData: any = {};
@@ -823,15 +834,8 @@ export async function registerUser(username: string, phone: string, password: st
     console.warn("Error clearing old storage on register:", e);
   }
 
-  // 2. إصلاح حاسم: يجب تسجيل دخول Firebase Auth الفعلي (Shadow Auth) قبل
-  //    أي محاولة كتابة بقاعدة البيانات (user_secrets ثم users)، وإلا قواعد
-  //    الأمان ترفض الكتابة لأن المستخدم وقتها غير مسجل دخوله فعليًا بعد.
-  //    هذا الترتيب سبق حذفه بالخطأ بتحديث سابق — لا تحذفه مرة ثانية.
-  try {
-    await shadowFirebaseAuth(cleanPhone, hashedPassword);
-  } catch (authErr) {
-    console.warn("Pre-registration shadow auth failed:", authErr);
-  }
+  // 2. ملاحظة: تسجيل الدخول الفعلي (Shadow Auth) صار مبكرًا الآن (قبل حتى
+  //    التحقق من رمز الدعوة أعلاه)، فما نحتاج نكرره هنا مرة ثانية.
 
   // 3. Write to Firestore database (if it fails/times out, we log warning and proceed with local user)
   //    إصلاح أمني: لا نكتب rawPassword (كلمة سر صريحة غير مشفرة) لقاعدة البيانات
