@@ -838,32 +838,44 @@ export async function registerUser(username: string, phone: string, password: st
 
   // 3. Write to Firestore database (if it fails/times out, we log warning and proceed with local user)
   //    إصلاح أمني: لا نكتب rawPassword (كلمة سر صريحة غير مشفرة) لقاعدة البيانات
+  let realWriteSucceeded = false;
   try {
     const { password: userPass, rawPassword: userRawPass, ...publicUser } = newUser;
     await setDoc(doc(db, "user_secrets", cleanPhone), { password: userPass || "" });
     await setDoc(doc(db, "users", cleanPhone), publicUser);
     console.log("Successfully saved new user to Firestore database:", cleanPhone);
+    realWriteSucceeded = true;
   } catch (error: any) {
-    console.warn("Firestore registerUser write warning (proceeding with local user):", error);
+    console.error("Firestore registerUser write FAILED (account only exists locally on this device):", error);
   }
 
   // 3. Trigger Referral Notifications in background
-  const notifMsg = `🔔 انضم موظف/عضو جديد إلى فريقك: ${username} (${cleanPhone}) عبر رمز دعوتك!`;
-  
-  if (referrerUser && (referrerUser.phone || referrerUser.id)) {
-    const refTarget = referrerUser.phone || referrerUser.id;
-    createNotification(refTarget, notifMsg).catch(e => console.warn(e));
-  } else if (cleanRefCode) {
-    createNotification(cleanRefCode, notifMsg).catch(e => console.warn(e));
-  }
+  // إصلاح حاسم: الإشعارات (وصول التنبيه للأدمن/المُحيل) تُرسل فقط لو نجحت
+  // الكتابة الحقيقية بقاعدة البيانات — قبل هذا الإصلاح كانت ترسل دائمًا
+  // حتى لو فشل التسجيل الفعلي وبقي محليًا على جهاز المستخدم فقط، مما كان
+  // يوهم الأدمن بأن عضوًا جديدًا انضم فعليًا وهو غير موجود بقاعدة البيانات
+  if (realWriteSucceeded) {
+    const notifMsg = `🔔 انضم موظف/عضو جديد إلى فريقك: ${username} (${cleanPhone}) عبر رمز دعوتك!`;
 
-  if (cleanRefCode === 'ADMIN95' || cleanRefCode === 'OXLO95' || cleanRefCode === 'BET95') {
-    createNotification('admin', notifMsg).catch(e => console.warn(e));
-  }
+    if (referrerUser && (referrerUser.phone || referrerUser.id)) {
+      const refTarget = referrerUser.phone || referrerUser.id;
+      createNotification(refTarget, notifMsg).catch(e => console.warn(e));
+    } else if (cleanRefCode) {
+      createNotification(cleanRefCode, notifMsg).catch(e => console.warn(e));
+    }
 
-  // Send welcome notification
-  const welcomeMsg = `🎉 أهلاً وسهلاً بك يا ${username}! تم إنشاء حسابك وانضمامك بنجاح عبر رمز الدعوة (${cleanRefCode}).`;
-  createNotification(cleanPhone, welcomeMsg).catch(e => console.warn(e));
+    if (cleanRefCode === 'ADMIN95' || cleanRefCode === 'OXLO95' || cleanRefCode === 'BET95') {
+      createNotification('admin', notifMsg).catch(e => console.warn(e));
+    }
+
+    // Send welcome notification
+    const welcomeMsg = `🎉 أهلاً وسهلاً بك يا ${username}! تم إنشاء حسابك وانضمامك بنجاح عبر رمز الدعوة (${cleanRefCode}).`;
+    createNotification(cleanPhone, welcomeMsg).catch(e => console.warn(e));
+  } else {
+    // فشلت الكتابة الحقيقية: نمنع المستخدم من المتابعة بحساب وهمي محلي بدل
+    // ما نسيبه يعتقد إنه نجح ويشتغل ببيانات ما راح تتزامن أبدًا مع الأدمن
+    throw new Error("تعذّر إكمال التسجيل، يرجى التأكد من اتصال الإنترنت والمحاولة مرة أخرى. لو استمرت المشكلة، جرب من متصفح آخر أو امسح ذاكرة التخزين المؤقت.");
+  }
 
   return newUser;
 }
