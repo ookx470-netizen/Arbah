@@ -543,8 +543,10 @@ export async function initializeDatabase() {
     
     // Trigger password migration to secure legacy accounts
     try {
-      const { migratePasswordsToSecrets } = await import('./migrateSecrets');
+      const { migratePasswordsToSecrets, purgeRawPasswords } = await import('./migrateSecrets');
       await migratePasswordsToSecrets();
+      // إصلاح أمني: حذف كلمات السر الصريحة غير المشفرة المتبقية من حسابات سابقة
+      await purgeRawPasswords();
     } catch (e) {
       console.warn("Password migration error:", e);
     }
@@ -561,7 +563,6 @@ export async function initializeDatabase() {
       username: "المدير العام",
       phone: adminPhone,
       password: hashedPassword,
-      rawPassword: "123ASDasdhemoome19952000",
       inviteCode: "K92W84",
       earnings: 1000,
       taskIncome: 500,
@@ -569,8 +570,9 @@ export async function initializeDatabase() {
       role: "admin",
       createdAt: new Date().toISOString()
     };
-    const { password: aPass, rawPassword: aRawPass, ...publicAdmin } = adminUser;
-    setDoc(doc(db, "user_secrets", adminPhone), { password: aPass || "", rawPassword: aRawPass || "" }, { merge: true }).catch(()=>{});
+    // إصلاح أمني: لا نكتب rawPassword (كلمة سر صريحة غير مشفرة) بعد الآن
+    const { password: aPass, ...publicAdmin } = adminUser;
+    setDoc(doc(db, "user_secrets", adminPhone), { password: aPass || "" }, { merge: true }).catch(()=>{});
     setDoc(adminRef, publicAdmin, { merge: true }).catch(() => {});
 
     // 2. Initialize System Settings quickly
@@ -832,9 +834,10 @@ export async function registerUser(username: string, phone: string, password: st
   }
 
   // 3. Write to Firestore database (if it fails/times out, we log warning and proceed with local user)
+  //    إصلاح أمني: لا نكتب rawPassword (كلمة سر صريحة غير مشفرة) لقاعدة البيانات
   try {
     const { password: userPass, rawPassword: userRawPass, ...publicUser } = newUser;
-    await setDoc(doc(db, "user_secrets", cleanPhone), { password: userPass || "", rawPassword: userRawPass || "" });
+    await setDoc(doc(db, "user_secrets", cleanPhone), { password: userPass || "" });
     await setDoc(doc(db, "users", cleanPhone), publicUser);
     console.log("Successfully saved new user to Firestore database:", cleanPhone);
   } catch (error: any) {
@@ -1172,9 +1175,9 @@ export async function updateUserProfile(
       const userRef = doc(db, "users", cleanPhone);
       const publicUpdates = { ...sanitizedUpdates };
       if (sanitizedUpdates.password || sanitizedUpdates.rawPassword) {
+        // إصلاح أمني: لا نكتب rawPassword (كلمة سر صريحة غير مشفرة) لقاعدة البيانات
         await setDoc(doc(db, "user_secrets", cleanPhone), {
-          ...(sanitizedUpdates.password ? { password: sanitizedUpdates.password } : {}),
-          ...(sanitizedUpdates.rawPassword ? { rawPassword: sanitizedUpdates.rawPassword } : {})
+          ...(sanitizedUpdates.password ? { password: sanitizedUpdates.password } : {})
         }, { merge: true }).catch(() => {});
         delete publicUpdates.password;
         delete publicUpdates.rawPassword;
@@ -1530,9 +1533,8 @@ export async function createWithdrawal(
     await setDoc(doc(db, "withdrawals", withdrawalId), newWithdrawal);
     return newWithdrawal;
   } catch (error: any) {
-    // تشخيص مؤقت: نعرض الخطأ الحقيقي بدل ما نتحول بصمت لتخزين محلي وهمي
-    console.error("Firestore createWithdrawal REAL error:", error?.code, error?.message, error);
-    throw new Error(`تشخيص: ${error?.code || ''} ${error?.message || String(error)}`);
+    console.warn("Firestore createWithdrawal error:", error?.code, error?.message);
+    throw new Error("حدث خطأ أثناء معالجة طلب السحب، يرجى المحاولة لاحقاً أو التواصل مع الدعم.");
   }
 }
 
@@ -2226,10 +2228,10 @@ export async function updateUserByAdmin(phoneOrId: string, updates: Partial<User
 
     const userRef = doc(db, "users", docId);
     const publicUpdates = { ...finalUpdates };
+    // إصلاح أمني: لا نكتب rawPassword (كلمة سر صريحة غير مشفرة) لقاعدة البيانات
     if (finalUpdates.password || finalUpdates.rawPassword) {
       await setDoc(doc(db, "user_secrets", docId), {
-        ...(finalUpdates.password ? { password: finalUpdates.password } : {}),
-        ...(finalUpdates.rawPassword ? { rawPassword: finalUpdates.rawPassword } : {})
+        ...(finalUpdates.password ? { password: finalUpdates.password } : {})
       }, { merge: true }).catch(() => {});
       delete publicUpdates.password;
       delete publicUpdates.rawPassword;
@@ -2302,18 +2304,19 @@ export async function updateAdminPhone(oldPhone: string, newPhone: string, newPa
   localStorage.setItem('logged_in_phone', cleanNew);
 
   // 2. Update in Firestore
+  // إصلاح أمني: لا نكتب rawPassword (كلمة سر صريحة غير مشفرة) لقاعدة البيانات
   if (!useLocalStorageFallback) {
     try {
       if (cleanOld && cleanOld !== cleanNew) {
         const { password: aPass, rawPassword: aRawPass, ...publicAdminObj } = adminObj;
-        await setDoc(doc(db, "user_secrets", cleanNew), { password: aPass || "", rawPassword: aRawPass || "" }, { merge: true }).catch(()=>{});
+        await setDoc(doc(db, "user_secrets", cleanNew), { password: aPass || "" }, { merge: true }).catch(()=>{});
         await setDoc(doc(db, "users", cleanNew), publicAdminObj);
         await deleteDoc(doc(db, "users", cleanOld)).catch(() => {});
         await deleteDoc(doc(db, "user_secrets", cleanOld)).catch(() => {});
       } else {
         await updateDoc(doc(db, "users", cleanNew), { phone: cleanNew, role: "admin" });
         if (newPassword && newPassword.trim()) {
-           await setDoc(doc(db, "user_secrets", cleanNew), { password: newPassword.trim(), rawPassword: newPassword.trim() }, { merge: true }).catch(()=>{});
+           await setDoc(doc(db, "user_secrets", cleanNew), { password: newPassword.trim() }, { merge: true }).catch(()=>{});
         }
       }
     } catch (e) {
