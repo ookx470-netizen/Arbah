@@ -1530,9 +1530,9 @@ export async function createWithdrawal(
     await setDoc(doc(db, "withdrawals", withdrawalId), newWithdrawal);
     return newWithdrawal;
   } catch (error: any) {
-    console.warn("Firestore createWithdrawal error, falling back:", error);
-    setFallbackMode(true);
-    return createWithdrawal(userId, username, phone, amount, walletAddress, selectedCurrency);
+    // تشخيص مؤقت: نعرض الخطأ الحقيقي بدل ما نتحول بصمت لتخزين محلي وهمي
+    console.error("Firestore createWithdrawal REAL error:", error?.code, error?.message, error);
+    throw new Error(`تشخيص: ${error?.code || ''} ${error?.message || String(error)}`);
   }
 }
 
