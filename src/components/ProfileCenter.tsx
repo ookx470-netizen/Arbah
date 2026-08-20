@@ -724,11 +724,11 @@ export default function ProfileCenter({
                   <div className="flex items-center gap-2 mb-0.5">
                     <h2 className="text-sm sm:text-base font-black tracking-tight truncate" dir="ltr">{getMaskedPhone()}</h2>
                     <div className={`px-2 py-0.5 rounded-full text-[8px] font-black border shrink-0 ${
-                      calculateRemainingEffectiveDays(currentUser) > 0 
+                      calculateRemainingEffectiveDays(currentUser, settings.holidayDays ?? [5]) > 0 
                         ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' 
                         : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
                     }`}>
-                      {calculateRemainingEffectiveDays(currentUser) > 0 ? 'نشط' : 'غير نشط'}
+                      {calculateRemainingEffectiveDays(currentUser, settings.holidayDays ?? [5]) > 0 ? 'نشط' : 'غير نشط'}
                     </div>
                   </div>
                   <div className="flex items-center gap-1.5 flex-wrap">
@@ -810,7 +810,7 @@ export default function ProfileCenter({
                   <span className="text-[10px] font-bold text-slate-400">حالة الحساب</span>
                 </div>
                 <span className="text-[10px] font-black text-slate-900 bg-slate-50 px-4 py-1.5 rounded-full">
-                  {calculateRemainingEffectiveDays(currentUser)} أيام من النشاط
+                  {calculateRemainingEffectiveDays(currentUser, settings.holidayDays ?? [5])} أيام من النشاط
                 </span>
               </div>
             </div>

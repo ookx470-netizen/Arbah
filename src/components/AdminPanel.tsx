@@ -521,7 +521,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
       setEditVipTierInput(selectedUserForEdit.vipTier || 'الباقة العادية');
       setEditEarnings(selectedUserForEdit.earnings || 0);
       setEditTaskIncome(selectedUserForEdit.taskIncome || 0);
-      setEditEffectiveDays(calculateRemainingEffectiveDays(selectedUserForEdit));
+      setEditEffectiveDays(calculateRemainingEffectiveDays(selectedUserForEdit, settings.holidayDays ?? [5]));
       setEditWithdrawalBlocked(!!selectedUserForEdit.isWithdrawalBlocked);
       setEditBypassHoliday(!!selectedUserForEdit.bypassHoliday);
     }
@@ -806,7 +806,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
     setEditingUserId(u.id);
     setEditEarnings(u.earnings);
     setEditTaskIncome(u.taskIncome);
-    setEditEffectiveDays(calculateRemainingEffectiveDays(u));
+    setEditEffectiveDays(calculateRemainingEffectiveDays(u, settings.holidayDays ?? [5]));
     setShowDeleteConfirm(false);
   };
 
@@ -1963,7 +1963,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                                   بدون باقة
                                 </span>
                               )}
-                              {calculateRemainingEffectiveDays(u) > 0 ? (
+                              {calculateRemainingEffectiveDays(u, settings.holidayDays ?? [5]) > 0 ? (
                                 <span className="bg-emerald-50 text-emerald-700 border border-emerald-150 px-1.5 py-0.5 rounded text-[8px] font-black inline-block">
                                   ● حساب فعال
                                 </span>
@@ -2021,7 +2021,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                                 className="w-16 p-1 border rounded text-center font-bold text-slate-800"
                               />
                             ) : (
-                              <span className="text-slate-600">{calculateRemainingEffectiveDays(u)} يوم</span>
+                              <span className="text-slate-600">{calculateRemainingEffectiveDays(u, settings.holidayDays ?? [5])} يوم</span>
                             )}
                           </td>
                           <td className="p-3">
@@ -2057,7 +2057,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                                     setEditVipTierInput(u.vipTier || 'الباقة العادية');
                                     setEditEarnings(u.earnings);
                                     setEditTaskIncome(u.taskIncome);
-                                    setEditEffectiveDays(calculateRemainingEffectiveDays(u));
+                                    setEditEffectiveDays(calculateRemainingEffectiveDays(u, settings.holidayDays ?? [5]));
                                     setEditWithdrawalBlocked(!!u.isWithdrawalBlocked);
                                     setEditIsBanned(!!u.isBanned);
                                     setEditBanReason(u.banReason || '');
@@ -2412,7 +2412,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                                       setEditVipTierInput(u.vipTier || 'الباقة العادية');
                                       setEditEarnings(u.earnings);
                                       setEditTaskIncome(u.taskIncome);
-                                      setEditEffectiveDays(calculateRemainingEffectiveDays(u));
+                                      setEditEffectiveDays(calculateRemainingEffectiveDays(u, settings.holidayDays ?? [5]));
                                       setEditWithdrawalBlocked(!!u.isWithdrawalBlocked);
                                       setEditIsBanned(!!u.isBanned);
                                       setEditBanReason(u.banReason || '');
