@@ -649,10 +649,9 @@ export async function getUserByPhone(phone: string): Promise<User | null> {
       return data;
     }
 
-    // If Firestore doesn't find it but it exists in local storage, return local
-    if (localUsers[cleanPhone]) {
-      return localUsers[cleanPhone];
-    }
+    // إصلاح حاسم: إذا نجح الاستعلام الحقيقي بقاعدة البيانات وأكد عدم الوجود،
+    // نثق بهذا التأكيد تمامًا — لا نرجع لبيانات كاش محلية قديمة بالجهاز قد
+    // تكون من استخدام سابق (عضو قديم)، لأنها كانت تُغلّب على النتيجة الحقيقية
     return null;
   } catch (error) {
     console.warn("Firestore getUserByPhone error, using local cache fallback:", error);
@@ -681,10 +680,10 @@ export async function getUserByEmail(email: string): Promise<User | null> {
       return querySnapshot.docs[0].data() as User;
     }
 
-    const foundLocal = Object.values(localUsers).find(
-      u => u.email && u.email.trim().toLowerCase() === cleanEmail
-    );
-    return foundLocal || null;
+    // إصلاح حاسم: نجح الاستعلام الحقيقي وأكد عدم وجود هذا البريد — نثق بهذا
+    // التأكيد، ولا نرجع لكاش محلي قديم بالجهاز (عضو قديم استخدم نفس الجهاز/
+    // المتصفح سابقًا) كان يُغلَّب على النتيجة الحقيقية ويسبب خطأ "مسجل مسبقًا" وهمي
+    return null;
   } catch (error) {
     console.warn("Firestore getUserByEmail error, using local cache fallback:", error);
     const foundLocal = Object.values(localUsers).find(
