@@ -1273,7 +1273,7 @@ export default function ProfileCenter({
 
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-slate-500 px-1">عنوان محفظة السحب (المرتبطة بحسابك)</label>
-                  <div className="w-full h-14 bg-slate-100 border border-slate-200 rounded-2xl px-5 flex items-center text-[11px] font-black text-slate-500 font-mono text-left" dir="ltr">
+                  <div className="w-full bg-slate-100 border border-slate-200 rounded-2xl px-5 py-4 flex items-center text-[10px] font-black text-slate-500 font-mono text-left break-all leading-relaxed" dir="ltr">
                     {currentUser.walletAddress || "لم تقم بربط محفظة بعد — اذهب لصفحة (ربط المحفظة) أولاً"}
                   </div>
                   <p className="text-[9px] font-bold text-slate-400 px-1">
