@@ -985,7 +985,7 @@ export async function updateUserStats(phone: string, updates: Partial<Pick<User,
     await updateDoc(userRef, safeUpdates);
   } catch (error) {
     console.warn("Firestore updateUserStats error, falling back:", error);
-    setFallbackMode(true);
+    checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
   }
 }
 
@@ -1088,7 +1088,7 @@ export async function updateUserWallet(phone: string, walletAddress: string) {
     await updateDoc(userRef, { walletAddress });
   } catch (error) {
     console.warn("Firestore updateUserWallet error, falling back:", error);
-    setFallbackMode(true);
+    checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
     const users = getLocalUsers();
     if (users[phone]) {
       users[phone].walletAddress = walletAddress;
@@ -1129,7 +1129,7 @@ export async function updateUserPassword(phone: string, oldPassword: string, new
       await updateDoc(userRef, { password: newPassword });
     } catch (error) {
       console.warn("Firestore updateUserPassword error, saved locally:", error);
-      setFallbackMode(true);
+      checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
     }
   }
 
@@ -1191,7 +1191,7 @@ export async function updateUserProfile(
       }
     } catch (error) {
       console.warn("Firestore updateUserProfile error, saved locally:", error);
-      setFallbackMode(true);
+      checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
     }
   }
 
@@ -1265,7 +1265,7 @@ export async function getSystemSettings(): Promise<SystemSettings> {
     return def;
   } catch (error) {
     console.warn("Firestore getSystemSettings error, falling back:", error);
-    setFallbackMode(true);
+    checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
     return getLocalSettings();
   }
 }
@@ -1281,7 +1281,7 @@ export async function updateSystemSettings(newSettings: SystemSettings) {
     await setDoc(settingsRef, newSettings);
   } catch (error) {
     console.warn("Firestore updateSystemSettings error, falling back:", error);
-    setFallbackMode(true);
+    checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
     saveLocalSettings(newSettings);
   }
 }
@@ -1326,9 +1326,15 @@ export async function createDeposit(
   try {
     await setDoc(doc(db, "deposits", depositId), newDeposit);
     return newDeposit;
-  } catch (error) {
-    console.warn("Firestore createDeposit error, falling back:", error);
-    setFallbackMode(true);
+  } catch (error: any) {
+    console.warn("Firestore createDeposit error:", error);
+    checkForQuotaExceeded(error);
+    // إصلاح: خطأ رفض الصلاحيات (permission-denied) لازم يفشل بوضوح للمستخدم،
+    // مو يتحول بصمت لتخزين محلي وهمي يعطي "نجاح" بدون ما يوصل فعليًا للأدمن
+    const errMsg = error?.message || String(error);
+    if (errMsg.includes('permission') || error?.code === 'permission-denied') {
+      throw new Error("تعذّر تسجيل طلب الإيداع. يرجى إعادة تسجيل الدخول والمحاولة مرة أخرى، أو التواصل مع الدعم الفني.");
+    }
     const deposits = getLocalDeposits();
     deposits[depositId] = newDeposit;
     saveLocalDeposits(deposits);
@@ -1356,7 +1362,7 @@ export async function getUserDeposits(phone: string): Promise<Deposit[]> {
     return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   } catch (error) {
     console.warn("Firestore getUserDeposits error, falling back:", error);
-    setFallbackMode(true);
+    checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
     const deposits = Object.values(getLocalDeposits()).filter(d => d.phone === phone);
     return deposits.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
@@ -1380,7 +1386,7 @@ export async function getAllDeposits(): Promise<Deposit[]> {
     return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   } catch (error) {
     console.warn("Firestore getAllDeposits error, falling back:", error);
-    setFallbackMode(true);
+    checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
     return Object.values(getLocalDeposits()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
 }
@@ -1421,7 +1427,7 @@ export async function updateDepositStatus(depositId: string, status: 'approved' 
     }
   } catch (error) {
     console.warn("Firestore updateDepositStatus error, falling back:", error);
-    setFallbackMode(true);
+    checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
     // apply local
     const deposits = getLocalDeposits();
     if (deposits[depositId]) {
@@ -1562,7 +1568,7 @@ export async function getUserWithdrawals(phone: string): Promise<Withdrawal[]> {
     return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   } catch (error) {
     console.warn("Firestore getUserWithdrawals error, falling back:", error);
-    setFallbackMode(true);
+    checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
     const withdrawals = Object.values(getLocalWithdrawals()).filter(w => w.phone === phone);
     return withdrawals.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
@@ -1586,7 +1592,7 @@ export async function getAllWithdrawals(): Promise<Withdrawal[]> {
     return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   } catch (error) {
     console.warn("Firestore getAllWithdrawals error, falling back:", error);
-    setFallbackMode(true);
+    checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
     return Object.values(getLocalWithdrawals()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
 }
@@ -1625,7 +1631,7 @@ export async function updateWithdrawalStatus(withdrawalId: string, status: 'appr
     }
   } catch (error) {
     console.warn("Firestore updateWithdrawalStatus error, falling back:", error);
-    setFallbackMode(true);
+    checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
     // apply local
     const withdrawals = getLocalWithdrawals();
     if (withdrawals[withdrawalId]) {
@@ -2147,7 +2153,7 @@ export async function deleteUserByAdmin(phone: string): Promise<void> {
     console.log("Successfully completed final deletion of user data from Firestore:", cleanPhone);
   } catch (error) {
     console.warn("Firestore deleteUserByAdmin error, falling back:", error);
-    setFallbackMode(true);
+    checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
   }
 }
 
@@ -2244,7 +2250,7 @@ export async function updateUserByAdmin(phoneOrId: string, updates: Partial<User
     await setDoc(userRef, publicUpdates, { merge: true });
   } catch (error) {
     console.warn("Firestore updateUserByAdmin error:", error);
-    setFallbackMode(true);
+    checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
     throw error;
   }
 }
@@ -2356,7 +2362,7 @@ export async function updateUserLocation(phone: string, locationData: {
     await updateDoc(userRef, locationData);
   } catch (error) {
     console.warn("Firestore updateUserLocation error, falling back:", error);
-    setFallbackMode(true);
+    checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
     const users = getLocalUsers();
     if (users[phone]) {
       users[phone] = {
@@ -2413,7 +2419,7 @@ export async function addManualWithdrawalByAdmin(
     return newWithdrawal;
   } catch (error) {
     console.warn("Firestore addManualWithdrawalByAdmin error, falling back:", error);
-    setFallbackMode(true);
+    checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
     const withdrawals = getLocalWithdrawals();
     withdrawals[withdrawalId] = newWithdrawal;
     saveLocalWithdrawals(withdrawals);
@@ -2485,7 +2491,7 @@ export async function addManualDepositByAdmin(
     return newDeposit;
   } catch (error) {
     console.warn("Firestore addManualDepositByAdmin error, falling back:", error);
-    setFallbackMode(true);
+    checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
     const deposits = getLocalDeposits();
     deposits[depositId] = newDeposit;
     saveLocalDeposits(deposits);
@@ -2514,7 +2520,7 @@ export async function updateDepositByAdmin(
     await updateDoc(depRef, updates);
   } catch (error) {
     console.warn("Firestore updateDepositByAdmin error, falling back:", error);
-    setFallbackMode(true);
+    checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
     const deposits = getLocalDeposits();
     if (deposits[depositId]) {
       deposits[depositId] = {
@@ -2595,7 +2601,7 @@ export async function updateWithdrawalByAdmin(
     await updateDoc(withRef, updates);
   } catch (error) {
     console.warn("Firestore updateWithdrawalByAdmin error, falling back:", error);
-    setFallbackMode(true);
+    checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
     const withdrawals = getLocalWithdrawals();
     if (withdrawals[withdrawalId]) {
       withdrawals[withdrawalId] = {
