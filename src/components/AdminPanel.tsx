@@ -457,6 +457,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
   const [editUsernameInput, setEditUsernameInput] = useState<string>('');
   const [editPhoneInput, setEditPhoneInput] = useState<string>('');
   const [editPasswordInput, setEditPasswordInput] = useState<string>('');
+  const [editWalletAddressInput, setEditWalletAddressInput] = useState<string>('');
   const [editVipTierInput, setEditVipTierInput] = useState<string>('');
   const [editWithdrawalBlocked, setEditWithdrawalBlocked] = useState<boolean>(false);
   const [editBypassHoliday, setEditBypassHoliday] = useState<boolean>(false);
@@ -518,6 +519,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
       setEditUsernameInput(selectedUserForEdit.username || '');
       setEditPhoneInput(selectedUserForEdit.phone || '');
       setEditPasswordInput(selectedUserForEdit.rawPassword || selectedUserForEdit.password || '');
+      setEditWalletAddressInput(selectedUserForEdit.walletAddress || '');
       setEditVipTierInput(selectedUserForEdit.vipTier || 'الباقة العادية');
       setEditEarnings(selectedUserForEdit.earnings || 0);
       setEditTaskIncome(selectedUserForEdit.taskIncome || 0);
@@ -841,6 +843,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
       await updateUserByAdmin(targetId, {
         username: editUsernameInput.trim(),
         password: editPasswordInput.trim(),
+        walletAddress: editWalletAddressInput.trim(),
         vipTier: updatedPlan,
         earnings: Number(editEarnings),
         taskIncome: Number(editTaskIncome),
@@ -859,6 +862,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
             username: editUsernameInput.trim(),
             password: editPasswordInput.trim() || u.password,
             rawPassword: editPasswordInput.trim() || u.rawPassword,
+            walletAddress: editWalletAddressInput.trim() || u.walletAddress,
             vipTier: updatedPlan,
             earnings: Number(editEarnings),
             taskIncome: Number(editTaskIncome),
@@ -4470,6 +4474,20 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold font-mono text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-white"
                   dir="ltr"
                 />
+              </div>
+
+              {/* Wallet Address Input — تعديل حصري للأدمن (العضو لا يقدر يغيّره بنفسه) */}
+              <div>
+                <label className="block mb-1 font-bold text-slate-600">عنوان محفظة السحب (Polygon):</label>
+                <input
+                  type="text"
+                  value={editWalletAddressInput}
+                  onChange={(e) => setEditWalletAddressInput(e.target.value)}
+                  placeholder="0x..."
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold font-mono text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-white"
+                  dir="ltr"
+                />
+                <p className="text-[10px] text-amber-600 font-bold mt-1">هذا الحقل مقفول على العضو نفسه — التعديل هنا فقط.</p>
               </div>
 
               {/* VIP Tier Selector */}

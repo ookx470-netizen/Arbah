@@ -401,6 +401,12 @@ export default function ProfileCenter({
   };
 
   const handleBindWallet = async () => {
+    // إصلاح: بعد أول ربط لعنوان المحفظة، يُقفل التعديل على العضو نهائيًا —
+    // فقط الأدمن يقدر يغيّره بعدها من لوحة الإدارة
+    if (currentUser.walletAddress) {
+      showToast("عنوان محفظتك مربوط بالفعل ولا يمكن تغييره. للتعديل تواصل مع الدعم الفني.");
+      return;
+    }
     if (!bindWalletInput.trim()) {
       showToast("الرجاء إدخال عنوان محفظة صالح");
       return;
@@ -409,7 +415,7 @@ export default function ProfileCenter({
     try {
       await updateUserWallet(currentUser.phone, bindWalletInput.trim());
       onUpdateUser({ ...currentUser, walletAddress: bindWalletInput.trim() });
-      showToast("تم ربط المحفظة بنجاح!");
+      showToast("تم ربط المحفظة بنجاح! هذا العنوان أصبح ثابتًا ولا يمكن تغييره إلا من الإدارة.");
       setActiveSubView('menu');
     } catch (err) {
       showToast("فشل ربط المحفظة");
@@ -486,6 +492,22 @@ export default function ProfileCenter({
       return;
     }
 
+    // إصلاح: يسمح للعضو بطلب سحب واحد فقط في نفس الوقت — لا يقدر يقدّم طلب
+    // سحب جديد إلا بعد ما تتم الموافقة (أو الرفض) على طلبه السابق من الإدارة
+    setLoading(true);
+    try {
+      const existingWithdrawals = await getUserWithdrawals(currentUser.phone);
+      const hasPending = existingWithdrawals.some(w => w.status === 'pending');
+      if (hasPending) {
+        setLoading(false);
+        showToast("⚠️ لديك طلب سحب قيد المعالجة بالفعل. يرجى انتظار موافقة الإدارة قبل تقديم طلب جديد.");
+        return;
+      }
+    } catch (err) {
+      console.warn("Error checking existing withdrawals:", err);
+    }
+    setLoading(false);
+
     // Withdrawal lock check
     const todayDay = new Date().getDay();
     if (settings.withdrawLockActive || (settings.withdrawLockDays && settings.withdrawLockDays.includes(todayDay))) {
@@ -517,17 +539,13 @@ export default function ProfileCenter({
       return;
     }
 
-    const finalWallet = withdrawWallet.trim() || currentUser.walletAddress;
+    const finalWallet = currentUser.walletAddress;
     if (!finalWallet) {
-      showToast("الرجاء تحديد عنوان محفظة السحب الخاصة بك");
+      showToast("يجب ربط عنوان محفظة Polygon أولاً من صفحة (ربط المحفظة) قبل تقديم أي طلب سحب");
       return;
     }
 
-    const withdrawCurrency = selectedWithdrawNetwork === 'BEP20'
-      ? 'USDT (BEP20)'
-      : selectedWithdrawNetwork === 'TRC20'
-      ? 'USDT (TRC20)'
-      : 'USDT (Polygon)';
+    const withdrawCurrency = 'USDT (Polygon)'; // إصلاح: السحب أصبح حصريًا عبر شبكة Polygon فقط
 
     setLoading(true);
     try {
@@ -1223,22 +1241,9 @@ export default function ProfileCenter({
               
               <div className="space-y-4">
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-500 px-1">اختر شبكة السحب</label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {['BEP20', 'TRC20', 'POLYGON'].map((net) => (
-                      <button
-                        key={net}
-                        type="button"
-                        onClick={() => setSelectedWithdrawNetwork(net as any)}
-                        className={`py-3 rounded-xl border text-[10px] font-black transition-all ${
-                          selectedWithdrawNetwork === net
-                            ? 'bg-slate-900 border-slate-900 text-white shadow-md'
-                            : 'bg-slate-50 border-slate-100 text-slate-400 hover:bg-slate-100'
-                        }`}
-                      >
-                        {net}
-                      </button>
-                    ))}
+                  <label className="text-[10px] font-black text-slate-500 px-1">شبكة السحب</label>
+                  <div className="py-3 rounded-xl border bg-slate-900 border-slate-900 text-white text-[10px] font-black text-center">
+                    POLYGON (الشبكة الوحيدة المعتمدة للسحب)
                   </div>
                 </div>
 
@@ -1267,15 +1272,13 @@ export default function ProfileCenter({
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-500 px-1">عنوان محفظة {selectedWithdrawNetwork}</label>
-                  <input
-                    type="text"
-                    value={withdrawWallet}
-                    onChange={(e) => setWithdrawWallet(e.target.value)}
-                    placeholder={currentUser.walletAddress || "أدخل العنوان هنا"}
-                    className="w-full h-14 bg-slate-50 border border-slate-100 rounded-2xl px-5 text-[11px] font-black text-slate-900 font-mono focus:outline-none focus:ring-2 focus:ring-blue-600/10 focus:bg-white transition-all text-left"
-                    dir="ltr"
-                  />
+                  <label className="text-[10px] font-black text-slate-500 px-1">عنوان محفظة السحب (المرتبطة بحسابك)</label>
+                  <div className="w-full h-14 bg-slate-100 border border-slate-200 rounded-2xl px-5 flex items-center text-[11px] font-black text-slate-500 font-mono text-left" dir="ltr">
+                    {currentUser.walletAddress || "لم تقم بربط محفظة بعد — اذهب لصفحة (ربط المحفظة) أولاً"}
+                  </div>
+                  <p className="text-[9px] font-bold text-slate-400 px-1">
+                    🔒 عنوان السحب مرتبط بحسابك ولا يمكن تغييره هنا — للتعديل تواصل مع الإدارة.
+                  </p>
                 </div>
               </div>
 
@@ -1617,18 +1620,22 @@ export default function ProfileCenter({
                   value={bindWalletInput}
                   onChange={(e) => setBindWalletInput(e.target.value)}
                   placeholder="0x..."
-                  className="w-full h-14 bg-slate-50 border border-slate-100 rounded-2xl px-5 text-[11px] font-black text-slate-900 font-mono focus:outline-none focus:ring-2 focus:ring-blue-600/10 focus:bg-white transition-all text-left"
+                  disabled={!!currentUser.walletAddress}
+                  className="w-full h-14 bg-slate-50 border border-slate-100 rounded-2xl px-5 text-[11px] font-black text-slate-900 font-mono focus:outline-none focus:ring-2 focus:ring-blue-600/10 focus:bg-white transition-all text-left disabled:bg-slate-100 disabled:text-slate-400"
                   dir="ltr"
                 />
+                {currentUser.walletAddress && (
+                  <p className="text-[9px] font-bold text-amber-600 px-1">🔒 عنوان محفظتك ثابت ولا يمكن تعديله ذاتيًا — تواصل مع الدعم لتغييره.</p>
+                )}
               </div>
 
               <button
                 onClick={handleBindWallet}
-                disabled={loading}
+                disabled={loading || !!currentUser.walletAddress}
                 className="w-full h-14 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl font-black text-[11px] shadow-lg transition-all flex items-center justify-center gap-3 active:scale-95 disabled:opacity-50"
               >
                 {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <BadgeCheck className="w-4 h-4" />}
-                <span>حفظ العنوان</span>
+                <span>{currentUser.walletAddress ? 'المحفظة مربوطة بالفعل' : 'حفظ العنوان'}</span>
               </button>
             </div>
 
