@@ -919,6 +919,11 @@ export default function TaskView() {
 
             // Only update if there's an actual change to prevent unnecessary re-renders
             if (JSON.stringify(updated) !== JSON.stringify(currentUser)) {
+              // تشخيص مؤقت: لو الرصيد القادم من قاعدة البيانات أقل من المعروض حاليًا،
+              // هذا يثبت إن آخر كتابة (صرف أرباح مهمة) ما وصلت فعليًا لقاعدة البيانات
+              if (typeof updated.earnings === 'number' && typeof currentUser.earnings === 'number' && updated.earnings < currentUser.earnings) {
+                alert(`⚠️ تشخيص: الرصيد المعروض كان ${currentUser.earnings}، لكن قاعدة البيانات الحقيقية فيها ${updated.earnings} فقط. آخر عملية صرف أرباح ما وصلت فعليًا للسيرفر.`);
+              }
               setCurrentUser(updated);
             }
           }
@@ -935,19 +940,8 @@ export default function TaskView() {
   // Sync tasks state and storage when the currentUser changes (such as on login, registration, or logout)
   useEffect(() => {
     const fetchUserTasks = async () => {
+      setTasks([]); // Clear state immediately on user change to prevent task leaks from prior accounts
       if (currentUser?.phone) {
-        // تحميل فوري من التخزين المحلي لمنع وميض أو فقدان الحالة أثناء التحميل
-        try {
-          const key = `micro_tasks_data_${currentUser.phone.trim()}`;
-          const cached = localStorage.getItem(key);
-          if (cached) {
-            const parsed = JSON.parse(cached);
-            if (Array.isArray(parsed) && parsed.length > 0) {
-              setTasks(parsed);
-            }
-          }
-        } catch (e) {}
-
         try {
           const { getUserTasks, saveUserTasks: persistTasks } = await import('./firebaseService');
           const fetched = await getUserTasks(currentUser.phone);
@@ -961,7 +955,7 @@ export default function TaskView() {
           const todayReal = getRiyadhMidnightDateStr();
           let expiredCount = 0;
           clean = clean.map((t: Task) => {
-            if (t.status === 'in_progress' && t.claimDate && t.claimDate !== todayReal) {
+            if (t.status === 'in_progress' && t.claimDate !== todayReal) {
               expiredCount++;
               return { ...t, status: 'withdrawn' as const };
             }
@@ -1494,7 +1488,9 @@ export default function TaskView() {
         } else if (msg.includes('USER_NOT_FOUND')) {
           triggerNotification("⚠️ تعذّر العثور على حسابك بقاعدة البيانات. يرجى تسجيل الخروج والدخول من جديد.");
         } else {
-          triggerNotification("🔴 تعذّر تسجيل المهمة وصرف أرباحها. يرجى التأكد من اتصالك بالإنترنت والمحاولة مرة أخرى.");
+          // تشخيص مؤقت: نعرض نص الخطأ التقني الحقيقي مباشرة بالتوست
+          // (بدل رسالة عامة) عشان يقدر يصوّره بدون فتح أدوات المطور
+          triggerNotification(`🔴 خطأ تقني: ${msg}`);
         }
         setIsSubmittingTask(false);
         return;
