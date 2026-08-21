@@ -4,7 +4,7 @@ import { User } from '../types';
 import { ShieldCheck, Phone, Lock, User as UserIcon, Award, RefreshCw, CheckCircle2, AlertTriangle, XCircle, Mail, KeyRound, Send } from 'lucide-react';
 import { COUNTRY_LIST, CountryInfo } from '../utils/phoneValidation';
 import { isAllowedTrustedEmail } from '../utils/disposableEmailBlocklist';
-import oxloLogoImg from '../assets/images/oxlo_clean_logo_1786416406822.jpg';
+import oxloLogoImg from '../assets/images/oxlo_logo_1786416051044.jpg';
 
 interface AuthPageProps {
   onLoginSuccess: (user: User) => void;
