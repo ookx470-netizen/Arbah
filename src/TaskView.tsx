@@ -78,7 +78,9 @@ import {
   setFallbackMode,
   getLastFirestoreError,
   getReferralLeaderboard,
-  LeaderboardEntry
+  LeaderboardEntry,
+  getActiveVideoPool,
+  VideoPoolItem
 } from './firebaseService';
 import { User, SystemSettings, VipPlan, Task } from './types';
 import { compressBase64Image, formatHourToArabic, isHourInShift } from './utils';
@@ -157,200 +159,28 @@ export const sanitizeTaskReviewLink = (link: string | undefined | null, category
   return link;
 };
 
-const dailyFamousVideosPool = [
-  // YouTube Celebrity Videos (100% Verified Active URLs)
-  {
-    id: 'yt-1',
-    creator: 'AboFlah (أبو فلة)',
-    country: '🇰🇼',
-    category: 'youtube',
-    videos: [
-      { title: 'فيديو حملة دبي الإنسانية وتحدي غرف الزجاج الشهير', url: 'https://www.youtube.com/watch?v=8mG5Q44f7dQ' },
-      { title: 'احتفال الوصول إلى 10 ملايين مشترك والتبرعات', url: 'https://www.youtube.com/watch?v=8mG5Q44f7dQ' },
-      { title: 'تحدي احتفال الوصول لـ 20 مليون مشترك وتوزيع الهدايا', url: 'https://www.youtube.com/watch?v=kJQP7kiw5Fk' },
-      { title: 'فيديو احتفال الوصول لـ 28 مليون مشترك والتحدي الأكبر', url: 'https://www.youtube.com/watch?v=erLbbextvlY' }
-    ]
-  },
-  {
-    id: 'yt-2',
-    creator: 'MrBeast (مستر بيست)',
-    country: '🇺🇸',
-    category: 'youtube',
-    videos: [
-      { title: 'تحدي 456 لاعب حقيقي لعشرة ملايين دولار في لعبة الحبار', url: 'https://www.youtube.com/watch?v=0e3GPea1Tyg' },
-      { title: 'تحدي البقاء 7 أيام في جزيرة مهجورة وسط المحيط', url: 'https://www.youtube.com/watch?v=erLbbextvlY' },
-      { title: 'بنيت 100 بئر ماء ومدرسة في إفريقيا وقدمتها مجاناً', url: 'https://www.youtube.com/watch?v=kJQP7kiw5Fk' },
-      { title: 'آخر شخص يغادر الدائرة يفوز بـ 500,000 دولار', url: 'https://www.youtube.com/watch?v=tzD9OxAHtzU' }
-    ]
-  },
-  {
-    id: 'yt-3',
-    creator: 'Joe Hattab (جو حطاب)',
-    country: '🇯🇴',
-    category: 'youtube',
-    videos: [
-      { title: 'رحلة أسرار اليابان العجيبة وغرائب التكنولوجيا الحديثة', url: 'https://www.youtube.com/watch?v=48_k-9K4W3M' },
-      { title: 'وثائقي أسرار قبائل الأمازون وأقدم الحضارات النادرة', url: 'https://www.youtube.com/watch?v=G3Y11k3tZno' },
-      { title: 'زيارة أصغر دولة وأغنى مدينة ومعالم العالم العجيبة', url: 'https://www.youtube.com/watch?v=XqZsoesa55w' }
-    ]
-  },
-  {
-    id: 'yt-4',
-    creator: 'BanderitaX (بندريتا)',
-    country: '🇸🇦',
-    category: 'youtube',
-    videos: [
-      { title: 'تحدي عدم الضحك الهستيري والمواقف الكوميدية المضحكة', url: 'https://www.youtube.com/watch?v=BddP6PYo2gs' },
-      { title: 'فيديو احتفال بندريتا بالوصول لـ 10 ملايين مشترك', url: 'https://www.youtube.com/watch?v=8mG5Q44f7dQ' },
-      { title: 'أفضل لحظات ومواقف بندريتا وألعاب الرعب الكوميدية', url: 'https://www.youtube.com/watch?v=48_k-9K4W3M' }
-    ]
-  },
-  {
-    id: 'yt-5',
-    creator: 'El Da7ee7 (الدحيح)',
-    country: '🇪🇬',
-    category: 'youtube',
-    videos: [
-      { title: 'حلقة أسرار الذكاء الاصطناعي ومستقبل البشرية القادم', url: 'https://www.youtube.com/watch?v=fLexgOxsZu0' },
-      { title: 'حلقة الاقتصاد العالمي وكيف نشأت الأموال والبنوك', url: 'https://www.youtube.com/watch?v=CevxZvSJLk8' },
-      { title: 'حلقة لغز الوقت والزمن في الفيزياء والكون العجيب', url: 'https://www.youtube.com/watch?v=XqZsoesa55w' }
-    ]
-  },
-  {
-    id: 'yt-6',
-    creator: 'Droos Online (دروس أونلاين)',
-    country: '🇪🇬',
-    category: 'youtube',
-    videos: [
-      { title: 'كيف تنظم وقتك وتضاعف إنجازك اليومي 3 أضعاف', url: 'https://www.youtube.com/watch?v=CevxZvSJLk8' },
-      { title: 'أسرار التعلم السريع وإتقان المهارات في وقت قياسي', url: 'https://www.youtube.com/watch?v=fLexgOxsZu0' },
-      { title: 'أفضل طريقة للتغلب على التسويف والمماطلة نهائياً', url: 'https://www.youtube.com/watch?v=CevxZvSJLk8' }
-    ]
-  },
-  {
-    id: 'yt-7',
-    creator: 'Omar Farooq (عمر فاروق)',
-    country: '🇧🇭',
-    category: 'youtube',
-    videos: [
-      { title: 'عمر يجرب 24 ساعة في تجربة انعدام الجاذبية والفضائيين', url: 'https://www.youtube.com/watch?v=OPf0YbXqDm0' },
-      { title: 'عمر يجرب قيادة طائرة ركاب حقيقية والتحليق بالسماء', url: 'https://www.youtube.com/watch?v=G3Y11k3tZno' }
-    ]
-  },
+// ============================================================
+// نظام تدوير روابط المهام — يعتمد على مجموعة روابط حقيقية تُدار من لوحة الأدمن
+// (Firestore: collection "videoPool")، بدل القائمة الثابتة القديمة بالكود.
+// خوارزمية عدم التكرار: فهرس تراكمي يزيد كل يوم بعدد المهام المستهلكة،
+// فلا يتكرر أي رابط إلا بعد أن يظهر كل رابط بالمجموعة مرة واحدة على الأقل
+// (بافتراض pool.length رابط ومعدل استهلاك limit/يوم، دورة كاملة كل
+// pool.length/limit يوم تقريبًا).
+// ============================================================
 
-  // Facebook Celebrity Videos & Official Watch Links (100% Direct Video URLs)
-  {
-    id: 'fb-1',
-    creator: 'Mohamed Salah (محمد صلاح)',
-    country: '🇪🇬',
-    category: 'facebook',
-    videos: [
-      { title: 'فيديو أفضل أهداف محمد صلاح الاستثنائية مع ليفربول', url: 'https://www.facebook.com/watch/?v=10153231379946729' },
-      { title: 'فيديو كواليس تدريبات صلاح البدنية وتحضيرات المباريات', url: 'https://www.facebook.com/watch/?v=10154388481471375' }
-    ]
-  },
-  {
-    id: 'fb-2',
-    creator: 'Cristiano Ronaldo (رونالدو)',
-    country: '🇵🇹',
-    category: 'facebook',
-    videos: [
-      { title: 'ريل احتفال رونالدو الشهير SIUU وأجمل أهدافه الخيالية', url: 'https://www.facebook.com/watch/?v=10153231379946729' },
-      { title: 'ملخص مهارات وتدريبات رونالدو الاستثنائية مع النصر', url: 'https://www.facebook.com/watch/?v=10154388481471375' }
-    ]
-  },
-  {
-    id: 'fb-3',
-    creator: 'Leo Messi (ليونيل ميسي)',
-    country: '🇦🇷',
-    category: 'facebook',
-    videos: [
-      { title: 'فيديو ملخص سحر ميسي ولحظات التتويج التاريخية', url: 'https://www.facebook.com/watch/?v=10152914104271032' },
-      { title: 'أجمل مراوغات وأهداف ميسي الخيالية والأكثر مشاهدة', url: 'https://www.facebook.com/watch/?v=10153231379946729' }
-    ]
-  },
-  {
-    id: 'fb-4',
-    creator: 'Khaby Lame (خابي لامي)',
-    country: '🇮🇹',
-    category: 'facebook',
-    videos: [
-      { title: 'ريل خابي لامي الساخر الأكثر مشاهدة وانتشاراً في العالم', url: 'https://www.facebook.com/watch/?v=10154388481471375' },
-      { title: 'تحدي خابي لامي للحلول البسيطة والمواقف المضحكة', url: 'https://www.facebook.com/watch/?v=10152914104271032' }
-    ]
-  },
-  {
-    id: 'fb-5',
-    creator: 'Real Madrid CF (ريال مدريد)',
-    country: '🇪🇸',
-    category: 'facebook',
-    videos: [
-      { title: 'ملخص أهداف ريمونتادا ريال مدريد في دوري الأبطال', url: 'https://www.facebook.com/watch/?v=10153231379946729' },
-      { title: 'كواليس ملخص المباريات اليومية والتحضيرات للمواجهات', url: 'https://www.facebook.com/watch/?v=10154388481471375' }
-    ]
-  },
-  {
-    id: 'fb-6',
-    creator: 'Amr Diab (عمرو دياب)',
-    country: '🇪🇬',
-    category: 'facebook',
-    videos: [
-      { title: 'فيديو كليب وأغاني الهضبة الجديدة والحصرية', url: 'https://www.facebook.com/watch/?v=10152914104271032' },
-      { title: 'حفلة الهضبة الحية الكبرى واللقاءات الفنية المميزة', url: 'https://www.facebook.com/watch/?v=10153231379946729' }
-    ]
-  },
-  {
-    id: 'fb-7',
-    creator: 'AboFlah (أبو فلة)',
-    country: '🇰🇼',
-    category: 'facebook',
-    videos: [
-      { title: 'فيديو مقاطع أبو فلة الكوميدية والتحديات الكبرى الرسمية', url: 'https://www.facebook.com/watch/?v=10154388481471375' },
-      { title: 'ملخص حملات التبرع المباشرة واللقاءات مع الجمهور', url: 'https://www.facebook.com/watch/?v=10152914104271032' }
-    ]
-  },
-  // TikTok Celebrity Videos & Official Watch Links (100% Direct Video URLs)
-  {
-    id: 'tk-1',
-    creator: 'Nour Mar5 (نور مار)',
-    country: '🇸🇾',
-    category: 'tiktok',
-    videos: [
-      { title: 'تحدي الفيديوهات الكوميدية والأغاني الرائجة على تيك توك', url: 'https://www.tiktok.com/@bellapoarch/video/6862153058223197445' },
-      { title: 'يوميات ومقاطع حصرية مع أصدقاء النادي على تيك توك', url: 'https://www.tiktok.com/@zachking/video/6768504825310186758' }
-    ]
-  },
-  {
-    id: 'tk-2',
-    creator: 'Bella Poarch (بيلا بورتش)',
-    country: '🇺🇸',
-    category: 'tiktok',
-    videos: [
-      { title: 'فيديو مهارات الموضة والجمال واليوميات الحصرية الرائجة', url: 'https://www.tiktok.com/@bellapoarch/video/6862153058223197445' },
-      { title: 'تحدي حركات الشفاه والأغاني الأكثر تفاعلاً في العالم', url: 'https://www.tiktok.com/@bellapoarch/video/6862153058223197445' }
-    ]
-  },
-  {
-    id: 'tk-3',
-    creator: 'Zach King (زاك كينغ)',
-    country: '🇺🇸',
-    category: 'tiktok',
-    videos: [
-      { title: 'خدعة الطيران بالمكنسة السحرية وتحديات الخيال البصري', url: 'https://www.tiktok.com/@zachking/video/6768504825310186758' },
-      { title: 'تحدي كعكة الزجاج والمقاطع البصرية الأكثر دهشة في العالم', url: 'https://www.tiktok.com/@zachking/video/6768504825310186758' }
-    ]
-  },
-  {
-    id: 'tk-4',
-    creator: 'Khaby Lame (خابي لامي)',
-    country: '🇮🇹',
-    category: 'tiktok',
-    videos: [
-      { title: 'أحدث مقاطع الرد الساخر والحلول البسيطة على تيك توك', url: 'https://www.tiktok.com/@bellapoarch/video/6862153058223197445' },
-      { title: 'تحديات الكوميديا الصامتة الأكثر مشاهدة في العالم', url: 'https://www.tiktok.com/@zachking/video/6768504825310186758' }
-    ]
-  }
-];
+export type TaskPlatform = 'youtube' | 'tiktok' | 'facebook' | 'instagram';
+
+export interface VideoPoolItemLite {
+  id: string;
+  url: string;
+}
+
+function pickNonRepeatingVideo(pool: VideoPoolItemLite[], rotationDaysSinceEpoch: number, limit: number, i: number): VideoPoolItemLite | null {
+  if (!pool || pool.length === 0) return null;
+  const globalIndex = rotationDaysSinceEpoch * limit + i;
+  const poolIndex = ((globalIndex % pool.length) + pool.length) % pool.length;
+  return pool[poolIndex];
+}
 
 // Helper to get operational date shifted by 14 hours so that the calendar day changes at exactly 14:00 (2:00 PM) Riyadh time (UTC+3)
 export function getRiyadhOperationalDateStr(): string {
@@ -365,6 +195,23 @@ export function getRiyadhOperationalDateStr(): string {
   const year = riyadhDate.getFullYear();
   const month = String(riyadhDate.getMonth() + 1).padStart(2, '0');
   const day = String(riyadhDate.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+// تاريخ تدوير روابط المهام: يتغير عند الساعة ١ ظهرًا (13:00) بالضبط بتوقيت مكة/العراق
+// (كلاهما UTC+3 بدون توقيت صيفي). يُستخدم حصريًا لاختيار أي رابط فيديو يظهر اليوم —
+// منفصل عن getRiyadhMidnightDateStr المستخدم لصلاحية تسليم المهام (يبقى عند منتصف الليل).
+export function getMeccaIraqRotationDateStr(): string {
+  const now = new Date();
+  const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
+  const meccaMs = utcMs + (3 * 60 * 60 * 1000);
+  const meccaDate = new Date(meccaMs);
+
+  meccaDate.setHours(meccaDate.getHours() - 13);
+
+  const year = meccaDate.getFullYear();
+  const month = String(meccaDate.getMonth() + 1).padStart(2, '0');
+  const day = String(meccaDate.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 }
 
@@ -383,108 +230,128 @@ export function getRiyadhMidnightDateStr(): string {
   return `${year}-${month}-${day}`;
 }
 
-function getDailyAvailableTasksForDate(dateStr: string, limit: number = 4) {
-  // Convert date string (e.g. "2026-08-02") into days count since epoch to guarantee a unique 24h rotation
-  const dateObj = new Date(dateStr);
-  const daysSinceEpoch = Math.floor(dateObj.getTime() / (24 * 60 * 60 * 1000));
-  
-  const ytItems = dailyFamousVideosPool.filter(c => c.category === 'youtube');
-  const fbItems = dailyFamousVideosPool.filter(c => c.category === 'facebook');
-  const tkItems = dailyFamousVideosPool.filter(c => c.category === 'tiktok');
-  
-  const dailyYt: any[] = [];
-  const dailyFb: any[] = [];
-  const dailyTk: any[] = [];
-  
-  // Rotate creators and videos every 24 hours based on daysSinceEpoch so videos change automatically each day
-  for (let i = 0; i < limit; i++) {
-    const creatorIdx = (daysSinceEpoch * 3 + i) % ytItems.length;
-    const creator = ytItems[creatorIdx];
-    
-    const videoIdx = (daysSinceEpoch + i * 2) % creator.videos.length;
-    const selectedVideo = creator.videos[videoIdx];
-    
-    dailyYt.push({
-      id: `avail-yt-${dateStr}-${creator.id}-${videoIdx}-${i}`,
-      title: `تفاعل مع الفيديو (لايك + اشتراك): ${creator.creator} ${creator.country}`,
-      category: 'youtube',
-      taskDetails: `انتقل إلى رابط الفيديو لـ ${creator.creator}، وشاهد الفيديو واضغط زر الإعجاب (Like) والاشتراك (Subscribe) بالقناة ثم التقط لقطة شاشة (سكرين) تظهر التفاعل مع الفيديو لإكمال المهمة.`,
-      requires: 'رفع لقطة شاشة (سكرين) واضحة تثبت الإعجاب والاشتراك في الفيديو.',
-      reviewLink: selectedVideo.url,
-      channelName: creator.creator,
-      country: creator.country
-    });
-  }
-  
-  for (let i = 0; i < limit; i++) {
-    const creatorIdx = (daysSinceEpoch * 5 + i + 2) % fbItems.length;
-    const creator = fbItems[creatorIdx];
-    
-    const videoIdx = (daysSinceEpoch + i * 3) % creator.videos.length;
-    const selectedVideo = creator.videos[videoIdx];
-    
-    dailyFb.push({
-      id: `avail-fb-${dateStr}-${creator.id}-${videoIdx}-${i}`,
-      title: `تفاعل مع الفيديو (لايك + متابعة): ${creator.creator} ${creator.country}`,
-      category: 'facebook',
-      taskDetails: `انتقل إلى رابط فيديو/ريل لـ ${creator.creator}، واضغط زر الإعجاب (Like) ومتابعة الصفحة (Follow) ثم التقط لقطة شاشة (سكرين) تظهر التفاعل مع الفيديو لإكمال المهمة.`,
-      requires: 'رفع لقطة شاشة (سكرين) واضحة تثبت الإعجاب ومتابعة الصفحة في فيسبوك.',
-      reviewLink: selectedVideo.url,
-      channelName: creator.creator,
-      country: creator.country
-    });
-  }
+function getDailyAvailableTasksForDate(
+  dateStr: string,
+  limit: number = 4,
+  pools: Record<TaskPlatform, VideoPoolItemLite[]> = { youtube: [], tiktok: [], facebook: [], instagram: [] }
+): Record<TaskPlatform, any[]> {
+  // تدوير روابط المهام يعتمد على الساعة ١ ظهرًا مكة/العراق (منفصل عن صلاحية التسليم اللي تبقى منتصف الليل)
+  const rotationDateStr = getMeccaIraqRotationDateStr();
+  const rotationDateObj = new Date(rotationDateStr);
+  const rotationDaysSinceEpoch = Math.floor(rotationDateObj.getTime() / (24 * 60 * 60 * 1000));
 
-  for (let i = 0; i < limit; i++) {
-    const creatorIdx = (daysSinceEpoch * 7 + i + 4) % tkItems.length;
-    const creator = tkItems[creatorIdx];
-    
-    const videoIdx = (daysSinceEpoch + i * 2) % creator.videos.length;
-    const selectedVideo = creator.videos[videoIdx];
-    
-    dailyTk.push({
-      id: `avail-tk-${dateStr}-${creator.id}-${videoIdx}-${i}`,
-      title: `تفاعل مع الفيديو (لايك + متابعة): ${creator.creator} ${creator.country}`,
-      category: 'tiktok',
-      taskDetails: `انتقل إلى رابط فيديو تيك توك لـ ${creator.creator}، واضغط زر الإعجاب (Like) ومتابعة الحساب (Follow) ثم التقط لقطة شاشة (سكرين) تظهر التفاعل واللايك للفيديو لإكمال المهمة.`,
-      requires: 'رفع لقطة شاشة (سكرين) واضحة تثبت الإعجاب بالاشتراك ومتابعة الحساب.',
-      reviewLink: selectedVideo.url,
-      channelName: creator.creator,
-      country: creator.country
-    });
-  }
-  
-  return { youtube: dailyYt, facebook: dailyFb, tiktok: dailyTk };
+  const buildTasksForPlatform = (platform: TaskPlatform, pool: VideoPoolItemLite[]) => {
+    const items: any[] = [];
+    for (let i = 0; i < limit; i++) {
+      const video = pickNonRepeatingVideo(pool, rotationDaysSinceEpoch, limit, i);
+      if (!video) continue;
+
+      const texts = getNormalizedTaskText({ category: platform });
+
+      items.push({
+        id: `avail-${platform}-${dateStr}-${video.id}-${i}`,
+        title: texts.title,
+        category: platform,
+        taskDetails: texts.taskDetails,
+        requires: texts.requires,
+        reviewLink: video.url,
+        channelName: '',
+        country: ''
+      });
+    }
+    return items;
+  };
+
+  return {
+    youtube: buildTasksForPlatform('youtube', pools.youtube),
+    facebook: buildTasksForPlatform('facebook', pools.facebook),
+    tiktok: buildTasksForPlatform('tiktok', pools.tiktok),
+    instagram: buildTasksForPlatform('instagram', pools.instagram)
+  };
+}
+export function getPlatformArabicName(category: string): string {
+  if (category === 'youtube') return 'يوتيوب';
+  if (category === 'facebook') return 'فيسبوك';
+  if (category === 'instagram') return 'انستقرام';
+  return 'تيك توك';
+}
+
+export function getPlatformEnglishName(category: string): string {
+  if (category === 'youtube') return 'YouTube';
+  if (category === 'facebook') return 'Facebook';
+  if (category === 'instagram') return 'Instagram';
+  return 'TikTok';
 }
 
 export function getNormalizedTaskText(task: any) {
   if (!task) return { title: '', taskDetails: '', requires: '' };
   const category = task.category || 'youtube';
-  const name = task.channelName || task.creator || 'المشاهير';
+  const rawName = task.channelName || task.creator || '';
   const country = task.country || '';
-  
+  // لاحقة اسم/دولة اختيارية — تُحذف تمامًا لو ما فيه اسم قناة محدد (المجموعة الجديدة روابط عامة بدون منشئ محدد)
+  const suffix = rawName ? `: ${rawName}${country ? ' ' + country : ''}` : '';
+
   let title = task.title || '';
   let taskDetails = task.taskDetails || '';
   let requires = task.requires || '';
 
   if (category === 'youtube') {
-    title = `تفاعل مع الفيديو (لايك + اشتراك): ${name} ${country}`;
-    taskDetails = `انتقل إلى رابط الفيديو لـ ${name}، وشاهد الفيديو واضغط زر الإعجاب (Like) والاشتراك (Subscribe) بالقناة ثم التقط لقطة شاشة (سكرين) تظهر التفاعل مع الفيديو لإكمال المهمة.`;
-    requires = `رفع لقطة شاشة (سكرين) واضحة تثبت الإعجاب والاشتراك في الفيديو.`;
+    // مهام يوتيوب: لايك فقط (بدون اشتراك)
+    title = `تفاعل مع الفيديو (لايك)${suffix}`;
+    taskDetails = `انتقل إلى رابط الفيديو، وشاهده واضغط زر الإعجاب (Like) ثم التقط لقطة شاشة (سكرين) تظهر الإعجاب بالفيديو لإكمال المهمة.`;
+    requires = `رفع لقطة شاشة (سكرين) واضحة تثبت الإعجاب (Like) بالفيديو.`;
   } else if (category === 'facebook') {
-    title = `تفاعل مع الفيديو (لايك + متابعة): ${name} ${country}`;
-    taskDetails = `انتقل إلى رابط فيديو/ريل لـ ${name}، واضغط زر الإعجاب (Like) ومتابعة الصفحة (Follow) ثم التقط لقطة شاشة (سكرين) تظهر التفاعل مع الفيديو لإكمال المهمة.`;
+    title = `تفاعل مع الفيديو (لايك + متابعة)${suffix}`;
+    taskDetails = `انتقل إلى رابط فيديو/ريل، واضغط زر الإعجاب (Like) ومتابعة الصفحة (Follow) ثم التقط لقطة شاشة (سكرين) تظهر التفاعل مع الفيديو لإكمال المهمة.`;
     requires = `رفع لقطة شاشة (سكرين) واضحة تثبت الإعجاب ومتابعة الصفحة في فيسبوك.`;
   } else if (category === 'tiktok') {
-    title = `تفاعل مع الفيديو (لايك + متابعة): ${name} ${country}`;
-    taskDetails = `انتقل إلى رابط فيديو تيك توك لـ ${name}، واضغط زر الإعجاب (Like) ومتابعة الحساب (Follow) ثم التقط لقطة شاشة (سكرين) تظهر التفاعل واللايك للفيديو لإكمال المهمة.`;
+    title = `تفاعل مع الفيديو (لايك + متابعة)${suffix}`;
+    taskDetails = `انتقل إلى رابط فيديو تيك توك، واضغط زر الإعجاب (Like) ومتابعة الحساب (Follow) ثم التقط لقطة شاشة (سكرين) تظهر التفاعل واللايك للفيديو لإكمال المهمة.`;
     requires = `رفع لقطة شاشة (سكرين) واضحة تثبت الإعجاب بالاشتراك ومتابعة الحساب.`;
+  } else if (category === 'instagram') {
+    title = `تفاعل مع الفيديو (لايك + متابعة)${suffix}`;
+    taskDetails = `انتقل إلى رابط الريل، واضغط زر الإعجاب (Like) ومتابعة الحساب (Follow) ثم التقط لقطة شاشة (سكرين) تظهر التفاعل واللايك للفيديو لإكمال المهمة.`;
+    requires = `رفع لقطة شاشة (سكرين) واضحة تثبت الإعجاب ومتابعة الحساب في انستقرام.`;
   }
 
   return { title, taskDetails, requires };
 }
 
 export default function TaskView() {
+  // مجموعات روابط المهام (يوتيوب/تيك توك/فيسبوك/انستقرام) — تُحمّل مرة واحدة من Firestore
+  // وتُستخدم لحساب مهام اليوم عبر نظام التدوير بدون تكرار (pickNonRepeatingVideo)
+  const [videoPools, setVideoPools] = useState<Record<TaskPlatform, VideoPoolItemLite[]>>({
+    youtube: [], tiktok: [], facebook: [], instagram: []
+  });
+  const [videoPoolsLoaded, setVideoPoolsLoaded] = useState<boolean>(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [yt, tk, fb, ig] = await Promise.all([
+          getActiveVideoPool('youtube'),
+          getActiveVideoPool('tiktok'),
+          getActiveVideoPool('facebook'),
+          getActiveVideoPool('instagram')
+        ]);
+        if (cancelled) return;
+        const toLite = (items: VideoPoolItem[]): VideoPoolItemLite[] => items.map(v => ({ id: v.id, url: v.url }));
+        setVideoPools({
+          youtube: toLite(yt),
+          tiktok: toLite(tk),
+          facebook: toLite(fb),
+          instagram: toLite(ig)
+        });
+      } catch (e) {
+        console.warn('فشل تحميل مجموعات روابط المهام:', e);
+      } finally {
+        if (!cancelled) setVideoPoolsLoaded(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   // Navigation / Active Views
   // 'list' -> Task Log View, 'detail' -> Task Details View
   const [currentView, setCurrentView] = useState<'list' | 'detail'>(() => {
@@ -516,16 +383,16 @@ export default function TaskView() {
   const [showLeaderBonusModal, setShowLeaderBonusModal] = useState<boolean>(false);
   const [showPromoCardModal, setShowPromoCardModal] = useState<boolean>(false);
 
-  const [pendingPlatformTab, setPendingPlatformTab] = useState<'youtube' | 'facebook' | 'tiktok' | null>(null);
-  const [homeCategoryTab, setHomeCategoryTab] = useState<'youtube' | 'facebook' | 'tiktok'>('youtube');
+  const [pendingPlatformTab, setPendingPlatformTab] = useState<TaskPlatform | null>(null);
+  const [homeCategoryTab, setHomeCategoryTab] = useState<TaskPlatform>('youtube');
   const [activeListTab, setActiveListTab] = useState<'withdrawn' | 'in_progress' | 'completed' | 'rejected'>('in_progress');
 
-  const handleSelectPlatform = (platform: 'youtube' | 'facebook' | 'tiktok') => {
+  const handleSelectPlatform = (platform: TaskPlatform) => {
     setHomeCategoryTab(platform);
   };
 
-  const transferAllTasksForPlatform = (plat: 'youtube' | 'facebook' | 'tiktok') => {
-    const availableTasks = getDailyAvailableTasksForDate(todayStr, userPlanDetails.tasksLimit)[plat] || [];
+  const transferAllTasksForPlatform = (plat: TaskPlatform) => {
+    const availableTasks = getDailyAvailableTasksForDate(todayStr, userPlanDetails.tasksLimit, videoPools)[plat] || [];
     const existingTaskIds = new Set(tasks.map(t => t.id));
     const newClaimedTasks: Task[] = [];
 
@@ -1207,7 +1074,7 @@ export default function TaskView() {
 
   const todayStr = getRiyadhMidnightDateStr();
   const todayClaimedCount = tasks.filter(t => t.claimDate === todayStr).length;
-  const dailyTasksForToday = getDailyAvailableTasksForDate(todayStr, userPlanDetails.tasksLimit);
+  const dailyTasksForToday = getDailyAvailableTasksForDate(todayStr, userPlanDetails.tasksLimit, videoPools);
 
   const isOutsideWorkingHours = (() => {
     if (!settings.enforceWorkingHours) return false;
@@ -1288,11 +1155,7 @@ export default function TaskView() {
     const todayClaimedTasks = tasks.filter(t => t.claimDate === todayStr && t.status !== 'withdrawn');
     const hasDifferentCategory = todayClaimedTasks.some(t => t.category !== template.category);
     if (hasDifferentCategory) {
-      const activeCategoryText = todayClaimedTasks[0].category === 'youtube' 
-        ? 'يوتيوب' 
-        : todayClaimedTasks[0].category === 'facebook' 
-        ? 'فيسبوك' 
-        : 'تيك توك';
+      const activeCategoryText = getPlatformArabicName(todayClaimedTasks[0].category);
       triggerNotification(`⚠️ لا يُسمح باختيار مهام من منصات مختلفة معاً في نفس اليوم! لقد بدأت اليوم بمهام ${activeCategoryText}، يرجى الاستمرار عليها أو الانتظار للغد.`);
       return;
     }
@@ -1850,7 +1713,7 @@ export default function TaskView() {
           </div>
 
           {/* Platform Switcher */}
-          <div className="grid grid-cols-3 gap-2 mb-8 bg-slate-100 p-1.5 rounded-2xl shadow-inner border border-slate-200/50">
+          <div className="grid grid-cols-4 gap-2 mb-8 bg-slate-100 p-1.5 rounded-2xl shadow-inner border border-slate-200/50">
             <button
               onClick={() => handleSelectPlatform('tiktok')}
               className={`py-2.5 rounded-xl text-[10px] font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
@@ -1885,6 +1748,19 @@ export default function TaskView() {
             >
               <Youtube className="w-4 h-4 fill-current" />
               <span>يوتيوب</span>
+            </button>
+            <button
+              onClick={() => handleSelectPlatform('instagram')}
+              className={`py-2.5 rounded-xl text-[10px] font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                homeCategoryTab === 'instagram'
+                  ? 'bg-gradient-to-br from-purple-600 to-pink-500 text-white shadow-lg shadow-pink-500/20'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
+                <path d="M12 2.16c3.2 0 3.58.01 4.85.07 3.25.15 4.77 1.69 4.92 4.92.06 1.27.07 1.65.07 4.85s-.01 3.58-.07 4.85c-.15 3.23-1.66 4.77-4.92 4.92-1.27.06-1.64.07-4.85.07s-3.58-.01-4.85-.07c-3.26-.15-4.77-1.7-4.92-4.92-.06-1.27-.07-1.65-.07-4.85s.01-3.58.07-4.85C2.38 3.92 3.9 2.38 7.15 2.23 8.42 2.17 8.8 2.16 12 2.16zM12 0C8.74 0 8.33.01 7.05.07 2.7.27.27 2.69.07 7.05.01 8.33 0 8.74 0 12s.01 3.67.07 4.95c.2 4.36 2.62 6.78 6.98 6.98 1.28.06 1.69.07 4.95.07s3.67-.01 4.95-.07c4.35-.2 6.78-2.62 6.98-6.98.06-1.28.07-1.69.07-4.95s-.01-3.67-.07-4.95c-.2-4.35-2.62-6.78-6.98-6.98C15.67.01 15.26 0 12 0zm0 5.84A6.16 6.16 0 1018.16 12 6.16 6.16 0 0012 5.84zM12 16a4 4 0 114-4 4 4 0 01-4 4zm6.41-10.85a1.44 1.44 0 11-1.44-1.44 1.44 1.44 0 011.44 1.44z"/>
+              </svg>
+              <span>انستقرام</span>
             </button>
           </div>
 
@@ -1963,19 +1839,25 @@ export default function TaskView() {
                             ? 'bg-rose-50 text-rose-600 border-rose-100' 
                             : item.category === 'facebook' 
                             ? 'bg-blue-50 text-blue-600 border-blue-100'
+                            : item.category === 'instagram'
+                            ? 'bg-pink-50 text-pink-600 border-pink-100'
                             : 'bg-purple-50 text-purple-600 border-purple-100'
                         }`}>
                           {item.category === 'youtube' ? (
                             <Youtube className="w-3 h-3 fill-current" />
                           ) : item.category === 'facebook' ? (
                             <Facebook className="w-3 h-3 fill-current" />
+                          ) : item.category === 'instagram' ? (
+                            <svg className="w-3 h-3 fill-current" viewBox="0 0 24 24">
+                              <path d="M12 2.16c3.2 0 3.58.01 4.85.07 3.25.15 4.77 1.69 4.92 4.92.06 1.27.07 1.65.07 4.85s-.01 3.58-.07 4.85c-.15 3.23-1.66 4.77-4.92 4.92-1.27.06-1.64.07-4.85.07s-3.58-.01-4.85-.07c-3.26-.15-4.77-1.7-4.92-4.92-.06-1.27-.07-1.65-.07-4.85s.01-3.58.07-4.85C2.38 3.92 3.9 2.38 7.15 2.23 8.42 2.17 8.8 2.16 12 2.16zM12 0C8.74 0 8.33.01 7.05.07 2.7.27.27 2.69.07 7.05.01 8.33 0 8.74 0 12s.01 3.67.07 4.95c.2 4.36 2.62 6.78 6.98 6.98 1.28.06 1.69.07 4.95.07s3.67-.01 4.95-.07c4.35-.2 6.78-2.62 6.98-6.98.06-1.28.07-1.69.07-4.95s-.01-3.67-.07-4.95c-.2-4.35-2.62-6.78-6.98-6.98C15.67.01 15.26 0 12 0zm0 5.84A6.16 6.16 0 1018.16 12 6.16 6.16 0 0012 5.84zM12 16a4 4 0 114-4 4 4 0 01-4 4zm6.41-10.85a1.44 1.44 0 11-1.44-1.44 1.44 1.44 0 011.44 1.44z"/>
+                            </svg>
                           ) : (
                             <svg className="w-3 h-3 fill-current" viewBox="0 0 24 24">
                               <path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-5.2 1.74 2.89 2.89 0 012.31-4.64 2.93 2.93 0 01.88.13V9.4a6.84 6.84 0 00-1-.05A6.33 6.33 0 005 20.1a6.34 6.34 0 0010.86-4.43v-7a8.16 8.16 0 004.77 1.52v-3.4a4.85 4.85 0 01-1-.1z"/>
                             </svg>
                           )}
                           <span>
-                            {item.category === 'youtube' ? 'يوتيوب' : item.category === 'facebook' ? 'فيسبوك' : 'تيك توك'} • {item.country}
+                            {getPlatformArabicName(item.category)}{item.country ? ` • ${item.country}` : ''}
                           </span>
                         </div>
                         <h4 className="text-[11px] font-black text-slate-900 leading-relaxed max-w-[200px]">{norm.title}</h4>
@@ -2133,12 +2015,18 @@ export default function TaskView() {
                           ? 'bg-[#FF0000]' 
                           : item.category === 'facebook' 
                           ? 'bg-[#1877F2]' 
+                          : item.category === 'instagram'
+                          ? 'bg-gradient-to-br from-purple-600 to-pink-500'
                           : 'bg-black'
                       }`}>
                         {item.category === 'youtube' ? (
                           <Youtube className="w-5.5 h-5.5 text-white" />
                         ) : item.category === 'facebook' ? (
                           <Facebook className="w-5.5 h-5.5 text-white fill-white" />
+                        ) : item.category === 'instagram' ? (
+                          <svg className="w-5.5 h-5.5 fill-current text-white" viewBox="0 0 24 24">
+                            <path d="M12 2.16c3.2 0 3.58.01 4.85.07 3.25.15 4.77 1.69 4.92 4.92.06 1.27.07 1.65.07 4.85s-.01 3.58-.07 4.85c-.15 3.23-1.66 4.77-4.92 4.92-1.27.06-1.64.07-4.85.07s-3.58-.01-4.85-.07c-3.26-.15-4.77-1.7-4.92-4.92-.06-1.27-.07-1.65-.07-4.85s.01-3.58.07-4.85C2.38 3.92 3.9 2.38 7.15 2.23 8.42 2.17 8.8 2.16 12 2.16zM12 0C8.74 0 8.33.01 7.05.07 2.7.27.27 2.69.07 7.05.01 8.33 0 8.74 0 12s.01 3.67.07 4.95c.2 4.36 2.62 6.78 6.98 6.98 1.28.06 1.69.07 4.95.07s3.67-.01 4.95-.07c4.35-.2 6.78-2.62 6.98-6.98.06-1.28.07-1.69.07-4.95s-.01-3.67-.07-4.95c-.2-4.35-2.62-6.78-6.98-6.98C15.67.01 15.26 0 12 0zm0 5.84A6.16 6.16 0 1018.16 12 6.16 6.16 0 0012 5.84zM12 16a4 4 0 114-4 4 4 0 01-4 4zm6.41-10.85a1.44 1.44 0 11-1.44-1.44 1.44 1.44 0 011.44 1.44z"/>
+                          </svg>
                         ) : (
                           <svg className="w-5.5 h-5.5 fill-current text-white" viewBox="0 0 24 24">
                             <path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-5.2 1.74 2.89 2.89 0 012.31-4.64 2.93 2.93 0 01.88.13V9.4a6.84 6.84 0 00-1-.05A6.33 6.33 0 005 20.1a6.34 6.34 0 0010.86-4.43v-7a8.16 8.16 0 004.77 1.52v-3.4a4.85 4.85 0 01-1-.1z"/>
@@ -2231,6 +2119,8 @@ export default function TaskView() {
                     ? 'from-rose-600 to-red-500' 
                     : currentTask.category === 'facebook'
                     ? 'from-[#1877F2] to-[#3B82F6]'
+                    : currentTask.category === 'instagram'
+                    ? 'from-purple-600 to-pink-500'
                     : 'from-zinc-900 to-black'
                 }`}>
                   
@@ -2240,6 +2130,10 @@ export default function TaskView() {
                       <Youtube className="w-11 h-11 text-[#FF0000]" />
                     ) : currentTask.category === 'facebook' ? (
                       <Facebook className="w-11 h-11 text-[#1877F2] fill-[#1877F2]" />
+                    ) : currentTask.category === 'instagram' ? (
+                      <svg className="w-11 h-11 fill-current text-pink-600" viewBox="0 0 24 24">
+                        <path d="M12 2.16c3.2 0 3.58.01 4.85.07 3.25.15 4.77 1.69 4.92 4.92.06 1.27.07 1.65.07 4.85s-.01 3.58-.07 4.85c-.15 3.23-1.66 4.77-4.92 4.92-1.27.06-1.64.07-4.85.07s-3.58-.01-4.85-.07c-3.26-.15-4.77-1.7-4.92-4.92-.06-1.27-.07-1.65-.07-4.85s.01-3.58.07-4.85C2.38 3.92 3.9 2.38 7.15 2.23 8.42 2.17 8.8 2.16 12 2.16zM12 0C8.74 0 8.33.01 7.05.07 2.7.27.27 2.69.07 7.05.01 8.33 0 8.74 0 12s.01 3.67.07 4.95c.2 4.36 2.62 6.78 6.98 6.98 1.28.06 1.69.07 4.95.07s3.67-.01 4.95-.07c4.35-.2 6.78-2.62 6.98-6.98.06-1.28.07-1.69.07-4.95s-.01-3.67-.07-4.95c-.2-4.35-2.62-6.78-6.98-6.98C15.67.01 15.26 0 12 0zm0 5.84A6.16 6.16 0 1018.16 12 6.16 6.16 0 0012 5.84zM12 16a4 4 0 114-4 4 4 0 01-4 4zm6.41-10.85a1.44 1.44 0 11-1.44-1.44 1.44 1.44 0 011.44 1.44z"/>
+                      </svg>
                     ) : (
                       <svg className="w-11 h-11 fill-current text-black" viewBox="0 0 24 24">
                         <path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-5.2 1.74 2.89 2.89 0 012.31-4.64 2.93 2.93 0 01.88.13V9.4a6.84 6.84 0 00-1-.05A6.33 6.33 0 005 20.1a6.34 6.34 0 0010.86-4.43v-7a8.16 8.16 0 004.77 1.52v-3.4a4.85 4.85 0 01-1-.1z"/>
@@ -2263,7 +2157,7 @@ export default function TaskView() {
                   <div className="flex items-center justify-between py-1.5 border-b border-stone-100">
                     <span className="text-stone-500 font-semibold">عنوان المهمة</span>
                     <span className="text-blue-600 font-extrabold text-[13px]">
-                      {currentTask.category === 'youtube' ? 'YouTube' : currentTask.category === 'facebook' ? 'Facebook' : 'TikTok'}
+                      {getPlatformEnglishName(currentTask.category)}
                     </span>
                   </div>
 

@@ -3473,6 +3473,139 @@ export async function shadowFirebaseAuth(phone: string, passwordHash: string) {
   }
 }
 
+// ============================================================
+// نظام مجموعة روابط المهام (Video Pool) — يوتيوب/تيك توك/فيسبوك/انستقرام
+// يحل محل القائمة الثابتة القديمة بالكود؛ يدعم لصق جماعي، منع تكرار حقيقي،
+// ودوران بدون تكرار حتى تُستهلك كل الروابط (نظام الطابور).
+// ============================================================
+
+export type VideoPlatform = 'youtube' | 'tiktok' | 'facebook' | 'instagram';
+
+export interface VideoPoolItem {
+  id: string;
+  platform: VideoPlatform;
+  url: string;
+  active: boolean;
+  addedAt: number;
+}
+
+// معرّف مستند حتمي (deterministic) من المنصة + الرابط، يضمن منع التكرار
+// طبيعيًا عبر Firestore نفسه (نفس الرابط لنفس المنصة = نفس المعرّف دائمًا)
+function videoDocId(platform: VideoPlatform, url: string): string {
+  const clean = url.trim().toLowerCase().replace(/[?&]$/, '');
+  let hash = 0;
+  for (let i = 0; i < clean.length; i++) {
+    hash = (hash * 31 + clean.charCodeAt(i)) >>> 0;
+  }
+  return `${platform}_${hash.toString(36)}`;
+}
+
+// إضافة روابط بالجملة (لصق جماعي) — يتجاهل أي رابط مكرر تلقائيًا
+// (سواء كان مكررًا بنفس الدفعة، أو موجود أصلاً بقاعدة البيانات)
+export async function bulkAddVideoLinks(
+  platform: VideoPlatform,
+  rawUrls: string[]
+): Promise<{ added: number; skipped: number }> {
+  const cleanUrls = [...new Set(
+    rawUrls
+      .map(u => u.trim())
+      .filter(u => u.length > 0 && u.startsWith('http'))
+  )];
+
+  if (cleanUrls.length === 0) return { added: 0, skipped: 0 };
+
+  let added = 0;
+  let skipped = 0;
+
+  // نتحقق دفعة دفعة (Firestore batch أقصاها 500 عملية) لتفادي أي حد
+  const BATCH_SIZE = 400;
+  for (let start = 0; start < cleanUrls.length; start += BATCH_SIZE) {
+    const chunk = cleanUrls.slice(start, start + BATCH_SIZE);
+    const batch = writeBatch(db);
+    let batchHasWrites = false;
+
+    for (const url of chunk) {
+      const id = videoDocId(platform, url);
+      const ref = doc(db, 'videoPool', id);
+      const existing = await getDoc(ref);
+      if (existing.exists()) {
+        skipped++;
+        continue;
+      }
+      batch.set(ref, {
+        platform,
+        url,
+        active: true,
+        addedAt: Date.now()
+      });
+      batchHasWrites = true;
+      added++;
+    }
+
+    if (batchHasWrites) {
+      await batch.commit();
+    }
+  }
+
+  return { added, skipped };
+}
+
+// جلب كل الروابط النشطة لمنصة معيّنة (تُستخدم لحساب دوران المهام اليومي)
+export async function getActiveVideoPool(platform: VideoPlatform): Promise<VideoPoolItem[]> {
+  try {
+    const q = query(collection(db, 'videoPool'), where('platform', '==', platform), where('active', '==', true));
+    const snap = await getDocs(q);
+    const items: VideoPoolItem[] = [];
+    snap.forEach((d: any) => {
+      const data = d.data();
+      items.push({
+        id: d.id,
+        platform: data.platform,
+        url: data.url,
+        active: data.active !== false,
+        addedAt: data.addedAt ?? 0
+      });
+    });
+    // ترتيب ثابت (حسب وقت الإضافة) لضمان نفس ترتيب الدوران لكل المستخدمين
+    items.sort((a, b) => a.addedAt - b.addedAt || a.id.localeCompare(b.id));
+    return items;
+  } catch (error) {
+    console.warn('getActiveVideoPool error:', error);
+    return [];
+  }
+}
+
+// جلب كل الروابط (نشطة وغير نشطة) لكل المنصات — لعرضها بلوحة الأدمن
+export async function getAllVideoPoolItems(): Promise<VideoPoolItem[]> {
+  try {
+    const snap = await getDocs(collection(db, 'videoPool'));
+    const items: VideoPoolItem[] = [];
+    snap.forEach((d: any) => {
+      const data = d.data();
+      items.push({
+        id: d.id,
+        platform: data.platform,
+        url: data.url,
+        active: data.active !== false,
+        addedAt: data.addedAt ?? 0
+      });
+    });
+    items.sort((a, b) => b.addedAt - a.addedAt);
+    return items;
+  } catch (error) {
+    console.warn('getAllVideoPoolItems error:', error);
+    return [];
+  }
+}
+
+export async function deleteVideoPoolItem(id: string): Promise<void> {
+  await deleteDoc(doc(db, 'videoPool', id));
+}
+
+export async function toggleVideoPoolItemActive(id: string, active: boolean): Promise<void> {
+  await updateDoc(doc(db, 'videoPool', id), { active });
+}
+
 export async function signInBackend() {
   const email = "backend_secure_server_admin@oxlo.app";
   const password = "VerySecureBackendPassword123!@#";
