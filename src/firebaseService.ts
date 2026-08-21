@@ -637,18 +637,9 @@ export async function getUserByPhone(phone: string): Promise<User | null> {
         }
       } catch(e) {}
 
-      // حماية الرصيد: لو التخزين المحلي أو الجلسة الحالية فيها أرباح أعلى من الموثقة بقاعدة البيانات (مثل مهمة أُنجزت توّاً)،
-      // نعتمد القيمة الأعلى ونزامنها مباشرة مع Firestore لمنع أي تراجع للرصيد
-      if (localUsers[cleanPhone]) {
-        if (Number(localUsers[cleanPhone].earnings || 0) > Number(data.earnings || 0)) {
-          data.earnings = Number(localUsers[cleanPhone].earnings || 0);
-          setDoc(docRef, { earnings: data.earnings }, { merge: true }).catch(() => {});
-        }
-        if (Number(localUsers[cleanPhone].taskIncome || 0) > Number(data.taskIncome || 0)) {
-          data.taskIncome = Number(localUsers[cleanPhone].taskIncome || 0);
-          setDoc(docRef, { taskIncome: data.taskIncome }, { merge: true }).catch(() => {});
-        }
-      }
+      // ⚠️ أُزيلت "حماية الرصيد الأعلى محليًا" — كانت ثغرة أمنية خطيرة تسمح
+      // بتعديل localStorage بالمتصفح وكتابة أي قيمة لقاعدة البيانات مباشرة.
+      // القيمة الموثوقة الوحيدة هي دائمًا اللي بقاعدة البيانات (Firestore).
 
       localUsers[cleanPhone] = data;
       saveLocalUsers(localUsers);
@@ -659,17 +650,6 @@ export async function getUserByPhone(phone: string): Promise<User | null> {
     const querySnapshot = await getDocs(q);
     if (!querySnapshot.empty) {
       const data = querySnapshot.docs[0].data() as User;
-      const matchedRef = querySnapshot.docs[0].ref;
-      if (localUsers[cleanPhone]) {
-        if (Number(localUsers[cleanPhone].earnings || 0) > Number(data.earnings || 0)) {
-          data.earnings = Number(localUsers[cleanPhone].earnings || 0);
-          setDoc(matchedRef, { earnings: data.earnings }, { merge: true }).catch(() => {});
-        }
-        if (Number(localUsers[cleanPhone].taskIncome || 0) > Number(data.taskIncome || 0)) {
-          data.taskIncome = Number(localUsers[cleanPhone].taskIncome || 0);
-          setDoc(matchedRef, { taskIncome: data.taskIncome }, { merge: true }).catch(() => {});
-        }
-      }
       localUsers[cleanPhone] = data;
       saveLocalUsers(localUsers);
       return data;
