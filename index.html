@@ -5,6 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OXLO - المنصة الرقمية الرسمية</title>
     <meta name="description" content="منصة OXLO الرسمية للمهام والأرباح الرقمية" />
+
+    <!-- PWA -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#0a0a0a" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="OXLO" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+
     <style>
       /* Prevent text selection and image dragging */
       body {
@@ -16,28 +28,77 @@
       img {
         pointer-events: none;
       }
+      #devtools-shield {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 999999;
+        background: #0a0a0a;
+        color: #fff;
+        align-items: center;
+        justify-content: center;
+        font-family: sans-serif;
+        text-align: center;
+        padding: 24px;
+      }
     </style>
     <script>
-      // Prevent Right Click
+      // منع الزر الأيمن
       document.addEventListener('contextmenu', event => event.preventDefault());
-      
-      // Prevent F12, Ctrl+Shift+I, Ctrl+Shift+J, Ctrl+U
-      document.onkeydown = function(e) {
-        if (e.keyCode == 123) { return false; }
-        if (e.ctrlKey && e.shiftKey && e.keyCode == 73) { return false; }
-        if (e.ctrlKey && e.shiftKey && e.keyCode == 74) { return false; }
-        if (e.ctrlKey && e.keyCode == 85) { return false; }
-      };
-      
-      // Prevent console opening via debugger loop
-      setInterval(function() {
-        var before = new Date().getTime();
-        debugger;
-        var after = new Date().getTime();
-        if (after - before > 100) {
-           document.body.innerHTML = "تم إيقاف النظام لأسباب أمنية.";
+
+      // منع الاختصارات: F12, Ctrl+Shift+I/J/C, Ctrl+U, Ctrl+S
+      document.addEventListener('keydown', function (e) {
+        if (
+          e.key === 'F12' ||
+          (e.ctrlKey && e.shiftKey && ['I', 'J', 'C', 'i', 'j', 'c'].includes(e.key)) ||
+          (e.ctrlKey && ['u', 'U', 's', 'S'].includes(e.key))
+        ) {
+          e.preventDefault();
+          return false;
         }
-      }, 100);
+      });
+
+      // منع القص/النسخ للنصوص الحساسة (اختياري - يمكن حذفه إن أزعج المستخدمين الشرعيين)
+      document.addEventListener('copy', function (e) {
+        // مسموح بالنسخ العادي؛ فقط منع السحب من الصور معطّل أعلاه
+      });
+
+      // كشف فتح أدوات المطور عبر فرق التوقيت (debugger loop) + كشف فرق أبعاد النافذة
+      (function () {
+        var shield = null;
+        function showShield() {
+          if (!shield) {
+            shield = document.createElement('div');
+            shield.id = 'devtools-shield';
+            shield.style.display = 'flex';
+            shield.innerHTML = '<div>تم إيقاف الوصول لأسباب أمنية.<br/>الرجاء إغلاق أدوات المطور وإعادة تحميل الصفحة.</div>';
+            document.body.appendChild(shield);
+          } else {
+            shield.style.display = 'flex';
+          }
+        }
+
+        // الطريقة 1: حلقة debugger لقياس التأخير
+        setInterval(function () {
+          var before = performance.now();
+          // eslint-disable-next-line no-debugger
+          debugger;
+          var after = performance.now();
+          if (after - before > 100) {
+            showShield();
+          }
+        }, 800);
+
+        // الطريقة 2: فرق أبعاد النافذة (يعمل جيدًا عند التثبيت docked)
+        var threshold = 160;
+        setInterval(function () {
+          var widthDiff = window.outerWidth - window.innerWidth;
+          var heightDiff = window.outerHeight - window.innerHeight;
+          if (widthDiff > threshold || heightDiff > threshold) {
+            showShield();
+          }
+        }, 800);
+      })();
     </script>
   </head>
   <body>
