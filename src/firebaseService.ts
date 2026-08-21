@@ -10,7 +10,8 @@ import {
   increment,
   deleteDoc as rawDeleteDoc,
   onSnapshot,
-  writeBatch
+  writeBatch,
+  runTransaction
 } from 'firebase/firestore';
 import { db, oldDb, storage } from './firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -2760,6 +2761,108 @@ export async function saveUserTasks(phone: string, tasks: Task[]): Promise<void>
 // حذف مستند مهمة واحدة فعليًا من Firestore (كان مفقودًا سابقًا — saveUserTasks تحفظ
 // بس المهام الموجودة بالمصفوفة الحالية، وما تحذف مستند Firestore لأي مهمة أُزيلت محليًا،
 // فكانت المهام "المحذوفة" ترجع تظهر بعد أي تحديث/رفريش لأنها تبقى بقاعدة البيانات)
+// فحص حظر حي (Live Ban Check) — بدل الاعتماد فقط على علامة محلية دائمة بالجهاز
+// (oxlo_device_banned) اللي ما تُلغى تلقائيًا إلا عند تسجيل دخول ناجح. هذا يفحص
+// مباشرة هل يوجد أي حساب بنفس عنوان الـIP الحالي محظور فعليًا بقاعدة البيانات
+// الحين — فلو الأدمن رفع الحظر (isBanned: false)، ينعكس فورًا بدون ما يحتاج
+// المستخدم يمسح شي بجهازه يدويًا.
+export async function checkDeviceBanByIp(ip: string): Promise<{ banned: boolean; reason?: string }> {
+  if (!ip) return { banned: false };
+  try {
+    const q = query(collection(db, "users"), where("ip", "==", ip), where("isBanned", "==", true));
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      const data = snap.docs[0].data() as User;
+      return { banned: true, reason: data.banReason };
+    }
+    return { banned: false };
+  } catch (error) {
+    console.warn("checkDeviceBanByIp error:", error);
+    // لو فشل الفحص الحي (مشكلة شبكة عابرة)، لا نمنع التسجيل بسببه —
+    // الأفضل نسمح ونعتمد على الفحص اليدوي اللاحق بدل ما نحجب مستخدم شرعي بالخطأ
+    return { banned: false };
+  }
+}
+
+// إكمال مهمة + صرف أرباحها بعملية ذرية واحدة (Firestore Transaction) — تحل مشكلة
+// خطيرة: الكود القديم كان يحدّث الرصيد محليًا فورًا، ثم يحاول تحديث Firestore
+// بشكل منفصل تمامًا (وإذا فشل، يُكتم الخطأ بصمت والواجهة توهم المستخدم بالنجاح).
+// هذا يخلي أي مستخدم يقدر "يكرر" نفس المهمة لا نهائيًا لو تعطّل حفظ حالتها.
+//
+// هذي الدالة تربط الفحص والصرف بعملية وحدة لا تتجزأ:
+// 1. تقرأ حالة المهمة الحقيقية من Firestore (مو من الكاش المحلي)
+// 2. لو كانت "مكتملة" فعلاً هناك، ترفض العملية فورًا (تمنع التكرار)
+// 3. لو كانت غير مكتملة، تحدّث حالتها + رصيد المستخدم بنفس اللحظة الذرية
+// 4. أي فشل (صلاحيات، شبكة، إلخ) يفشل العملية كاملة بدون أي تحديث جزئي أو وهمي
+export async function completeTaskAtomic(
+  phone: string,
+  taskId: string,
+  rewardValue: number,
+  taskSnapshot: { title: string; reward: string; category: string; taskDetails: string; requires: string; reviewLink: string; uploadedScreenshot?: string; claimDate?: string }
+): Promise<{ newEarnings: number; newTaskIncome: number }> {
+  const cleanPhone = phone.trim();
+  let cleanTaskId = taskId;
+  if (cleanTaskId.startsWith(`${cleanPhone}_`)) {
+    cleanTaskId = cleanTaskId.replace(`${cleanPhone}_`, '');
+  }
+  const taskDocRef = doc(db, "tasks", `${cleanPhone}_${cleanTaskId}`);
+  const userDocRef = doc(db, "users", cleanPhone);
+
+  const result = await runTransaction(db, async (transaction) => {
+    const taskSnap = await transaction.get(taskDocRef);
+    if (taskSnap.exists() && taskSnap.data()?.status === 'completed') {
+      throw new Error('TASK_ALREADY_COMPLETED');
+    }
+
+    const userSnap = await transaction.get(userDocRef);
+    if (!userSnap.exists()) {
+      throw new Error('USER_NOT_FOUND');
+    }
+    const userData = userSnap.data();
+    const baseEarnings = Number(userData.earnings) || 0;
+    const baseTaskIncome = Number(userData.taskIncome) || 0;
+    const reward = Number(rewardValue) || 0;
+    const newEarnings = Number((baseEarnings + reward).toFixed(2));
+    const newTaskIncome = Number((baseTaskIncome + reward).toFixed(2));
+
+    transaction.set(taskDocRef, {
+      id: cleanTaskId,
+      title: taskSnapshot.title,
+      reward: taskSnapshot.reward,
+      category: taskSnapshot.category,
+      status: 'completed',
+      taskDetails: taskSnapshot.taskDetails,
+      requires: taskSnapshot.requires,
+      reviewLink: taskSnapshot.reviewLink,
+      uploadedScreenshot: taskSnapshot.uploadedScreenshot || null,
+      claimDate: taskSnapshot.claimDate || null,
+      userId: cleanPhone,
+      updatedAt: new Date().toISOString()
+    }, { merge: true });
+
+    transaction.update(userDocRef, {
+      earnings: newEarnings,
+      taskIncome: newTaskIncome
+    });
+
+    return { newEarnings, newTaskIncome };
+  });
+
+  // مزامنة التخزين المحلي بعد نجاح المعاملة الذرية فعليًا (مو قبلها)
+  try {
+    const users = getLocalUsers();
+    if (users[cleanPhone]) {
+      users[cleanPhone].earnings = result.newEarnings;
+      users[cleanPhone].taskIncome = result.newTaskIncome;
+      saveLocalUsers(users);
+    }
+  } catch (e) {
+    console.warn("Local cache sync error after atomic task completion:", e);
+  }
+
+  return result;
+}
+
 export async function deleteUserTaskDoc(phone: string, taskId: string): Promise<void> {
   if (!phone || !taskId) return;
   const cleanPhone = phone.trim();

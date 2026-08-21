@@ -1442,65 +1442,47 @@ export default function TaskView() {
         setIsSubmittingTask(false);
         return;
       }
-      
-      let data: any;
-      let usedClientFallback = false;
-      
+
+      // إصلاح أمني حاسم: بدل المسار القديم اللي كان يحدّث الرصيد محليًا فورًا
+      // ثم يحاول Firestore بشكل منفصل (وإذا فشل، يُكتم الخطأ بصمت والواجهة توهم
+      // بالنجاح — هذا كان يسمح بتكرار صرف نفس المهمة لا نهائيًا)، نستخدم عملية
+      // ذرية واحدة تفحص وتصرف بنفس اللحظة، وتفشل بوضوح لو صار أي خطأ حقيقي
+      const { completeTaskAtomic } = await import('./firebaseService');
+
+      let data: { newEarnings: number; newTaskIncome: number };
       try {
-        const response = await fetch('/api/complete-task', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            phone: currentUser.phone,
-            password: currentUser.password || currentUser.id,
-            taskId: targetTask.id,
-            rewardValue
-          })
+        data = await completeTaskAtomic(currentUser.phone, targetTask.id, rewardValue, {
+          title: targetTask.title,
+          reward: targetTask.reward,
+          category: targetTask.category,
+          taskDetails: targetTask.taskDetails,
+          requires: targetTask.requires,
+          reviewLink: targetTask.reviewLink,
+          uploadedScreenshot: targetTask.uploadedScreenshot,
+          claimDate: targetTask.claimDate
         });
-        
-        const contentType = response.headers.get('content-type') || '';
-        if (!response.ok || contentType.includes('text/html')) {
-          throw new Error('API_NOT_FOUND_OR_HTML');
+      } catch (txErr: any) {
+        const msg = txErr?.message || String(txErr);
+        if (msg.includes('TASK_ALREADY_COMPLETED')) {
+          triggerNotification("⚠️ هذه المهمة مكتملة ومضافة لأرباحك بالفعل ولا يمكن تسليمها مرة أخرى!");
+          // نزامن الحالة المحلية عشان ما تفضل الواجهة تعرض المهمة كأنها متاحة بالغلط
+          const syncedTasks = tasks.map(t => t.id === targetTask.id ? { ...t, status: 'completed' as const } : t);
+          setTasks(syncedTasks);
+        } else if (msg.includes('USER_NOT_FOUND')) {
+          triggerNotification("⚠️ تعذّر العثور على حسابك. يرجى تسجيل الخروج والدخول من جديد.");
+        } else {
+          triggerNotification("🔴 تعذّر تسجيل المهمة وصرف أرباحها. يرجى التأكد من اتصالك بالإنترنت والمحاولة مرة أخرى، أو تسجيل الخروج والدخول من جديد لو تكررت المشكلة.");
         }
-        
-        data = await response.json();
-        
-        if (!data.success) {
-          throw new Error(data.message || "فشل تسجيل المهمة");
-        }
-      } catch (apiErr: any) {
-        console.warn("API complete-task failed or not found, falling back to direct client-side database update:", apiErr);
-        usedClientFallback = true;
-        
-        const baseEarnings = Number(currentUser.earnings) || 0;
-        const baseTaskIncome = Number(currentUser.taskIncome) || 0;
-        const reward = Number(rewardValue) || 0;
-        
-        const newEarnings = Number((baseEarnings + reward).toFixed(2));
-        const newTaskIncome = Number((baseTaskIncome + reward).toFixed(2));
-        
-        const { updateUserStats, creditReferrerCommission } = await import('./firebaseService');
-        
-        // 1. Direct Firestore write
-        await updateUserStats(currentUser.phone, {
-          earnings: newEarnings,
-          taskIncome: newTaskIncome
-        });
-        
-        // 2. Direct Referrer commission credit
-        try {
-          await creditReferrerCommission(currentUser.phone, reward, currentUser.username || '');
-        } catch (commErr) {
-          console.warn("Client fallback commission error:", commErr);
-        }
-        
-        data = {
-          success: true,
-          newEarnings,
-          newTaskIncome
-        };
+        setIsSubmittingTask(false);
+        return;
+      }
+
+      // العمولة للمُحيل (ثانوية، لا نوقف نجاح المهمة الأساسية لو فشلت وحدها)
+      try {
+        const { creditReferrerCommission } = await import('./firebaseService');
+        await creditReferrerCommission(currentUser.phone, rewardValue, currentUser.username || '');
+      } catch (commErr) {
+        console.warn("Referrer commission credit error:", commErr);
       }
       
       const updatedUser = {
@@ -1518,7 +1500,12 @@ export default function TaskView() {
         }
         return t;
       });
-      await saveTasks(updated);
+      setTasks(updated);
+      try {
+        localStorage.setItem(`micro_tasks_data_${currentUser.phone}`, JSON.stringify(updated));
+      } catch (e) {
+        console.warn("LocalStorage sync error after atomic completion:", e);
+      }
       
       triggerNotification(`🎉 تهانينا! تم تقديم العمل بنجاح وإضافة ${rewardValue} USDT إلى أرباحك مباشرة!`);
       setCurrentView('list');
@@ -1526,7 +1513,7 @@ export default function TaskView() {
     } catch (err: any) {
       console.error("Error confirming task and updating earnings:", err);
       const errorMessage = err.message || "فشل غير معروف";
-      triggerNotification(`🔴 فشل تحديث الرصيد (v2): ${errorMessage}`);
+      triggerNotification(`🔴 فشل تحديث الرصيد: ${errorMessage}`);
     } finally {
       setIsSubmittingTask(false);
     }
