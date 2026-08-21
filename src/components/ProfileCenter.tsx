@@ -329,14 +329,9 @@ export default function ProfileCenter({
         // Always refresh user info to get the latest updated balances/stats
         const freshUser = await getUserByPhone(currentUser.phone);
         if (freshUser) {
-          const safeUser = { ...freshUser };
-          if (Number(currentUser.earnings || 0) > Number(safeUser.earnings || 0)) {
-            safeUser.earnings = Number(currentUser.earnings || 0);
-          }
-          if (Number(currentUser.taskIncome || 0) > Number(safeUser.taskIncome || 0)) {
-            safeUser.taskIncome = Number(currentUser.taskIncome || 0);
-          }
-          onUpdateUser(safeUser);
+          // ⚠️ أُزيلت "حماية الرصيد الأعلى محليًا" — كانت ثغرة أمنية خطيرة.
+          // القيمة الموثوقة الوحيدة هي دائمًا اللي بقاعدة البيانات (Firestore).
+          onUpdateUser(freshUser);
         }
 
         // Always fetch system settings to validate limits and get official info if not passed from parent
