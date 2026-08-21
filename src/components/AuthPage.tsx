@@ -254,9 +254,12 @@ export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
         try {
           await shadowFirebaseAuth(user.phone, user.password || user.id);
         } catch (authErr: any) {
-          console.warn("Shadow auth on login failed:", authErr);
-          // تشخيص مؤقت: نظهر الخطأ الحقيقي بالواجهة عشان نعرف السبب بالضبط
-          setErrorMsg(`تحذير تشخيصي (Shadow Auth): ${authErr?.code || ''} ${authErr?.message || String(authErr)}`);
+          console.warn("Shadow auth on login failed after retries:", authErr);
+          // منع دخول "نص شغال" — لو فشلت المصادقة الحقيقية، نوقف الدخول تمامًا
+          // بدل ما نخلي المستخدم يدخل ويشوف بياناته لكن كل حذف/حفظ يفشل بصمت
+          setErrorMsg('تعذّر إكمال تسجيل الدخول بسبب مشكلة اتصال مؤقتة. يرجى إعادة تحميل الصفحة والمحاولة مرة أخرى.');
+          setLoading(false);
+          return;
         }
         recordUserLogin(user.phone || user.id).catch(e => console.warn(e));
         setSuccessMsg("تم تسجيل الدخول بنجاح!");
