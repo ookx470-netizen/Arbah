@@ -807,7 +807,24 @@ export default function TaskView() {
             if (localStorage.getItem('oxlo_device_banned') === 'true') {
               localStorage.removeItem('oxlo_device_banned');
             }
-            shadowFirebaseAuth(usr.phone, usr.password || usr.id).catch(e => console.warn('Shadow auth failed:', e));
+            // إصلاح حاسم: ننتظر نتيجة المصادقة الحقيقية فعليًا (بدل fire-and-forget)
+            // shadowFirebaseAuth أصلاً تعيد المحاولة 3 مرات داخليًا لأخطاء عابرة.
+            // لو فشلت رغم ذلك، نعيد محاولة أخيرة، وإن فشلت كمان نبلّغ المستخدم
+            // بوضوح بدل ما يفضل بجلسة "نص شغالة" (يشوف بياناته لكن كل حذف/حفظ يفشل بصمت)
+            try {
+              await shadowFirebaseAuth(usr.phone, usr.password || usr.id);
+            } catch (authErr) {
+              console.warn('Shadow auth (auto-login) failed, retrying once more:', authErr);
+              try {
+                await new Promise(r => setTimeout(r, 1500));
+                await shadowFirebaseAuth(usr.phone, usr.password || usr.id);
+              } catch (finalErr) {
+                console.error('Shadow auth (auto-login) failed permanently:', finalErr);
+                setTimeout(() => {
+                  triggerNotification('⚠️ تعذّر تأكيد جلستك بشكل كامل. لو واجهت مشكلة بحذف أو حفظ أي شي، سجّل خروج ثم دخول من جديد.');
+                }, 1000);
+              }
+            }
             setCurrentUser(usr);
           }
         } catch (e) {
@@ -1317,6 +1334,14 @@ export default function TaskView() {
     if (!taskToDeleteId) return;
     const updated = tasks.filter(t => t.id !== taskToDeleteId);
     saveTasks(updated);
+    // حذف حقيقي لمستند المهمة من Firestore (بدون هذا، كانت المهمة "المحذوفة" ترجع تظهر بعد أي رفريش)
+    if (currentUser?.phone) {
+      import('./firebaseService').then(({ deleteUserTaskDoc }) => {
+        deleteUserTaskDoc(currentUser.phone, taskToDeleteId).catch(e =>
+          console.warn('فشل حذف مستند المهمة:', e)
+        );
+      });
+    }
     triggerNotification("تم حذف المهمة بنجاح!");
     setActiveBottomTab('log');
     setCurrentView('list');
