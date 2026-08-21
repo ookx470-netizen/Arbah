@@ -89,6 +89,7 @@ import {
 } from 'lucide-react';
 import { SignalLogo } from './SignalLogo';
 import { getCountryFlagEmoji } from '../locationService';
+import VideoPoolManager from './VideoPoolManager';
 
 interface AdminPanelProps {
   adminUser: User;
@@ -122,7 +123,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
   });
   
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'teams' | 'deposits' | 'withdrawals' | 'plans' | 'settings' | 'all' | 'support' | 'banned'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'teams' | 'deposits' | 'withdrawals' | 'plans' | 'settings' | 'all' | 'support' | 'banned' | 'videoPool'>('overview');
   const [depositFilter, setDepositFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
   const [withdrawalFilter, setWithdrawalFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
 
@@ -1591,6 +1592,15 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                 <Zap className="w-5 h-5 text-purple-600 mb-1 group-hover:scale-110 transition-transform" />
                 <div className="text-xs font-bold text-slate-800">باقات VIP والمهام</div>
                 <div className="text-[10px] text-slate-500">{settings.vipPlans?.length || 0} باقة متاحة</div>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('videoPool')}
+                className="p-3 bg-rose-50 hover:bg-rose-100/80 border border-rose-200/60 rounded-xl text-right transition-all cursor-pointer group"
+              >
+                <Youtube className="w-5 h-5 text-rose-600 mb-1 group-hover:scale-110 transition-transform" />
+                <div className="text-xs font-bold text-slate-800">روابط مهام الفيديو</div>
+                <div className="text-[10px] text-slate-500">يوتيوب / تيك توك / فيسبوك / انستقرام</div>
               </button>
 
               <button
@@ -3597,6 +3607,9 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
             </div>
           </div>
           )}
+
+          {/* Video Task Pool Management */}
+          {(activeTab === 'videoPool') && <VideoPoolManager />}
 
           {/* VIP / Subscription Tiers CRUD card */}
           {(activeTab === 'plans' || activeTab === 'all') && (
