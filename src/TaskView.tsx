@@ -301,17 +301,20 @@ export function getNormalizedTaskText(task: any) {
     taskDetails = `انتقل إلى رابط الفيديو، وشاهده واضغط زر الإعجاب (Like) ثم التقط لقطة شاشة (سكرين) تظهر الإعجاب بالفيديو لإكمال المهمة.`;
     requires = `رفع لقطة شاشة (سكرين) واضحة تثبت الإعجاب (Like) بالفيديو.`;
   } else if (category === 'facebook') {
-    title = `تفاعل مع الفيديو (لايك + متابعة)${suffix}`;
-    taskDetails = `انتقل إلى رابط فيديو/ريل، واضغط زر الإعجاب (Like) ومتابعة الصفحة (Follow) ثم التقط لقطة شاشة (سكرين) تظهر التفاعل مع الفيديو لإكمال المهمة.`;
-    requires = `رفع لقطة شاشة (سكرين) واضحة تثبت الإعجاب ومتابعة الصفحة في فيسبوك.`;
+    // مهام فيسبوك: لايك فقط (بدون متابعة)
+    title = `تفاعل مع الفيديو (لايك)${suffix}`;
+    taskDetails = `انتقل إلى رابط الفيديو/الريل، وشاهده واضغط زر الإعجاب (Like) ثم التقط لقطة شاشة (سكرين) تظهر الإعجاب بالفيديو لإكمال المهمة.`;
+    requires = `رفع لقطة شاشة (سكرين) واضحة تثبت الإعجاب (Like) بالفيديو.`;
   } else if (category === 'tiktok') {
-    title = `تفاعل مع الفيديو (لايك + متابعة)${suffix}`;
-    taskDetails = `انتقل إلى رابط فيديو تيك توك، واضغط زر الإعجاب (Like) ومتابعة الحساب (Follow) ثم التقط لقطة شاشة (سكرين) تظهر التفاعل واللايك للفيديو لإكمال المهمة.`;
-    requires = `رفع لقطة شاشة (سكرين) واضحة تثبت الإعجاب بالاشتراك ومتابعة الحساب.`;
+    // مهام تيك توك: لايك فقط (بدون متابعة)
+    title = `تفاعل مع الفيديو (لايك)${suffix}`;
+    taskDetails = `انتقل إلى رابط فيديو تيك توك، وشاهده واضغط زر الإعجاب (Like) ثم التقط لقطة شاشة (سكرين) تظهر الإعجاب بالفيديو لإكمال المهمة.`;
+    requires = `رفع لقطة شاشة (سكرين) واضحة تثبت الإعجاب (Like) بالفيديو.`;
   } else if (category === 'instagram') {
-    title = `تفاعل مع الفيديو (لايك + متابعة)${suffix}`;
-    taskDetails = `انتقل إلى رابط الريل، واضغط زر الإعجاب (Like) ومتابعة الحساب (Follow) ثم التقط لقطة شاشة (سكرين) تظهر التفاعل واللايك للفيديو لإكمال المهمة.`;
-    requires = `رفع لقطة شاشة (سكرين) واضحة تثبت الإعجاب ومتابعة الحساب في انستقرام.`;
+    // مهام انستقرام: لايك فقط (بدون متابعة)
+    title = `تفاعل مع الفيديو (لايك)${suffix}`;
+    taskDetails = `انتقل إلى رابط الريل، وشاهده واضغط زر الإعجاب (Like) ثم التقط لقطة شاشة (سكرين) تظهر الإعجاب بالفيديو لإكمال المهمة.`;
+    requires = `رفع لقطة شاشة (سكرين) واضحة تثبت الإعجاب (Like) بالفيديو.`;
   }
 
   return { title, taskDetails, requires };
@@ -1879,7 +1882,7 @@ export default function TaskView() {
                           onClick={() => {
                             handleClaimTask(item);
                           }}
-                          className="w-full h-11 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl text-[10px] font-black transition-all active:scale-95 shadow-lg shadow-slate-900/10 flex items-center justify-center gap-2"
+                          className="w-full h-11 bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 hover:brightness-110 text-white rounded-2xl text-[10px] font-black transition-all active:scale-95 shadow-lg shadow-indigo-500/40 flex items-center justify-center gap-2"
                         >
                           <span>بدء تنفيذ المهمة الآن</span>
                           <ArrowUpRight className="w-4 h-4" />
