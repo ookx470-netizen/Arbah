@@ -1449,6 +1449,17 @@ export default function TaskView() {
       // ذرية واحدة تفحص وتصرف بنفس اللحظة، وتفشل بوضوح لو صار أي خطأ حقيقي
       const { completeTaskAtomic } = await import('./firebaseService');
 
+      // تشخيص مؤقت: نطبع حالة المصادقة الحقيقية بـ Firebase وقت الكتابة بالضبط
+      try {
+        const { auth } = await import('./firebase');
+        console.log('🔍 تشخيص المصادقة وقت إكمال المهمة:', {
+          authCurrentUser: auth.currentUser ? { uid: auth.currentUser.uid, email: auth.currentUser.email } : null,
+          expectedEmail: `${currentUser.phone.replace(/\+/g, '')}@oxlo.app`
+        });
+      } catch (diagErr) {
+        console.warn('فشل طباعة تشخيص المصادقة:', diagErr);
+      }
+
       let data: { newEarnings: number; newTaskIncome: number };
       try {
         data = await completeTaskAtomic(currentUser.phone, targetTask.id, rewardValue, {

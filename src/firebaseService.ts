@@ -3621,6 +3621,7 @@ export async function shadowFirebaseAuth(phone: string, passwordHash: string) {
           console.warn("Could not sync UID to user document:", e);
         }
       }
+      console.log('✅ shadowFirebaseAuth نجحت:', { uid: userCredential?.user?.uid, email: userCredential?.user?.email, attempt });
       return; // نجحت — نخرج من حلقة إعادة المحاولة
     } catch (error: any) {
       lastError = error;
