@@ -2757,6 +2757,53 @@ export async function saveUserTasks(phone: string, tasks: Task[]): Promise<void>
   }
 }
 
+// حذف مستند مهمة واحدة فعليًا من Firestore (كان مفقودًا سابقًا — saveUserTasks تحفظ
+// بس المهام الموجودة بالمصفوفة الحالية، وما تحذف مستند Firestore لأي مهمة أُزيلت محليًا،
+// فكانت المهام "المحذوفة" ترجع تظهر بعد أي تحديث/رفريش لأنها تبقى بقاعدة البيانات)
+export async function deleteUserTaskDoc(phone: string, taskId: string): Promise<void> {
+  if (!phone || !taskId) return;
+  const cleanPhone = phone.trim();
+
+  // إزالة من التخزين المحلي أيضًا (نفس المفتاح المستخدم بـ saveUserTasks/getUserTasks)
+  try {
+    const key = `micro_tasks_data_${cleanPhone}`;
+    const saved = localStorage.getItem(key);
+    if (saved) {
+      const list = JSON.parse(saved).filter((t: any) => t?.id !== taskId);
+      localStorage.setItem(key, JSON.stringify(list));
+    }
+  } catch (e) {
+    console.warn("LocalStorage deletion error in deleteUserTaskDoc:", e);
+  }
+
+  if (useLocalStorageFallback) return;
+
+  try {
+    // بدل تخمين شكل معرّف المستند (اللي كان يفشل بصمت لو رقم الهاتف مخزّن بصيغة
+    // مختلفة عن +964/964)، نبحث بنفس استعلام getUserTasks الناجح فعليًا، ونحذف
+    // كل مستند يطابق (احتياطًا لو فيه أكثر من نسخة مكررة بنفس taskId)
+    const q = query(collection(db, "tasks"), where("userId", "==", cleanPhone));
+    const snap = await getDocs(q);
+    const matches = snap.docs.filter(d => {
+      const data = d.data();
+      let rawId = data.id || d.id;
+      if (rawId.startsWith(`${cleanPhone}_`)) {
+        rawId = rawId.replace(`${cleanPhone}_`, '');
+      }
+      return rawId === taskId || d.id === taskId || d.id === `${cleanPhone}_${taskId}`;
+    });
+
+    if (matches.length === 0) {
+      console.warn('deleteUserTaskDoc: لم يُعثر على مستند مطابق لـ', taskId);
+      return;
+    }
+
+    await Promise.all(matches.map(d => deleteDoc(doc(db, "tasks", d.id))));
+  } catch (error) {
+    console.warn("Firestore deleteUserTaskDoc error:", error);
+  }
+}
+
 // Subscribe to system settings in real-time
 export function subscribeToSystemSettings(onUpdate: (settings: SystemSettings) => void): () => void {
   const settingsRef = doc(db, "settings", "general");
