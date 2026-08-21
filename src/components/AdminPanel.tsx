@@ -85,7 +85,8 @@ import {
   ExternalLink,
   CheckSquare,
   Square,
-  AlertTriangle
+  AlertTriangle,
+  Youtube
 } from 'lucide-react';
 import { SignalLogo } from './SignalLogo';
 import { getCountryFlagEmoji } from '../locationService';
