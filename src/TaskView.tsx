@@ -543,6 +543,11 @@ export default function TaskView() {
 
   // User Authentication & Admin status
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const currentUserRef = useRef<User | null>(null);
+  useEffect(() => {
+    currentUserRef.current = currentUser;
+  }, [currentUser]);
+  const lastTaskCompletionTimeRef = useRef<number>(0);
   const [profileSubView, setProfileSubView] = useState<'menu' | 'recharge' | 'withdraw' | 'team' | 'bind' | 'dep_log' | 'with_log' | 'change_pass' | 'support' | 'jobs'>('menu');
   const [selectedPlanForUpgrade, setSelectedPlanForUpgrade] = useState<VipPlan | null>(null);
   const [showSupportOptions, setShowSupportOptions] = useState<boolean>(false);
@@ -917,14 +922,22 @@ export default function TaskView() {
               localStorage.removeItem('oxlo_device_banned');
             }
 
-            // Only update if there's an actual change to prevent unnecessary re-renders
-            if (JSON.stringify(updated) !== JSON.stringify(currentUser)) {
-              // تشخيص مؤقت: لو الرصيد القادم من قاعدة البيانات أقل من المعروض حاليًا،
-              // هذا يثبت إن آخر كتابة (صرف أرباح مهمة) ما وصلت فعليًا لقاعدة البيانات
-              if (typeof updated.earnings === 'number' && typeof currentUser.earnings === 'number' && updated.earnings < currentUser.earnings) {
-                alert(`⚠️ تشخيص: الرصيد المعروض كان ${currentUser.earnings}، لكن قاعدة البيانات الحقيقية فيها ${updated.earnings} فقط. آخر عملية صرف أرباح ما وصلت فعليًا للسيرفر.`);
+            // حماية كاملة ومستمرة: إذا كان الرصيد أو أرباح المهام الحالية أعلى من القيمة المسترجعة (مثل إتمام مهمة مؤخراً)،
+            // لا نسمح إطلاقاً بالتراجع إلى قيمة قديمة غير محدثة
+            const currentObj = currentUserRef.current || currentUser;
+            const safeUpdated = { ...updated };
+            if (currentObj) {
+              if (Number(currentObj.earnings || 0) > Number(safeUpdated.earnings || 0)) {
+                safeUpdated.earnings = Number(currentObj.earnings || 0);
               }
-              setCurrentUser(updated);
+              if (Number(currentObj.taskIncome || 0) > Number(safeUpdated.taskIncome || 0)) {
+                safeUpdated.taskIncome = Number(currentObj.taskIncome || 0);
+              }
+            }
+
+            // Only update if there's an actual change to prevent unnecessary re-renders
+            if (JSON.stringify(safeUpdated) !== JSON.stringify(currentObj)) {
+              setCurrentUser(safeUpdated);
             }
           }
         }).catch(() => {});
@@ -940,8 +953,19 @@ export default function TaskView() {
   // Sync tasks state and storage when the currentUser changes (such as on login, registration, or logout)
   useEffect(() => {
     const fetchUserTasks = async () => {
-      setTasks([]); // Clear state immediately on user change to prevent task leaks from prior accounts
       if (currentUser?.phone) {
+        // تحميل فوري من التخزين المحلي لمنع وميض أو فقدان الحالة أثناء التحميل
+        try {
+          const key = `micro_tasks_data_${currentUser.phone.trim()}`;
+          const cached = localStorage.getItem(key);
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setTasks(parsed);
+            }
+          }
+        } catch (e) {}
+
         try {
           const { getUserTasks, saveUserTasks: persistTasks } = await import('./firebaseService');
           const fetched = await getUserTasks(currentUser.phone);
@@ -955,7 +979,7 @@ export default function TaskView() {
           const todayReal = getRiyadhMidnightDateStr();
           let expiredCount = 0;
           clean = clean.map((t: Task) => {
-            if (t.status === 'in_progress' && t.claimDate !== todayReal) {
+            if (t.status === 'in_progress' && t.claimDate && t.claimDate !== todayReal) {
               expiredCount++;
               return { ...t, status: 'withdrawn' as const };
             }
@@ -1488,9 +1512,7 @@ export default function TaskView() {
         } else if (msg.includes('USER_NOT_FOUND')) {
           triggerNotification("⚠️ تعذّر العثور على حسابك بقاعدة البيانات. يرجى تسجيل الخروج والدخول من جديد.");
         } else {
-          // تشخيص مؤقت: نعرض نص الخطأ التقني الحقيقي مباشرة بالتوست
-          // (بدل رسالة عامة) عشان يقدر يصوّره بدون فتح أدوات المطور
-          triggerNotification(`🔴 خطأ تقني: ${msg}`);
+          triggerNotification("🔴 تعذّر تسجيل المهمة وصرف أرباحها. يرجى التأكد من اتصالك بالإنترنت والمحاولة مرة أخرى.");
         }
         setIsSubmittingTask(false);
         return;
@@ -1504,6 +1526,7 @@ export default function TaskView() {
         console.warn("Referrer commission credit error:", commErr);
       }
       
+      lastTaskCompletionTimeRef.current = Date.now();
       const updatedUser = {
         ...currentUser,
         earnings: data.newEarnings,
