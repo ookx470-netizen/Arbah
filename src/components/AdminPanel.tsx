@@ -1680,6 +1680,9 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
           
           {/* Main Content Column */}
           <div className={activeTab === 'all' ? 'lg:col-span-2 space-y-6' : 'space-y-6'}>
+
+            {/* Video Task Pool Management */}
+            {(activeTab === 'videoPool') && <VideoPoolManager />}
             
             {/* Table: Registered Users Panel */}
             {(activeTab === 'users' || activeTab === 'all' || activeTab === 'banned') && (
@@ -3608,9 +3611,6 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
             </div>
           </div>
           )}
-
-          {/* Video Task Pool Management */}
-          {(activeTab === 'videoPool') && <VideoPoolManager />}
 
           {/* VIP / Subscription Tiers CRUD card */}
           {(activeTab === 'plans' || activeTab === 'all') && (
