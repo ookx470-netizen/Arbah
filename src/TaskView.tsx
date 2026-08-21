@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import oxloLogoImg from './assets/images/oxlo_clean_logo_1786416406822.jpg';
+import oxloLogoImg from './assets/images/oxlo_logo_1786416051044.jpg';
 import { 
   Home, 
   Briefcase, 
@@ -1473,6 +1473,7 @@ export default function TaskView() {
           claimDate: targetTask.claimDate
         });
       } catch (txErr: any) {
+        console.error("Task completion transaction error details:", txErr);
         const msg = txErr?.message || String(txErr);
         if (msg.includes('TASK_ALREADY_COMPLETED')) {
           triggerNotification("⚠️ هذه المهمة مكتملة ومضافة لأرباحك بالفعل ولا يمكن تسليمها مرة أخرى!");
@@ -1480,9 +1481,9 @@ export default function TaskView() {
           const syncedTasks = tasks.map(t => t.id === targetTask.id ? { ...t, status: 'completed' as const } : t);
           setTasks(syncedTasks);
         } else if (msg.includes('USER_NOT_FOUND')) {
-          triggerNotification("⚠️ تعذّر العثور على حسابك. يرجى تسجيل الخروج والدخول من جديد.");
+          triggerNotification("⚠️ تعذّر العثور على حسابك بقاعدة البيانات. يرجى تسجيل الخروج والدخول من جديد.");
         } else {
-          triggerNotification("🔴 تعذّر تسجيل المهمة وصرف أرباحها. يرجى التأكد من اتصالك بالإنترنت والمحاولة مرة أخرى، أو تسجيل الخروج والدخول من جديد لو تكررت المشكلة.");
+          triggerNotification("🔴 تعذّر تسجيل المهمة وصرف أرباحها. يرجى التأكد من اتصالك بالإنترنت والمحاولة مرة أخرى.");
         }
         setIsSubmittingTask(false);
         return;

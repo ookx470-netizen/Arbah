@@ -10,19 +10,22 @@ export function compressBase64Image(
 ): Promise<string> {
   return new Promise((resolve) => {
     // If it's not a valid base64 image or not an image at all, return it
-    if (!base64Str || !base64Str.startsWith('data:image')) {
-      resolve(base64Str);
+    if (!base64Str || typeof base64Str !== 'string' || !base64Str.startsWith('data:image')) {
+      resolve(base64Str || '');
       return;
     }
 
     const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.src = base64Str;
+    // Only set crossOrigin for external http(s) URLs, never on data: URIs (avoids iOS/WebKit canvas taint/abort)
+    if (base64Str.startsWith('http://') || base64Str.startsWith('https://')) {
+      img.crossOrigin = 'anonymous';
+    }
+
     img.onload = () => {
       try {
         const canvas = document.createElement('canvas');
-        let width = img.width;
-        let height = img.height;
+        let width = img.naturalWidth || img.width || 400;
+        let height = img.naturalHeight || img.height || 400;
 
         if (width > height) {
           if (width > maxWidth) {
@@ -36,24 +39,27 @@ export function compressBase64Image(
           }
         }
 
-        canvas.width = width;
-        canvas.height = height;
+        canvas.width = Math.max(1, width);
+        canvas.height = Math.max(1, height);
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          ctx.drawImage(img, 0, 0, width, height);
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
           const compressed = canvas.toDataURL('image/jpeg', quality);
           resolve(compressed);
         } else {
-          resolve(base64Str);
+          // If canvas context fails, safety-cap length so Firestore never rejects
+          resolve(base64Str.length > 350000 ? base64Str.substring(0, 350000) : base64Str);
         }
       } catch (e) {
         console.error("Error during image compression:", e);
-        resolve(base64Str);
+        resolve(base64Str.length > 350000 ? base64Str.substring(0, 350000) : base64Str);
       }
     };
-    img.onerror = () => {
-      resolve(base64Str);
+    img.onerror = (err) => {
+      console.warn("Image load error during compression:", err);
+      resolve(base64Str.length > 350000 ? base64Str.substring(0, 350000) : base64Str);
     };
+    img.src = base64Str;
   });
 }
 
