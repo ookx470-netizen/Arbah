@@ -3517,38 +3517,54 @@ export async function bulkAddVideoLinks(
   let added = 0;
   let skipped = 0;
 
-  // نتحقق دفعة دفعة (Firestore batch أقصاها 500 عملية) لتفادي أي حد
-  const BATCH_SIZE = 400;
-  for (let start = 0; start < cleanUrls.length; start += BATCH_SIZE) {
-    const chunk = cleanUrls.slice(start, start + BATCH_SIZE);
-    const batch = writeBatch(db);
-    let batchHasWrites = false;
+  // فحص الوجود بالتوازي على دفعات (بدل واحد بواحد بالتسلسل، اللي كان بطيء جدًا
+  // مع مجموعات كبيرة — كل رابط كان يحتاج طلب شبكة منفصل بالتتابع)
+  const CHECK_PARALLEL = 25;
+  const existsMap = new Map<string, boolean>();
 
+  for (let start = 0; start < cleanUrls.length; start += CHECK_PARALLEL) {
+    const chunk = cleanUrls.slice(start, start + CHECK_PARALLEL);
+    const results = await Promise.all(
+      chunk.map(async (url) => {
+        const id = videoDocId(platform, url);
+        try {
+          const snap = await getDoc(doc(db, 'videoPool', id));
+          return { url, exists: snap.exists() };
+        } catch (e) {
+          // لو فشل فحص رابط واحد (مشكلة شبكة عابرة)، نعامله كغير موجود
+          // بدل ما نوقف كل العملية — الأهم إكمال الإضافة لباقي الروابط
+          console.warn('فشل فحص وجود الرابط:', url, e);
+          return { url, exists: false };
+        }
+      })
+    );
+    for (const r of results) existsMap.set(r.url, r.exists);
+  }
+
+  // كتابة الروابط الجديدة على دفعات (Firestore batch أقصاها 500 عملية)
+  const BATCH_SIZE = 400;
+  const newUrls = cleanUrls.filter(u => !existsMap.get(u));
+  skipped = cleanUrls.length - newUrls.length;
+
+  for (let start = 0; start < newUrls.length; start += BATCH_SIZE) {
+    const chunk = newUrls.slice(start, start + BATCH_SIZE);
+    const batch = writeBatch(db);
     for (const url of chunk) {
       const id = videoDocId(platform, url);
-      const ref = doc(db, 'videoPool', id);
-      const existing = await getDoc(ref);
-      if (existing.exists()) {
-        skipped++;
-        continue;
-      }
-      batch.set(ref, {
+      batch.set(doc(db, 'videoPool', id), {
         platform,
         url,
         active: true,
         addedAt: Date.now()
       });
-      batchHasWrites = true;
       added++;
     }
-
-    if (batchHasWrites) {
-      await batch.commit();
-    }
+    await batch.commit();
   }
 
   return { added, skipped };
 }
+
 
 // جلب كل الروابط النشطة لمنصة معيّنة (تُستخدم لحساب دوران المهام اليومي)
 export async function getActiveVideoPool(platform: VideoPlatform): Promise<VideoPoolItem[]> {
