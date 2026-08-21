@@ -2677,15 +2677,25 @@ export async function deleteAllWithdrawalsByAdmin(): Promise<void> {
 export async function getUserTasks(phone: string): Promise<Task[]> {
   if (!phone) return [];
   const cleanPhone = phone.trim();
-  if (useLocalStorageFallback) {
-    const key = `micro_tasks_data_${cleanPhone}`;
+  const key = `micro_tasks_data_${cleanPhone}`;
+  let localTasks: Task[] = [];
+  try {
     const saved = localStorage.getItem(key);
-    return saved ? JSON.parse(saved) : [];
+    if (saved) {
+      localTasks = JSON.parse(saved);
+    }
+  } catch (e) {
+    console.warn("Error parsing local micro_tasks_data:", e);
   }
+
+  if (useLocalStorageFallback) {
+    return localTasks;
+  }
+
   try {
     const q = query(collection(db, "tasks"), where("userId", "==", cleanPhone));
     const querySnapshot = await getDocs(q);
-    const tasks: Task[] = [];
+    const remoteTasks: Task[] = [];
     querySnapshot.forEach((docSnap) => {
       const data = docSnap.data();
       if (data && (!data.userId || data.userId === cleanPhone)) {
@@ -2693,7 +2703,7 @@ export async function getUserTasks(phone: string): Promise<Task[]> {
         if (rawId.startsWith(`${cleanPhone}_`)) {
           rawId = rawId.replace(`${cleanPhone}_`, '');
         }
-        tasks.push({
+        remoteTasks.push({
           id: rawId,
           title: data.title || '',
           reward: data.reward || '',
@@ -2707,11 +2717,45 @@ export async function getUserTasks(phone: string): Promise<Task[]> {
         });
       }
     });
-    return tasks;
+
+    // دمج موثوق يحافظ على حالة المهام المكتملة ولقطات الشاشة حتى لو تأخر تحديث قاعدة البيانات
+    const taskMap = new Map<string, Task>();
+    
+    // وضع المهام المخزنة محلياً أولاً
+    for (const lt of localTasks) {
+      if (lt && lt.id) {
+        taskMap.set(lt.id, lt);
+      }
+    }
+
+    // دمج المهام القادمة من السيرفر مع حماية حالة الاكتمال
+    for (const rt of remoteTasks) {
+      if (!rt || !rt.id) continue;
+      const existing = taskMap.get(rt.id);
+      if (existing) {
+        const isCompleted = existing.status === 'completed' || rt.status === 'completed';
+        const finalStatus = isCompleted ? 'completed' : (rt.status || existing.status);
+        const finalScreenshot = existing.uploadedScreenshot || rt.uploadedScreenshot;
+        taskMap.set(rt.id, {
+          ...rt,
+          ...existing,
+          status: finalStatus,
+          uploadedScreenshot: finalScreenshot
+        });
+      } else {
+        taskMap.set(rt.id, rt);
+      }
+    }
+
+    const mergedTasks = Array.from(taskMap.values());
+    try {
+      localStorage.setItem(key, JSON.stringify(mergedTasks));
+    } catch (e) {}
+
+    return mergedTasks;
   } catch (error) {
-    console.warn("Firestore getUserTasks error, falling back:", error);
-    const saved = localStorage.getItem(`micro_tasks_data_${cleanPhone}`);
-    return saved ? JSON.parse(saved) : [];
+    console.warn("Firestore getUserTasks error, falling back to reliable local tasks:", error);
+    return localTasks;
   }
 }
 
@@ -2737,7 +2781,8 @@ export async function saveUserTasks(phone: string, tasks: Task[]): Promise<void>
       if (cleanId.startsWith(`${cleanPhone}_`)) {
         cleanId = cleanId.replace(`${cleanPhone}_`, '');
       }
-      const docId = `${cleanPhone}_${cleanId}`;
+      const safeId = cleanId.replace(/[\/\s#?&]+/g, '_');
+      const docId = `${cleanPhone}_${safeId}`;
       await setDoc(doc(db, "tasks", docId), {
         id: cleanId,
         title: t.title,

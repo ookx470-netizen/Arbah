@@ -935,8 +935,19 @@ export default function TaskView() {
   // Sync tasks state and storage when the currentUser changes (such as on login, registration, or logout)
   useEffect(() => {
     const fetchUserTasks = async () => {
-      setTasks([]); // Clear state immediately on user change to prevent task leaks from prior accounts
       if (currentUser?.phone) {
+        // تحميل فوري من التخزين المحلي لمنع وميض أو فقدان الحالة أثناء التحميل
+        try {
+          const key = `micro_tasks_data_${currentUser.phone.trim()}`;
+          const cached = localStorage.getItem(key);
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setTasks(parsed);
+            }
+          }
+        } catch (e) {}
+
         try {
           const { getUserTasks, saveUserTasks: persistTasks } = await import('./firebaseService');
           const fetched = await getUserTasks(currentUser.phone);
@@ -950,7 +961,7 @@ export default function TaskView() {
           const todayReal = getRiyadhMidnightDateStr();
           let expiredCount = 0;
           clean = clean.map((t: Task) => {
-            if (t.status === 'in_progress' && t.claimDate !== todayReal) {
+            if (t.status === 'in_progress' && t.claimDate && t.claimDate !== todayReal) {
               expiredCount++;
               return { ...t, status: 'withdrawn' as const };
             }
