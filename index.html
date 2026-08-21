@@ -78,26 +78,43 @@
           }
         }
 
-        // الطريقة 1: حلقة debugger لقياس التأخير
-        setInterval(function () {
-          var before = performance.now();
-          // eslint-disable-next-line no-debugger
-          debugger;
-          var after = performance.now();
-          if (after - before > 100) {
-            showShield();
-          }
-        }, 800);
+        // تعطيل كامل داخل متصفحات التطبيقات الداخلية (تيليجرام/انستقرام/فيسبوك/إلخ)
+        // — هذي البيئات تسبب فروقات توقيت وأبعاد غير طبيعية تؤدي لحجب مستخدمين
+        // حقيقيين بالغلط (False Positive)، وفائدة الحماية فيها ضعيفة أصلاً
+        var ua = navigator.userAgent || '';
+        var isInAppBrowser = /Telegram|Instagram|FBAN|FBAV|Line\/|MicroMessenger|TikTok/i.test(ua);
 
-        // الطريقة 2: فرق أبعاد النافذة (يعمل جيدًا عند التثبيت docked)
-        var threshold = 160;
-        setInterval(function () {
-          var widthDiff = window.outerWidth - window.innerWidth;
-          var heightDiff = window.outerHeight - window.innerHeight;
-          if (widthDiff > threshold || heightDiff > threshold) {
-            showShield();
-          }
-        }, 800);
+        if (!isInAppBrowser) {
+          // الطريقة 1: حلقة debugger لقياس التأخير — تحتاج 3 اكتشافات متتالية
+          // (بدل اكتشاف واحد) قبل ما تحجب، عشان نتفادى قفزة توقيت عابرة وحيدة
+          var debuggerHits = 0;
+          setInterval(function () {
+            var before = performance.now();
+            // eslint-disable-next-line no-debugger
+            debugger;
+            var after = performance.now();
+            if (after - before > 300) {
+              debuggerHits++;
+              if (debuggerHits >= 3) showShield();
+            } else {
+              debuggerHits = 0;
+            }
+          }, 800);
+
+          // الطريقة 2: فرق أبعاد النافذة (يعمل جيدًا عند التثبيت docked)
+          var threshold = 220;
+          var sizeHits = 0;
+          setInterval(function () {
+            var widthDiff = window.outerWidth - window.innerWidth;
+            var heightDiff = window.outerHeight - window.innerHeight;
+            if (widthDiff > threshold || heightDiff > threshold) {
+              sizeHits++;
+              if (sizeHits >= 3) showShield();
+            } else {
+              sizeHits = 0;
+            }
+          }, 800);
+        }
       })();
     </script>
   </head>
