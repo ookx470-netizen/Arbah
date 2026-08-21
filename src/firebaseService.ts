@@ -3482,42 +3482,57 @@ import { auth } from './firebase';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 
 export async function shadowFirebaseAuth(phone: string, passwordHash: string) {
-  try {
-    const email = `${phone.replace(/\+/g, '')}@oxlo.app`;
-    const safePassword = passwordHash.substring(0, 20).padEnd(6, '0');
-    let userCredential;
+  const email = `${phone.replace(/\+/g, '')}@oxlo.app`;
+  const safePassword = passwordHash.substring(0, 20).padEnd(6, '0');
+
+  // إعادة محاولة تلقائية (حتى 3 مرات) — مشكلة "Database is closing" غالبًا عابرة
+  // (تعارض مؤقت بـ IndexedDB وقت تحميل الصفحة)، وتنجح بمحاولة ثانية خلال ثوانٍ
+  let lastError: any = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      userCredential = await withTimeout(signInWithEmailAndPassword(auth, email, safePassword));
-    } catch (error: any) {
-      if (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential') {
-        try {
-          userCredential = await withTimeout(createUserWithEmailAndPassword(auth, email, safePassword));
-        } catch (createError: any) {
-          if (createError.code === 'auth/email-already-in-use') {
-             userCredential = await withTimeout(signInWithEmailAndPassword(auth, email, safePassword));
-          } else {
-             throw createError;
+      let userCredential;
+      try {
+        userCredential = await withTimeout(signInWithEmailAndPassword(auth, email, safePassword));
+      } catch (error: any) {
+        if (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential') {
+          try {
+            userCredential = await withTimeout(createUserWithEmailAndPassword(auth, email, safePassword));
+          } catch (createError: any) {
+            if (createError.code === 'auth/email-already-in-use') {
+              userCredential = await withTimeout(signInWithEmailAndPassword(auth, email, safePassword));
+            } else {
+              throw createError;
+            }
           }
+        } else {
+          throw error;
         }
-      } else {
+      }
+
+      if (userCredential && userCredential.user) {
+        try {
+          await updateDoc(doc(db, "users", phone), {
+            uid: userCredential.user.uid
+          });
+        } catch (e) {
+          console.warn("Could not sync UID to user document:", e);
+        }
+      }
+      return; // نجحت — نخرج من حلقة إعادة المحاولة
+    } catch (error: any) {
+      lastError = error;
+      const msg = error?.message || String(error);
+      // نعيد المحاولة بس للأخطاء العابرة (مشاكل قاعدة بيانات محلية/مهلة)، مو لأخطاء كلمة مرور حقيقية
+      const isTransient = msg.includes('closing') || msg.includes('hidden') || msg.includes('timeout') || error?.code === 'unavailable';
+      if (!isTransient || attempt === 3) {
+        console.error("Shadow auth REAL error:", error?.code, error?.message, error);
         throw error;
       }
+      console.warn(`Shadow auth محاولة ${attempt} فشلت (خطأ عابر)، إعادة محاولة...`, msg);
+      await new Promise(r => setTimeout(r, 700 * attempt));
     }
-
-    if (userCredential && userCredential.user) {
-      try {
-        await updateDoc(doc(db, "users", phone), {
-          uid: userCredential.user.uid
-        });
-      } catch (e) {
-        console.warn("Could not sync UID to user document:", e);
-      }
-    }
-  } catch (error: any) {
-    // تشخيص مؤقت: نعرض الخطأ الحقيقي بدل ما نكتمه بصمت
-    console.error("Shadow auth REAL error:", error?.code, error?.message, error);
-    throw error;
   }
+  throw lastError;
 }
 
 // ============================================================
