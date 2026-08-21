@@ -43,10 +43,12 @@
       }
     </style>
     <script>
+      // ⚠️ معطّل مؤقتًا للتشخيص — رجّعه بعد ما تخلص من فحص Console
       // منع الزر الأيمن
-      document.addEventListener('contextmenu', event => event.preventDefault());
+      // document.addEventListener('contextmenu', event => event.preventDefault());
 
       // منع الاختصارات: F12, Ctrl+Shift+I/J/C, Ctrl+U, Ctrl+S
+      /*
       document.addEventListener('keydown', function (e) {
         if (
           e.key === 'F12' ||
@@ -57,6 +59,7 @@
           return false;
         }
       });
+      */
 
       // منع القص/النسخ للنصوص الحساسة (اختياري - يمكن حذفه إن أزعج المستخدمين الشرعيين)
       document.addEventListener('copy', function (e) {
