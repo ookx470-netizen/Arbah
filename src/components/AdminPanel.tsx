@@ -402,6 +402,10 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
   // Withdrawal lock states
   const [withdrawLockActiveInput, setWithdrawLockActiveInput] = useState<boolean>(false);
   const [withdrawLockDaysInput, setWithdrawLockDaysInput] = useState<number[]>([5]);
+  // نافذة وقت السحب اليومية (فترة واحدة)
+  const [enforceWithdrawHoursInput, setEnforceWithdrawHoursInput] = useState<boolean>(false);
+  const [withdrawStartHourInput, setWithdrawStartHourInput] = useState<number>(14);
+  const [withdrawEndHourInput, setWithdrawEndHourInput] = useState<number>(17);
   const [withdrawRatesInfoInput, setWithdrawRatesInfoInput] = useState<string>('');
 
   // Notice alert states
@@ -591,6 +595,9 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
       setGlobalNotificationInput(sysSettings.globalNotification ?? '');
       setWithdrawLockActiveInput(sysSettings.withdrawLockActive ?? false);
       setWithdrawLockDaysInput(sysSettings.withdrawLockDays ?? [5]);
+      setEnforceWithdrawHoursInput(sysSettings.enforceWithdrawHours ?? false);
+      setWithdrawStartHourInput(sysSettings.withdrawStartHour ?? 14);
+      setWithdrawEndHourInput(sysSettings.withdrawEndHour ?? 17);
       setWithdrawRatesInfoInput(sysSettings.withdrawRatesInfo ?? '');
       setRechargeNoticeInput(sysSettings.rechargeNotice ?? '');
       setRechargeNotice2Input(sysSettings.rechargeNotice2 ?? '');
@@ -676,6 +683,9 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
         globalNotification: globalNotificationInput.trim(),
         withdrawLockActive: withdrawLockActiveInput,
         withdrawLockDays: withdrawLockDaysInput,
+        enforceWithdrawHours: enforceWithdrawHoursInput,
+        withdrawStartHour: withdrawStartHourInput,
+        withdrawEndHour: withdrawEndHourInput,
         withdrawRatesInfo: withdrawRatesInfoInput.trim(),
         rechargeNotice: rechargeNoticeInput.trim(),
         rechargeNotice2: rechargeNotice2Input.trim(),
@@ -3342,6 +3352,53 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                       );
                     })}
                   </div>
+                </div>
+
+                {/* Daily withdrawal time window (single period) */}
+                <div className="border-t border-blue-900/20 pt-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={enforceWithdrawHoursInput}
+                        onChange={(e) => setEnforceWithdrawHoursInput(e.target.checked)}
+                        className="accent-[#F39C12] w-4 h-4"
+                      />
+                      <span className="text-[10px] font-bold text-slate-200">⏰ تفعيل تحديد وقت السحب اليومي</span>
+                    </label>
+                  </div>
+                  <p className="text-[9px] text-slate-500 mb-2 text-right">
+                    عند التفعيل، لن يتمكن الأعضاء من إنشاء طلب سحب إلا خلال هذه الفترة (بتوقيت مكة المكرمة).
+                  </p>
+
+                  {enforceWithdrawHoursInput && (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 mb-1">من الساعة</label>
+                        <select
+                          value={withdrawStartHourInput}
+                          onChange={(e) => setWithdrawStartHourInput(Number(e.target.value))}
+                          className="w-full px-2.5 py-2 bg-[#070D19] border border-blue-900/50 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-[#F39C12] text-center"
+                        >
+                          {Array.from({ length: 24 }, (_, h) => (
+                            <option key={h} value={h}>{formatHourToArabic(h)}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 mb-1">إلى الساعة</label>
+                        <select
+                          value={withdrawEndHourInput}
+                          onChange={(e) => setWithdrawEndHourInput(Number(e.target.value))}
+                          className="w-full px-2.5 py-2 bg-[#070D19] border border-blue-900/50 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-[#F39C12] text-center"
+                        >
+                          {Array.from({ length: 24 }, (_, h) => (
+                            <option key={h} value={h}>{formatHourToArabic(h)}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Rates/Exchange Price Info displayed to user on Withdrawal Form */}

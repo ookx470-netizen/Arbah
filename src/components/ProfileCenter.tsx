@@ -22,7 +22,7 @@ import {
   defaultSupportFaqs
 } from '../firebaseService';
 import { User, Deposit, Withdrawal, SystemSettings, UserNotification, SupportMessage, SupportChat, isExemptFromDepositRequirement } from '../types';
-import { compressBase64Image, calculateRemainingEffectiveDays } from '../utils';
+import { compressBase64Image, calculateRemainingEffectiveDays, formatHourToArabic } from '../utils';
 import { 
   ChevronLeft, 
   Copy, 
@@ -515,6 +515,37 @@ export default function ProfileCenter({
     if (settings.withdrawLockActive || (settings.withdrawLockDays && settings.withdrawLockDays.includes(todayDay))) {
       showToast("عذراً، عمليات السحب مغلقة حالياً من قبل الإدارة.");
       return;
+    }
+
+    // فحص نافذة وقت السحب اليومية (بتوقيت مكة المكرمة)
+    if (settings.enforceWithdrawHours) {
+      const startH = typeof settings.withdrawStartHour === 'number' ? settings.withdrawStartHour : 14;
+      const endH = typeof settings.withdrawEndHour === 'number' ? settings.withdrawEndHour : 17;
+
+      let meccaHour = new Date().getHours();
+      try {
+        meccaHour = Number(
+          new Intl.DateTimeFormat('en-US', {
+            hour: 'numeric',
+            hour12: false,
+            timeZone: 'Asia/Riyadh'
+          }).format(new Date())
+        );
+      } catch (e) {
+        console.warn('Timezone detection failed, using local hour:', e);
+      }
+
+      // يدعم الفترات التي تعبر منتصف الليل (مثال: من 21 إلى 2)
+      const inWindow = startH === endH
+        ? true
+        : (startH < endH
+            ? (meccaHour >= startH && meccaHour < endH)
+            : (meccaHour >= startH || meccaHour < endH));
+
+      if (!inWindow) {
+        showToast(`⏰ السحب متاح فقط من ${formatHourToArabic(startH)} إلى ${formatHourToArabic(endH)} بتوقيت مكة المكرمة.`);
+        return;
+      }
     }
 
     // 1. فحص الإيداع والتفعيل أولاً (مع استثناء المشتركين القدامى ومن تفعيل باقاتهم)
@@ -1324,6 +1355,14 @@ export default function ProfileCenter({
                   <Info className="w-5 h-5 text-teal-600 shrink-0 mt-0.5" />
                   <p className="text-[10px] font-bold text-teal-900 leading-relaxed whitespace-pre-line">
                     {settings.withdrawNotice2}
+                  </p>
+                </div>
+              )}
+              {settings.enforceWithdrawHours && (
+                <div className="bg-amber-50/90 p-4 rounded-[2rem] border border-amber-200/80 flex gap-3 items-start shadow-sm">
+                  <BadgeCheck className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                  <p className="text-[10px] font-bold text-amber-900 leading-relaxed">
+                    ⏰ أوقات السحب المتاحة يومياً: من {formatHourToArabic(typeof settings.withdrawStartHour === 'number' ? settings.withdrawStartHour : 14)} إلى {formatHourToArabic(typeof settings.withdrawEndHour === 'number' ? settings.withdrawEndHour : 17)} بتوقيت مكة المكرمة.
                   </p>
                 </div>
               )}
