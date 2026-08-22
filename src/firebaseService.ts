@@ -1402,26 +1402,38 @@ export async function createDeposit(
 
 export async function getUserDeposits(phone: string): Promise<Deposit[]> {
   if (useLocalStorageFallback) {
-    const deposits = Object.values(getLocalDeposits()).filter(d => d.phone === phone);
+    const variants = phoneVariants(phone);
+    const deposits = Object.values(getLocalDeposits()).filter(d => variants.includes(d.phone));
     return deposits.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
 
   try {
-    const q = query(collection(db, "deposits"), where("phone", "==", phone));
-    const querySnapshot = await getDocs(q);
-    const list: Deposit[] = [];
-    querySnapshot.forEach((docSnap) => {
-      const data = docSnap.data() as Deposit;
-      const key = data.id || docSnap.id;
-      if (key) {
-        list.push({ ...data, id: key });
+    // إصلاح: نبحث بكل الصيغ المحتملة للرقم بدل صيغة واحدة حرفية — كانت
+    // السجلات اليدوية (المضافة من لوحة الأدمن بصيغة مختلفة) لا تظهر للمستخدم.
+    const variants = phoneVariants(phone);
+    const map: Record<string, Deposit> = {};
+
+    for (const v of variants) {
+      try {
+        const q = query(collection(db, "deposits"), where("phone", "==", v));
+        const snap = await getDocs(q);
+        snap.forEach((docSnap) => {
+          const data = docSnap.data() as Deposit;
+          const key = data.id || docSnap.id;
+          if (key) map[key] = { ...data, id: key };
+        });
+      } catch (inner) {
+        console.warn('getUserDeposits variant query failed:', v, inner);
       }
-    });
+    }
+
+    const list = Object.values(map);
     return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   } catch (error) {
     console.warn("Firestore getUserDeposits error, falling back:", error);
-    checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
-    const deposits = Object.values(getLocalDeposits()).filter(d => d.phone === phone);
+    checkForQuotaExceeded(error);
+    const variants = phoneVariants(phone);
+    const deposits = Object.values(getLocalDeposits()).filter(d => variants.includes(d.phone));
     return deposits.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
 }
@@ -1606,28 +1618,62 @@ export async function createWithdrawal(
   }
 }
 
+// يولّد كل الصيغ المحتملة لرقم الهاتف (بعلامة +، بدونها، بصفر بادئ...)
+// لضمان مطابقة السجلات مهما اختلفت صيغة الإدخال بين الأدمن والمستخدم.
+function phoneVariants(phone: string): string[] {
+  const raw = (phone || '').trim();
+  if (!raw) return [];
+  const digits = raw.replace(/\D/g, '');           // أرقام فقط
+  const noZero = digits.replace(/^0+/, '');         // بدون أصفار بادئة
+  const variants = new Set<string>([
+    raw,
+    digits,
+    '+' + digits,
+    noZero,
+    '+' + noZero
+  ]);
+  // صيغة محلية بصفر بادئ (مثال: 964771... -> 0771...)
+  if (noZero.startsWith('964')) {
+    const local = '0' + noZero.substring(3);
+    variants.add(local);
+  }
+  return Array.from(variants).filter(v => v.length > 0);
+}
+
 export async function getUserWithdrawals(phone: string): Promise<Withdrawal[]> {
   if (useLocalStorageFallback) {
-    const withdrawals = Object.values(getLocalWithdrawals()).filter(w => w.phone === phone);
+    const variants = phoneVariants(phone);
+    const withdrawals = Object.values(getLocalWithdrawals()).filter(w => variants.includes(w.phone));
     return withdrawals.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
 
   try {
-    const q = query(collection(db, "withdrawals"), where("phone", "==", phone));
-    const querySnapshot = await getDocs(q);
-    const list: Withdrawal[] = [];
-    querySnapshot.forEach((docSnap) => {
-      const data = docSnap.data() as Withdrawal;
-      const key = data.id || docSnap.id;
-      if (key) {
-        list.push({ ...data, id: key });
+    // إصلاح: نبحث بكل الصيغ المحتملة للرقم بدل صيغة واحدة حرفية — كانت
+    // السجلات اليدوية (المضافة من لوحة الأدمن بصيغة مختلفة) لا تظهر للمستخدم.
+    const variants = phoneVariants(phone);
+    const map: Record<string, Withdrawal> = {};
+
+    for (const v of variants) {
+      try {
+        const q = query(collection(db, "withdrawals"), where("phone", "==", v));
+        const snap = await getDocs(q);
+        snap.forEach((docSnap) => {
+          const data = docSnap.data() as Withdrawal;
+          const key = data.id || docSnap.id;
+          if (key) map[key] = { ...data, id: key };
+        });
+      } catch (inner) {
+        console.warn('getUserWithdrawals variant query failed:', v, inner);
       }
-    });
+    }
+
+    const list = Object.values(map);
     return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   } catch (error) {
     console.warn("Firestore getUserWithdrawals error, falling back:", error);
-    checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
-    const withdrawals = Object.values(getLocalWithdrawals()).filter(w => w.phone === phone);
+    checkForQuotaExceeded(error);
+    const variants = phoneVariants(phone);
+    const withdrawals = Object.values(getLocalWithdrawals()).filter(w => variants.includes(w.phone));
     return withdrawals.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
 }
