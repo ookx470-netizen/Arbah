@@ -2848,9 +2848,27 @@ export default function TaskView() {
                   const currentUserPlan = rawPlansList.find(p => p.name === currentUser?.vipTier);
                   const currentUserPlanPrice = currentUserPlan ? currentUserPlan.price : 0;
 
+                  // إخفاء الباقات الخاصة عن غير المسموح لهم: تظهر فقط إذا كان
+                  // رقم هاتف المستخدم ضمن قائمة allowedPhones المحددة بلوحة الأدمن.
+                  // المطابقة مرنة (تتجاهل علامة + والأصفار البادئة ومفتاح الدولة)
+                  // فلا يهم تنسيق الرقم المُدخل. الباقة المفعّلة للمستخدم تبقى
+                  // ظاهرة دائمًا حتى لو أُزيل رقمه من القائمة لاحقًا.
+                  const normalizePhoneForMatch = (p: string) => {
+                    const digits = (p || '').replace(/\D/g, '');
+                    return digits.replace(/^0+/, '').replace(/^964/, '');
+                  };
+                  const myNormalizedPhone = normalizePhoneForMatch(currentUser?.phone || '');
+                  const visiblePlansList = rawPlansList.filter((p: any) => {
+                    if (!p.isPrivate) return true;
+                    if (p.name === currentUser?.vipTier) return true;
+                    if (!myNormalizedPhone) return false;
+                    const allowed = Array.isArray(p.allowedPhones) ? p.allowedPhones : [];
+                    return allowed.some((ap: string) => normalizePhoneForMatch(ap) === myNormalizedPhone);
+                  });
+
                   const plansList = settings.hideTrialPlans
-                    ? rawPlansList.filter(p => !p.isTrial || p.name === currentUser?.vipTier)
-                    : rawPlansList;
+                    ? visiblePlansList.filter(p => !p.isTrial || p.name === currentUser?.vipTier)
+                    : visiblePlansList;
 
                   return plansList.map((plan) => {
                     const isActive = currentUser?.vipTier === plan.name;
@@ -2913,9 +2931,23 @@ export default function TaskView() {
                 { id: 'plan_d2', name: 'D2', price: 65000, profit: 1620, tasksCount: 5 },
                 { id: 'plan_business', name: 'business', price: 90000, profit: 2550, tasksCount: 5 }
               ];
+              // إخفاء الباقات الخاصة عن غير المسموح لهم بحاسبة الأرباح أيضًا
+              const normalizeCalcPhone = (p: string) => {
+                const digits = (p || '').replace(/\D/g, '');
+                return digits.replace(/^0+/, '').replace(/^964/, '');
+              };
+              const myCalcPhone = normalizeCalcPhone(currentUser?.phone || '');
+              const visibleCalcPlans = rawCalcPlans.filter((p: any) => {
+                if (!p.isPrivate) return true;
+                if (p.name === currentUser?.vipTier) return true;
+                if (!myCalcPhone) return false;
+                const allowed = Array.isArray(p.allowedPhones) ? p.allowedPhones : [];
+                return allowed.some((ap: string) => normalizeCalcPhone(ap) === myCalcPhone);
+              });
+
               const calcPlans = settings.hideTrialPlans
-                ? rawCalcPlans.filter(p => !p.isTrial || p.name === currentUser?.vipTier)
-                : rawCalcPlans;
+                ? visibleCalcPlans.filter(p => !p.isTrial || p.name === currentUser?.vipTier)
+                : visibleCalcPlans;
               const currentSelected = calcPlans.find(p => p.id === calcSelectedPlanId) || calcPlans[0] || rawCalcPlans[0];
               
               const feeRate = 0.15; // 15% Withdrawal Fee Deduction
