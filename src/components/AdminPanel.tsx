@@ -426,6 +426,9 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
   const [planSingleTaskRewardInput, setPlanSingleTaskRewardInput] = useState<number>(0.3);
   const [planIsTrialInput, setPlanIsTrialInput] = useState<boolean>(false);
   const [planMaxSubscribersInput, setPlanMaxSubscribersInput] = useState<number>(0);
+  // باقة خاصة مخفية: لا تظهر بصفحة المنصب إلا للأرقام المحددة
+  const [planIsPrivateInput, setPlanIsPrivateInput] = useState<boolean>(false);
+  const [planAllowedPhonesInput, setPlanAllowedPhonesInput] = useState<string>('');
   const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
   const [planIdToDeleteConfirm, setPlanIdToDeleteConfirm] = useState<string | null>(null);
 
@@ -1010,6 +1013,13 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
     setUpdating('vip_plans');
     try {
       const calculatedProfit = Number((planTasksInput * planSingleTaskRewardInput).toFixed(2));
+      // تنظيف قائمة الأرقام المسموح لها: سطر لكل رقم، مع حذف الفراغات والأسطر الفارغة
+      const allowedPhonesList = planIsPrivateInput
+        ? planAllowedPhonesInput
+            .split('\n')
+            .map(p => p.trim())
+            .filter(p => p.length > 0)
+        : [];
       const currentPlans = settings.vipPlans ? [...settings.vipPlans] : [];
       if (editingPlanId) {
         const idx = currentPlans.findIndex(p => p.id === editingPlanId);
@@ -1021,7 +1031,9 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
             profit: calculatedProfit,
             tasksCount: Number(planTasksInput),
             isTrial: planIsTrialInput,
-            maxSubscribers: Number(planMaxSubscribersInput)
+            maxSubscribers: Number(planMaxSubscribersInput),
+            isPrivate: planIsPrivateInput,
+            allowedPhones: allowedPhonesList
           };
         }
       } else {
@@ -1032,7 +1044,9 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
           profit: calculatedProfit,
           tasksCount: Number(planTasksInput),
           isTrial: planIsTrialInput,
-          maxSubscribers: Number(planMaxSubscribersInput)
+          maxSubscribers: Number(planMaxSubscribersInput),
+          isPrivate: planIsPrivateInput,
+          allowedPhones: allowedPhonesList
         };
         currentPlans.push(newPlan);
       }
@@ -1051,6 +1065,8 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
       setPlanProfitInput(0);
       setPlanTasksInput(5);
       setPlanSingleTaskRewardInput(0.3);
+      setPlanIsPrivateInput(false);
+      setPlanAllowedPhonesInput('');
       setEditingPlanId(null);
       setTimeout(() => {
         window.location.reload();
@@ -3696,6 +3712,38 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                 </div>
               </div>
 
+              {/* باقة خاصة مخفية — تظهر فقط للأرقام المحددة */}
+              <div className="grid grid-cols-1 gap-3 mt-2">
+                <label className="flex items-center gap-2 cursor-pointer bg-[#0B1528] border border-purple-500/40 rounded-lg px-2.5 py-2 w-full">
+                  <input
+                    type="checkbox"
+                    checked={planIsPrivateInput}
+                    onChange={(e) => setPlanIsPrivateInput(e.target.checked)}
+                    className="accent-purple-500 w-4 h-4"
+                  />
+                  <span className="text-[10px] font-bold text-purple-300">🔒 باقة خاصة (مخفية عن الجميع إلا الأرقام المحددة)</span>
+                </label>
+
+                {planIsPrivateInput && (
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 mb-1">
+                      أرقام الأعضاء المسموح لهم (رقم واحد بكل سطر)
+                    </label>
+                    <textarea
+                      value={planAllowedPhonesInput}
+                      onChange={(e) => setPlanAllowedPhonesInput(e.target.value)}
+                      rows={4}
+                      placeholder={"+9647712345678\n+9647701234567"}
+                      dir="ltr"
+                      className="w-full px-2.5 py-2 bg-[#0B1528] border border-purple-500/40 rounded-lg text-[11px] font-mono text-white focus:outline-none focus:border-purple-400 resize-y"
+                    />
+                    <p className="text-[9px] text-slate-500 mt-1 text-right">
+                      * لا يهم تنسيق الرقم (بعلامة + أو بدونها) — سيتم مطابقته تلقائيًا.
+                    </p>
+                  </div>
+                )}
+              </div>
+
               <div className="text-[10px] text-slate-400 text-right mt-2">
                 * الربح اليومي الإجمالي المحسوب لهذه الباقة: <strong className="text-emerald-400">{(planTasksInput * planSingleTaskRewardInput).toFixed(2)}$</strong>
               </div>
@@ -3748,6 +3796,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                       <div>
                         <span className="font-extrabold text-slate-200 block">
                           {plan.name} {plan.isTrial && <span className="text-emerald-400 text-[10px] ml-1">(تجريبية)</span>}
+                          {plan.isPrivate && <span className="text-purple-400 text-[10px] ml-1">🔒 خاصة ({(plan.allowedPhones || []).length} عضو)</span>}
                         </span>
                         <span className="text-[10px] text-slate-400 block mt-0.5">
                           السعر: <strong className="text-[#F39C12]">{plan.price}$</strong> • الربح: <strong className="text-emerald-400">{plan.profit}$</strong> • مهام: {plan.tasksCount}
@@ -3808,6 +3857,8 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                           setPlanTasksInput(plan.tasksCount || 5);
                           setPlanIsTrialInput(plan.isTrial || false);
                           setPlanMaxSubscribersInput(plan.maxSubscribers || 0);
+                          setPlanIsPrivateInput(plan.isPrivate || false);
+                          setPlanAllowedPhonesInput((plan.allowedPhones || []).join('\n'));
                           const singleReward = plan.tasksCount && plan.tasksCount > 0 ? Number((plan.profit / plan.tasksCount).toFixed(2)) : 0;
                           setPlanSingleTaskRewardInput(singleReward);
                         }}

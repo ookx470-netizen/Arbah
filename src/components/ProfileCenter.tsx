@@ -853,6 +853,21 @@ export default function ProfileCenter({
               { id: 'plan_business', name: 'business', price: 90000, profit: 2550, tasksCount: 5 }
             ];
 
+            // إخفاء الباقات الخاصة عن غير المسموح لهم: تظهر فقط إذا كان رقم
+            // هاتف المستخدم ضمن قائمة allowedPhones (مطابقة مرنة تتجاهل
+            // علامة + والأصفار البادئة، فلا يهم تنسيق الرقم المُدخل بلوحة الأدمن)
+            const normalizePhoneForMatch = (p: string) => {
+              const digits = (p || '').replace(/\D/g, '');
+              return digits.replace(/^0+/, '').replace(/^964/, '');
+            };
+            const myNormalizedPhone = normalizePhoneForMatch(currentUser?.phone || '');
+            plansList = plansList.filter((p: any) => {
+              if (!p.isPrivate) return true;
+              if (!myNormalizedPhone) return false;
+              const allowed = Array.isArray(p.allowedPhones) ? p.allowedPhones : [];
+              return allowed.some((ap: string) => normalizePhoneForMatch(ap) === myNormalizedPhone);
+            });
+
             const rawTier = (currentUser.vipTier || "").trim();
             const isUnsubscribed = !rawTier || rawTier === "العضوية العادية" || rawTier === "بدون باقة" || rawTier === "غير مفعلة";
             
