@@ -963,6 +963,48 @@ export async function recordUserActivity(phone: string): Promise<void> {
   }
 }
 
+// تسجيل يوم عمل فعلي (يُستدعى عند إدخال رمز المهام اليومي الصحيح).
+// يُضاف تاريخ اليوم لمصفوفة workedDays بمستند المستخدم، ومنها يحسب العداد
+// الأيام الفعالة المتبقية (effectiveDays - عدد أيام العمل الفريدة).
+// آمن ضد التكرار: لو التاريخ مسجّل مسبقًا لا يُضاف مرة ثانية، فحتى لو
+// أدخل المستخدم الرمز في فترتي العمل بنفس اليوم يُحتسب يومًا واحدًا فقط.
+export async function recordWorkedDay(phone: string, dateStr: string): Promise<void> {
+  if (!phone || !dateStr) return;
+  const cleanPhone = phone.trim();
+
+  // 1. تحديث التخزين المحلي
+  const users = getLocalUsers();
+  if (users[cleanPhone]) {
+    const existing: string[] = Array.isArray((users[cleanPhone] as any).workedDays)
+      ? (users[cleanPhone] as any).workedDays
+      : [];
+    if (!existing.includes(dateStr)) {
+      (users[cleanPhone] as any).workedDays = [...existing, dateStr];
+      saveLocalUsers(users);
+    }
+  }
+
+  if (useLocalStorageFallback) return;
+
+  // 2. تحديث Firestore — نقرأ القيمة الحالية أولًا لتفادي أي تكرار
+  try {
+    const userRef = doc(db, "users", cleanPhone);
+    const snap = await getDoc(userRef);
+    if (!snap.exists()) {
+      console.warn("recordWorkedDay: مستند المستخدم غير موجود:", cleanPhone);
+      return;
+    }
+    const data = snap.data();
+    const current: string[] = Array.isArray(data.workedDays) ? data.workedDays : [];
+    if (current.includes(dateStr)) {
+      return; // اليوم مسجّل مسبقًا — لا شيء لفعله
+    }
+    await updateDoc(userRef, { workedDays: [...current, dateStr] });
+  } catch (err) {
+    console.warn("recordWorkedDay Firestore error:", err);
+  }
+}
+
 // 3. Update User Statistics (Admin function or task complete)
 export async function updateUserStats(phone: string, updates: Partial<Pick<User, 'earnings' | 'taskIncome' | 'effectiveDays' | 'vipStartDate'>>) {
   // Safeguard against NaN values

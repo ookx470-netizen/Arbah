@@ -96,39 +96,52 @@ export function isHourInShift(currentHour: number, start: number, end: number): 
 }
 
 /**
- * Calculate the remaining effective days for a user based on vipStartDate or createdAt.
- * إصلاح: أيام العطلة تُقرأ ديناميكيًا من إعدادات الإدارة (settings.holidayDays)
- * بدل ما تكون مثبّتة بالكود — أي تغيير بيوم العطلة من لوحة الأدمن ينعكس هنا
- * تلقائيًا بدون الحاجة لتعديل الكود مستقبلاً.
+ * حساب الأيام الفعالة المتبقية للمستخدم.
+ *
+ * المنطق: يُخصم يوم عن **كل يوم عمل يمر** منذ تفعيل الاشتراك — سواء عمل
+ * المستخدم فيه أو تغيّب — ما عدا أيام العطلة الرسمية المحددة من لوحة
+ * الإدارة (holidayDays) فهي لا تُخصم إطلاقًا.
+ *
+ * إصلاح مهم: يوم الاشتراك نفسه يُحتسب ضمن أيام العمل (كان يُتجاهل سابقًا،
+ * فيظهر العداد أكبر بيوم واحد رغم أن المستخدم عمل فيه وأخذ أرباحه).
+ *
+ * كذلك يُؤخذ بالحسبان حقل workedDays (أيام إدخال رمز المهام فعليًا) عبر
+ * اعتماد الأكبر بين الحسابين، لتغطية أي حالة عمل استثنائية في يوم عطلة.
  */
 export function calculateRemainingEffectiveDays(user: any, holidayDays: number[] = [5]): number {
   if (!user || typeof user.effectiveDays !== 'number') return 0;
-  
+
   const startDateStr = user.vipStartDate || user.createdAt;
   if (!startDateStr) return user.effectiveDays;
 
   try {
     const start = new Date(startDateStr);
     const now = new Date();
-    
-    // Normalize to start of local day
+
+    // توحيد التواريخ على بداية اليوم المحلي
     const startDay = new Date(start.getFullYear(), start.getMonth(), start.getDate());
     const nowDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    
+
     let workingDaysPassed = 0;
     const current = new Date(startDay);
-    
-    while (current < nowDay) {
-      current.setDate(current.getDate() + 1);
+
+    // نبدأ من يوم الاشتراك نفسه (شامل) وحتى اليوم الحالي (شامل)
+    while (current <= nowDay) {
       const dayOfWeek = current.getDay();
-      // أيام العطل المحددة من الإدارة لا تُخصم من رصيد الأيام
       if (!holidayDays.includes(dayOfWeek)) {
         workingDaysPassed++;
       }
+      current.setDate(current.getDate() + 1);
     }
-    
-    // Remaining is initial allocation minus working days passed
-    const remaining = user.effectiveDays - workingDaysPassed;
+
+    // احتياط: عدد أيام إدخال رمز المهام الفعلية (تواريخ فريدة)
+    const worked = Array.isArray(user.workedDays) ? user.workedDays : [];
+    const workedCount = new Set(
+      worked.filter((d: any) => typeof d === 'string' && d.length > 0)
+    ).size;
+
+    const consumed = Math.max(workingDaysPassed, workedCount);
+    const remaining = user.effectiveDays - consumed;
     return Math.max(0, remaining);
   } catch (e) {
     console.error("Error calculating effective days:", e);

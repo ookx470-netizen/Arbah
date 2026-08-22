@@ -487,7 +487,23 @@ export default function TaskView() {
       setShowTasksCodeModal(false);
       setTasksCodeAttempt('');
       setTasksCodeError(null);
-      
+
+      // تسجيل يوم العمل: بمجرد إدخال الرمز الصحيح يُحتسب اليوم مستهلكًا من
+      // عداد الأيام الفعالة (سواء أكمل المستخدم مهامه أو لا). نخزّن التاريخ
+      // بمصفوفة workedDays بمستند المستخدم، والعداد يحسب عددها الفريد.
+      if (currentUser?.phone) {
+        const alreadyLogged = Array.isArray(currentUser.workedDays) && currentUser.workedDays.includes(today);
+        if (!alreadyLogged) {
+          const updatedWorkedDays = [...(currentUser.workedDays || []), today];
+          setCurrentUser({ ...currentUser, workedDays: updatedWorkedDays });
+          import('./firebaseService').then(({ recordWorkedDay }) => {
+            recordWorkedDay(currentUser.phone, today).catch(e =>
+              console.warn('تعذّر تسجيل يوم العمل:', e)
+            );
+          });
+        }
+      }
+
       if (pendingPlatformTab) {
         const plat = pendingPlatformTab;
         setPendingPlatformTab(null);
