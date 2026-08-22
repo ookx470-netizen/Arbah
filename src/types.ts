@@ -106,6 +106,9 @@ export interface SystemSettings {
   globalNotification?: string; // رسالة الإشعار العام للموقع
   withdrawLockActive?: boolean; // قفل السحب يدوياً بالكامل
   withdrawLockDays?: number[]; // تحديد أيام قفل السحب أسبوعياً
+  enforceWithdrawHours?: boolean; // تفعيل تحديد نافذة زمنية يومية للسحب
+  withdrawStartHour?: number; // ساعة بدء السحب (0-23) بتوقيت مكة
+  withdrawEndHour?: number; // ساعة انتهاء السحب (0-23) بتوقيت مكة
   withdrawRatesInfo?: string; // عرض أسعار وتنويهات السحب للمستخدمين
   rechargeNotice?: string; // تنبيه/إشعار صفحة الشحن للمستخدمين (الأول)
   rechargeNotice2?: string; // تنبيه/إشعار صفحة الشحن للمستخدمين الثاني (الجديد)
