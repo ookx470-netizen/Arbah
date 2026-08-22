@@ -89,6 +89,8 @@ export interface VipPlan {
   tasksCount: number; // عدد المهام
   isTrial?: boolean; // هل هي باقة تجريبية؟
   maxSubscribers?: number; // الحد الأقصى للمشتركين
+  isPrivate?: boolean; // باقة خاصة مخفية: لا تظهر إلا للأرقام المحددة أدناه
+  allowedPhones?: string[]; // أرقام هواتف الأعضاء المسموح لهم برؤية الباقة الخاصة
 }
 
 export interface SystemSettings {
