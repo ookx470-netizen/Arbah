@@ -964,8 +964,7 @@ export async function recordUserActivity(phone: string): Promise<void> {
 }
 
 // تسجيل يوم عمل فعلي (يُستدعى عند إدخال رمز المهام اليومي الصحيح).
-// يُضاف تاريخ اليوم لمصفوفة workedDays بمستند المستخدم، ومنها يحسب العداد
-// الأيام الفعالة المتبقية (effectiveDays - عدد أيام العمل الفريدة).
+// يُضاف تاريخ اليوم لمصفوفة workedDays بمستند المستخدم.
 // آمن ضد التكرار: لو التاريخ مسجّل مسبقًا لا يُضاف مرة ثانية، فحتى لو
 // أدخل المستخدم الرمز في فترتي العمل بنفس اليوم يُحتسب يومًا واحدًا فقط.
 export async function recordWorkedDay(phone: string, dateStr: string): Promise<void> {
@@ -2443,11 +2442,16 @@ export async function addManualWithdrawalByAdmin(
   // Try to find the user first to get their username
   let username = "عضو يدوي";
   let userId = phone;
+  // إصلاح: نستخدم رقم الهاتف بالصيغة الرسمية المخزّنة بمستند المستخدم
+  // (مثلاً +9647...) بدل الصيغة التي كتبها الأدمن يدويًا، لأن سجل المستخدم
+  // يبحث بـ where("phone","==",...) فلو اختلفت الصيغة لا يظهر السجل عنده.
+  let canonicalPhone = phone;
   try {
     const user = await getUserByPhone(phone);
     if (user) {
       username = user.username;
       userId = user.id;
+      if (user.phone) canonicalPhone = user.phone;
     }
   } catch (e) {
     console.warn("Could not find user for manual withdrawal, using defaults", e);
@@ -2458,7 +2462,7 @@ export async function addManualWithdrawalByAdmin(
     id: withdrawalId,
     userId,
     username,
-    phone,
+    phone: canonicalPhone,
     amount,
     currency: 'USDT (Polygon)',
     walletAddress: walletAddress || "تم الإدخال يدوياً",
@@ -2495,11 +2499,14 @@ export async function addManualDepositByAdmin(
 ): Promise<Deposit> {
   let username = "عضو يدوي";
   let userId = phone;
+  // إصلاح: نستخدم صيغة الهاتف الرسمية من مستند المستخدم ليظهر السجل عنده
+  let canonicalPhone = phone;
   try {
     const user = await getUserByPhone(phone);
     if (user) {
       username = user.username;
       userId = user.id;
+      if (user.phone) canonicalPhone = user.phone;
     }
   } catch (e) {
     console.warn("Could not find user for manual deposit, using defaults", e);
@@ -2510,7 +2517,7 @@ export async function addManualDepositByAdmin(
     id: depositId,
     userId,
     username,
-    phone,
+    phone: canonicalPhone,
     amount,
     currency: currency || 'USDT (Polygon)',
     txHash: 'إيداع يدوي من لوحة التحكم',
