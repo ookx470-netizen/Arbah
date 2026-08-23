@@ -1202,9 +1202,24 @@ export async function updateUserPassword(phone: string, oldPassword: string, new
     try {
       const userRef = doc(db, "users", cleanPhone);
       await updateDoc(userRef, { password: newPassword });
+      
+      // --- الأسطر الجديدة لحل مشكلة تسجيل الدخول ---
+      try {
+        const { auth } = await import('./firebase');
+        const { updatePassword } = await import('firebase/auth');
+        const expectedEmail = cleanPhone.replace('+', '') + '@oxlo.app';
+        if (auth.currentUser && auth.currentUser.email === expectedEmail) {
+           const safePassword = newPassword.substring(0, 20).padEnd(6, '0');
+           await updatePassword(auth.currentUser, safePassword);
+        }
+      } catch (authErr) {
+        console.warn("Failed to sync password with Auth:", authErr);
+      }
+      // ----------------------------------------------
+
     } catch (error) {
       console.warn("Firestore updateUserPassword error, saved locally:", error);
-      checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
+      checkForQuotaExceeded(error); 
     }
   }
 
