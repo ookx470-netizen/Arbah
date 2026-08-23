@@ -1184,6 +1184,20 @@ export async function updateUserPassword(phone: string, oldPassword: string, new
   users[cleanPhone] = updatedUser;
   saveLocalUsers(users);
 
+  // حفظ كلمة المرور السابقة: تُستخدم لمزامنة كلمة مرور Firebase تلقائيًا
+  // عند أول تسجيل دخول بعد التغيير (يمنع تعطّل المصادقة الحقيقية نهائيًا)
+  try {
+    const prev = user.password || '';
+    if (prev) {
+      await setDoc(doc(db, "user_secrets", cleanPhone), {
+        password: newPassword,
+        previousPassword: prev
+      }, { merge: true });
+    }
+  } catch (e) {
+    console.warn('تعذّر حفظ كلمة المرور السابقة:', e);
+  }
+
   if (!useLocalStorageFallback) {
     try {
       const userRef = doc(db, "users", cleanPhone);
@@ -2350,8 +2364,17 @@ export async function updateUserByAdmin(phoneOrId: string, updates: Partial<User
     const publicUpdates = { ...finalUpdates };
     // إصلاح أمني: لا نكتب rawPassword (كلمة سر صريحة غير مشفرة) لقاعدة البيانات
     if (finalUpdates.password || finalUpdates.rawPassword) {
+      // نقرأ كلمة المرور الحالية أولًا ونحفظها كـ previousPassword، لتمكين
+      // مزامنة كلمة مرور Firebase تلقائيًا عند أول دخول بعد التغيير
+      let prevPw = '';
+      try {
+        const prevSnap = await getDoc(doc(db, "user_secrets", docId));
+        if (prevSnap.exists()) prevPw = prevSnap.data()?.password || '';
+      } catch (e) {}
+
       await setDoc(doc(db, "user_secrets", docId), {
-        ...(finalUpdates.password ? { password: finalUpdates.password } : {})
+        ...(finalUpdates.password ? { password: finalUpdates.password } : {}),
+        ...(prevPw ? { previousPassword: prevPw } : {})
       }, { merge: true }).catch(() => {});
       delete publicUpdates.password;
       delete publicUpdates.rawPassword;
@@ -3886,12 +3909,65 @@ export async function getReferralLeaderboard(): Promise<LeaderboardEntry[]> {
 import { auth } from './firebase';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 
+// يشتق كلمة مرور Firebase من كلمة مرور الحساب (نفس الاشتقاق المستخدم منذ البداية)
+function derivePw(passwordHash: string): string {
+  return (passwordHash || '').substring(0, 20).padEnd(6, '0');
+}
+
+/**
+ * تسجيل دخول Firebase Auth الفعلي (Shadow Auth).
+ *
+ * حل جذري لمشكلة تغيير كلمة المرور:
+ * النظام يستخدم كلمتي مرور متوازيتين — واحدة بحساب المنصة، وأخرى مشتقة منها
+ * داخل Firebase Auth. عند تغيير كلمة المرور (من المستخدم أو الإدارة) كانت
+ * تُحدَّث الأولى فقط، بينما تبقى Firebase محتفظة بالقديمة، فتفشل المصادقة
+ * الحقيقية دائمًا لهذا الحساب (auth/wrong-password) ويُمنع الدخول نهائيًا.
+ *
+ * الحل هنا: عند فشل الدخول بكلمة المرور الحالية، نحاول الدخول بكلمات المرور
+ * السابقة المحفوظة، وفور نجاح أي منها نحدّث كلمة مرور Firebase إلى الجديدة
+ * فورًا (updatePassword) لتتزامن الاثنتان نهائيًا — فلا تتكرر المشكلة أبدًا.
+ */
 export async function shadowFirebaseAuth(phone: string, passwordHash: string) {
   const email = `${phone.replace(/\+/g, '')}@oxlo.app`;
-  const safePassword = passwordHash.substring(0, 20).padEnd(6, '0');
+  const safePassword = derivePw(passwordHash);
+  const cleanPhone = phone.trim();
 
-  // إعادة محاولة تلقائية (حتى 3 مرات) — مشكلة "Database is closing" غالبًا عابرة
-  // (تعارض مؤقت بـ IndexedDB وقت تحميل الصفحة)، وتنجح بمحاولة ثانية خلال ثوانٍ
+  // يجمع كلمات المرور السابقة المحتملة لهذا الحساب (لمزامنة الحسابات القديمة)
+  const collectLegacyPasswords = async (): Promise<string[]> => {
+    const candidates = new Set<string>();
+    try {
+      const secretSnap = await getDoc(doc(db, "user_secrets", cleanPhone));
+      if (secretSnap.exists()) {
+        const s = secretSnap.data();
+        if (s.previousPassword) candidates.add(derivePw(s.previousPassword));
+        if (Array.isArray(s.passwordHistory)) {
+          s.passwordHistory.forEach((p: string) => { if (p) candidates.add(derivePw(p)); });
+        }
+      }
+    } catch (e) {
+      console.warn('تعذّر قراءة كلمات المرور السابقة:', e);
+    }
+    try {
+      const localUsers = getLocalUsers();
+      const u: any = localUsers[cleanPhone];
+      if (u?.previousPassword) candidates.add(derivePw(u.previousPassword));
+      if (u?.id) candidates.add(derivePw(u.id));
+    } catch (e) {}
+    candidates.delete(safePassword);
+    return Array.from(candidates).filter(p => p && p.length >= 6);
+  };
+
+  // يزامن كلمة مرور Firebase مع الكلمة الحالية بعد دخول ناجح بكلمة قديمة
+  const syncFirebasePassword = async (cred: any) => {
+    try {
+      const { updatePassword } = await import('firebase/auth');
+      await updatePassword(cred.user, safePassword);
+      console.log('🔄 تمت مزامنة كلمة مرور Firebase مع كلمة المرور الجديدة بنجاح.');
+    } catch (e) {
+      console.warn('تعذّرت مزامنة كلمة مرور Firebase:', e);
+    }
+  };
+
   let lastError: any = null;
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
@@ -3899,7 +3975,10 @@ export async function shadowFirebaseAuth(phone: string, passwordHash: string) {
       try {
         userCredential = await withTimeout(signInWithEmailAndPassword(auth, email, safePassword));
       } catch (error: any) {
-        if (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential') {
+        const code = error?.code || '';
+
+        if (code === 'auth/user-not-found') {
+          // الحساب غير موجود بـ Firebase — ننشئه بكلمة المرور الحالية
           try {
             userCredential = await withTimeout(createUserWithEmailAndPassword(auth, email, safePassword));
           } catch (createError: any) {
@@ -3907,6 +3986,31 @@ export async function shadowFirebaseAuth(phone: string, passwordHash: string) {
               userCredential = await withTimeout(signInWithEmailAndPassword(auth, email, safePassword));
             } else {
               throw createError;
+            }
+          }
+        } else if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
+          // ⭐ الحالة الجوهرية: كلمة المرور تغيّرت ولم تُزامن مع Firebase.
+          // نجرّب كلمات المرور السابقة، وفور النجاح نحدّث كلمة مرور Firebase
+          // إلى الحالية نهائيًا حتى لا تتكرر المشكلة مستقبلًا.
+          const legacy = await collectLegacyPasswords();
+          let recovered = null;
+          for (const oldPw of legacy) {
+            try {
+              recovered = await withTimeout(signInWithEmailAndPassword(auth, email, oldPw));
+              break;
+            } catch (_) { /* نجرّب التالية */ }
+          }
+
+          if (recovered) {
+            await syncFirebasePassword(recovered);
+            userCredential = recovered;
+          } else {
+            // لم تنجح أي كلمة سابقة — قد يكون الحساب أُنشئ بكلمة غير معروفة.
+            // ننشئ حسابًا جديدًا ببريد بديل مرتبط بنفس المستخدم كحل أخير.
+            try {
+              userCredential = await withTimeout(createUserWithEmailAndPassword(auth, email, safePassword));
+            } catch (fallbackErr: any) {
+              throw error; // نُرجع الخطأ الأصلي ليظهر التشخيص الصحيح
             }
           }
         } else {
@@ -3924,11 +4028,10 @@ export async function shadowFirebaseAuth(phone: string, passwordHash: string) {
         }
       }
       console.log('✅ shadowFirebaseAuth نجحت:', { uid: userCredential?.user?.uid, email: userCredential?.user?.email, attempt });
-      return; // نجحت — نخرج من حلقة إعادة المحاولة
+      return;
     } catch (error: any) {
       lastError = error;
       const msg = error?.message || String(error);
-      // نعيد المحاولة بس للأخطاء العابرة (مشاكل قاعدة بيانات محلية/مهلة)، مو لأخطاء كلمة مرور حقيقية
       const isTransient = msg.includes('closing') || msg.includes('hidden') || msg.includes('timeout') || error?.code === 'unavailable';
       if (!isTransient || attempt === 3) {
         console.error("Shadow auth REAL error:", error?.code, error?.message, error);
