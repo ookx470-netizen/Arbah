@@ -813,7 +813,7 @@ export async function registerUser(username: string, phone: string, password: st
     inviteCode: generateInviteCode(),
     referrerCode: finalReferrer,
     walletAddress: "",
-    earnings: 10,
+    earnings: 0, // تم إلغاء المكافأة الترحيبية — الرصيد يبدأ من صفر
     taskIncome: 0,
     effectiveDays: 0,
     role: "user",
@@ -1545,7 +1545,7 @@ export async function createWithdrawal(
     }
     // 1. فحص الإيداع أولاً (الأولوية القصوى - مع استثناء المشتركين القدامى ومن تفعيل باقاتهم)
     if (!isExemptFromDepositRequirement(users[phone])) {
-      throw new Error("⚠️ عذراً! لا يمكنك سحب الأرباح أو المكافأة الترحيبية إلا بعد إيداع وتفعيل باقتك الاستثمارية الأولى في المنصة.");
+      throw new Error("⚠️ عذراً! لا يمكنك سحب الأرباح إلا بعد إيداع وتفعيل باقتك الاستثمارية الأولى في المنصة.");
     }
     // 2. ثم فحص الحظر اليدوي أو الأمني
     if (users[phone].isWithdrawalBlocked) {
@@ -1588,7 +1588,7 @@ export async function createWithdrawal(
     const userData = userSnap.data() as User;
     // 1. فحص الإيداع أولاً (الأولوية القصوى - مع استثناء المشتركين القدامى ومن تفعيل باقاتهم)
     if (!isExemptFromDepositRequirement(userData)) {
-      throw new Error("⚠️ عذراً! لا يمكنك سحب الأرباح أو المكافأة الترحيبية إلا بعد إيداع وتفعيل باقتك الاستثمارية الأولى في المنصة.");
+      throw new Error("⚠️ عذراً! لا يمكنك سحب الأرباح إلا بعد إيداع وتفعيل باقتك الاستثمارية الأولى في المنصة.");
     }
     // 2. ثم فحص الحظر اليدوي أو الأمني
     if (userData.isWithdrawalBlocked) {
