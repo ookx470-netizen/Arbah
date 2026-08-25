@@ -788,6 +788,20 @@ export default function ProfileCenter({
                     <span className="text-[10px] font-black text-amber-400 shrink-0">
                       {currentUser.vipTier || 'العضوية العادية'}
                     </span>
+                    {currentUser.memberId && (
+                      <>
+                        <div className="h-1 w-1 bg-slate-700 rounded-full shrink-0"></div>
+                        <button
+                          type="button"
+                          onClick={() => handleCopy(currentUser.memberId || '')}
+                          title="اضغط لنسخ رقمك التعريفي"
+                          className="inline-flex items-center gap-1 bg-sky-500/15 hover:bg-sky-500/25 text-sky-300 border border-sky-500/30 text-[9.5px] font-black px-2 py-0.5 rounded-full shrink-0 transition-all cursor-pointer active:scale-95"
+                        >
+                          <span className="font-mono tracking-wider" dir="ltr">{currentUser.memberId}</span>
+                          <Copy className="w-2.5 h-2.5" />
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>

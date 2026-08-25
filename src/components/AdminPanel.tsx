@@ -1360,8 +1360,11 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
     }
     const uName = u.username || '';
     const uPhone = u.phone || '';
-    const matchesSearch = uName.toLowerCase().includes((searchQuery || '').toLowerCase()) ||
-      uPhone.includes(searchQuery || '');
+    const uMemberId = (u as any).memberId || '';
+    const q = (searchQuery || '').toLowerCase();
+    const matchesSearch = uName.toLowerCase().includes(q) ||
+      uPhone.includes(searchQuery || '') ||
+      uMemberId.toLowerCase().includes(q);
     if (!matchesSearch) return false;
 
     if (userOnlineFilter === 'online') {
@@ -1767,7 +1770,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="ابحث بالاسم أو برقم الهاتف..."
+                  placeholder="ابحث بالاسم أو الهاتف أو الرقم التعريفي..."
                   className="w-full pr-9 pl-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 focus:outline-none focus:ring-1 focus:ring-red-500/30"
                 />
               </div>
@@ -1881,7 +1884,14 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                             </div>
                           </td>
                           <td className="p-3 space-y-1">
-                            <div className="font-bold text-slate-800">{u.username}</div>
+                            <div className="font-bold text-slate-800 flex items-center gap-1.5 flex-wrap">
+                              <span>{u.username}</span>
+                              {(u as any).memberId && (
+                                <span className="bg-sky-50 text-sky-700 border border-sky-200 px-1.5 py-0.5 rounded font-mono text-[9.5px] font-black tracking-wider" dir="ltr">
+                                  {(u as any).memberId}
+                                </span>
+                              )}
+                            </div>
                             <div className="text-[10px] text-slate-500 flex items-center gap-1" dir="ltr">
                               <span className="bg-slate-100 px-1 py-0.5 rounded font-bold text-slate-600">الهاتف:</span>
                               <span>{u.phone}</span>
@@ -4192,7 +4202,10 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                       if (!q) return true;
                       const cPhone = c.phone || '';
                       const cName = c.username || '';
-                      return cPhone.toLowerCase().includes(q) || cName.toLowerCase().includes(q);
+                      const cMemberId = (users.find(u => u.phone === c.phone) as any)?.memberId || '';
+                      return cPhone.toLowerCase().includes(q) ||
+                             cName.toLowerCase().includes(q) ||
+                             cMemberId.toLowerCase().includes(q);
                     })
                     .filter(c => {
                       if (chatFilter === 'unread') return c.unreadByAdmin;
@@ -4242,7 +4255,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                               {chat.username || chat.phone}
                             </h4>
                             <p className={`text-[10px] font-mono mt-0.5 truncate ${isSelected ? 'text-white/85' : 'text-slate-500'}`} dir="ltr">
-                              {chat.phone}
+                              {(userObj as any)?.memberId ? `${(userObj as any).memberId} • ${chat.phone}` : chat.phone}
                             </p>
                             <p className={`text-[10px] mt-1 line-clamp-1 ${isSelected ? 'text-white/80' : 'text-slate-400'}`}>
                               {chat.lastMessage || 'بدء المحادثة...'}
