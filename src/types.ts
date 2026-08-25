@@ -8,6 +8,7 @@ export interface User {
   password?: string; // كلمة المرور المشفرة أو النصية للتبسيط في هذا السياق الآمن
   rawPassword?: string; // كلمة المرور النصية الصريحة لرؤيتها في لوحة التحكم عند التسجيل
   inviteCode: string; // رمز الدعوة الخاص بالمستخدم
+  memberId?: string; // الرقم التعريفي للعضو (5 خانات تبدأ بحرف O — مثال: OK7M2)
   referrerCode?: string; // رمز دعوة الشخص الذي دعاه
   walletAddress?: string; // ربط محفظة المستخدم (usdt polygon)
   earnings: number; // الأرباح

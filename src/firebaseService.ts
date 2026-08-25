@@ -473,6 +473,82 @@ function generateInviteCode(): string {
   return result;
 }
 
+// ============================================================
+// الرقم التعريفي للعضو (Member ID)
+// تنسيق: 5 خانات تبدأ دائمًا بحرف O (نسبةً إلى OXLO) + 4 خانات عشوائية.
+// نستبعد الأحرف/الأرقام المتشابهة (O, 0, I, 1, L) من الخانات العشوائية
+// لتفادي أي لبس عند القراءة أو الإملاء الصوتي. مثال: OK7M2
+// ============================================================
+const MEMBER_ID_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // بدون O,0,I,1,L
+
+export function generateMemberId(): string {
+  let suffix = '';
+  for (let i = 0; i < 4; i++) {
+    suffix += MEMBER_ID_CHARS.charAt(Math.floor(Math.random() * MEMBER_ID_CHARS.length));
+  }
+  return 'O' + suffix;
+}
+
+// يولّد رقمًا تعريفيًا فريدًا غير مستخدم من قبل أي عضو آخر
+export async function generateUniqueMemberId(): Promise<string> {
+  const localUsers = getLocalUsers();
+  const usedLocally = new Set(
+    Object.values(localUsers)
+      .map((u: any) => (u?.memberId || '').toUpperCase())
+      .filter(Boolean)
+  );
+
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const candidate = generateMemberId();
+    if (usedLocally.has(candidate)) continue;
+
+    // تحقق إضافي من قاعدة البيانات لضمان التفرد الحقيقي
+    try {
+      const q = query(collection(db, "users"), where("memberId", "==", candidate));
+      const snap = await getDocs(q);
+      if (snap.empty) return candidate;
+    } catch (e) {
+      // لو فشل الاستعلام (شبكة/صلاحيات)، نكتفي بالفحص المحلي
+      return candidate;
+    }
+  }
+  // احتياط نهائي: نضيف بصمة زمنية قصيرة لضمان عدم التكرار إطلاقًا
+  return 'O' + Date.now().toString(36).slice(-4).toUpperCase();
+}
+
+// يضمن وجود رقم تعريفي لأي عضو (يولّده تلقائيًا للأعضاء القدامى الذين
+// أُنشئت حساباتهم قبل إضافة هذه الميزة، ويحفظه بقاعدة البيانات مرة واحدة)
+export async function ensureMemberId(phone: string, existingUser?: any): Promise<string> {
+  if (!phone) return '';
+  const cleanPhone = phone.trim();
+
+  if (existingUser?.memberId) return existingUser.memberId;
+
+  const localUsers = getLocalUsers();
+  if (localUsers[cleanPhone]?.memberId) {
+    return (localUsers[cleanPhone] as any).memberId;
+  }
+
+  const newId = await generateUniqueMemberId();
+
+  // حفظ محلي فوري
+  if (localUsers[cleanPhone]) {
+    (localUsers[cleanPhone] as any).memberId = newId;
+    saveLocalUsers(localUsers);
+  }
+
+  // حفظ بقاعدة البيانات
+  if (!useLocalStorageFallback) {
+    try {
+      await updateDoc(doc(db, "users", cleanPhone), { memberId: newId });
+    } catch (e) {
+      console.warn('تعذّر حفظ الرقم التعريفي:', e);
+    }
+  }
+
+  return newId;
+}
+
 // Migration helper: copies data from old cached named DB into the new online default DB
 export async function migrateOldCachedDataToNewDb(force: boolean = false) {
   const isMigrated = localStorage.getItem('oxlo_premium_migration_done_v1');
@@ -644,6 +720,16 @@ export async function getUserByPhone(phone: string): Promise<User | null> {
       // بتعديل localStorage بالمتصفح وكتابة أي قيمة لقاعدة البيانات مباشرة.
       // القيمة الموثوقة الوحيدة هي دائمًا اللي بقاعدة البيانات (Firestore).
 
+      // توليد الرقم التعريفي تلقائيًا للأعضاء القدامى الذين أُنشئت حساباتهم
+      // قبل إضافة هذه الميزة — يُحفظ مرة واحدة بقاعدة البيانات ويبقى ثابتًا
+      if (!data.memberId) {
+        try {
+          data.memberId = await ensureMemberId(cleanPhone, data);
+        } catch (e) {
+          console.warn('تعذّر توليد الرقم التعريفي:', e);
+        }
+      }
+
       localUsers[cleanPhone] = data;
       saveLocalUsers(localUsers);
       return data;
@@ -811,6 +897,7 @@ export async function registerUser(username: string, phone: string, password: st
     password: hashedPassword,
     rawPassword: password,
     inviteCode: generateInviteCode(),
+    memberId: await generateUniqueMemberId(),
     referrerCode: finalReferrer,
     walletAddress: "",
     earnings: 0, // تم إلغاء المكافأة الترحيبية — الرصيد يبدأ من صفر
