@@ -3123,6 +3123,18 @@ export default function TaskView() {
                           localStorage.setItem('user_session', JSON.stringify(updatedUser));
                         } catch (e) {}
 
+                        // منح نقاط الشرف الابتدائية (100) عند أول تفعيل للباقة.
+                        // الدالة نفسها تتحقق أن النقاط صفر قبل المنح، فلا تتكرر
+                        // عند أي ترقية لاحقة، وترسل إشعارًا للعضو تلقائيًا.
+                        try {
+                          const { grantActivationHonorPoints } = await import('./firebaseService');
+                          grantActivationHonorPoints(currentUser.phone).catch(e =>
+                            console.warn('تعذّر منح نقاط التفعيل:', e)
+                          );
+                        } catch (e) {
+                          console.warn('تعذّر تحميل دالة نقاط التفعيل:', e);
+                        }
+
                         triggerNotification(`🎉 تهانينا! تم ترقية حسابك إلى ${selectedPlanForUpgrade.name} بنجاح!`);
                       } catch (err: any) {
                         console.error("Upgrade action error:", err);
