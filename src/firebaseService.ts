@@ -683,9 +683,28 @@ export async function getReferralBonusTotal(phone: string): Promise<number> {
   if (!phone) return 0;
   try {
     const deposits = await getUserDeposits(phone);
-    return deposits
-      .filter((d: any) => d.depositType === 'referral_bonus' && d.status === 'approved')
-      .reduce((sum: number, d: any) => sum + (Number(d.amount) || 0), 0);
+
+    // نقبل أي إيداع مصنّف كمكافأة إحالة ما لم يكن مرفوضًا صراحة —
+    // بعض السجلات القديمة قد لا تحمل حقل status بصيغة 'approved' بدقة.
+    const bonuses = deposits.filter((d: any) => {
+      const isBonus = d.depositType === 'referral_bonus' ||
+                      (typeof d.txHash === 'string' && d.txHash.includes('مكافأة إحالة'));
+      return isBonus && d.status !== 'rejected';
+    });
+
+    const total = bonuses.reduce((sum: number, d: any) => sum + (Number(d.amount) || 0), 0);
+
+    console.log('🎁 مكافآت الإحالة:', {
+      phone,
+      إجمالي_الإيداعات: deposits.length,
+      مكافآت_موجودة: bonuses.length,
+      المجموع: total,
+      عينة: deposits.slice(0, 3).map((d: any) => ({
+        amount: d.amount, type: d.depositType, status: d.status, tx: d.txHash
+      }))
+    });
+
+    return total;
   } catch (e) {
     console.warn('تعذّر حساب مكافآت الإحالة:', e);
     return 0;
