@@ -150,7 +150,11 @@ export default function ProfileCenter({
     // 1) حساب فوري من السجل المحمّل (إن وُجد) لتحديث لحظي
     if (deposits && deposits.length > 0) {
       const localTotal = deposits
-        .filter((d: any) => d.depositType === 'referral_bonus' && d.status === 'approved')
+        .filter((d: any) => {
+          const isBonus = d.depositType === 'referral_bonus' ||
+                          (typeof d.txHash === 'string' && d.txHash.includes('مكافأة إحالة'));
+          return isBonus && d.status !== 'rejected';
+        })
         .reduce((sum: number, d: any) => sum + (Number(d.amount) || 0), 0);
       setReferralBonusTotal(localTotal);
     }
