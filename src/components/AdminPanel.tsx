@@ -33,6 +33,7 @@ import {
   sendSupportMessage,
   markChatAsReadByAdmin,
   recordUserActivity
+  adjustHonorPoints,
 } from '../firebaseService';
 import { db } from '../firebase';
 import { User, Deposit, Withdrawal, SystemSettings, VipPlan, UserNotification, SupportChat, SupportMessage } from '../types';
@@ -124,7 +125,12 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
   });
   
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'teams' | 'deposits' | 'withdrawals' | 'plans' | 'settings' | 'all' | 'support' | 'banned' | 'videoPool'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'teams' | 'deposits' | 'withdrawals' | 'plans' | 'settings' | 'all' | 'support' | 'banned' | 'videoPool' | 'honorPoints'>('overview');
+  // نقاط الشرف: بحث وحالة تحميل لكل عضو
+  const [honorSearch, setHonorSearch] = useState<string>('');
+  // نوع الإيداع اليدوي: عادي أو مكافأة إحالة داخلية
+  const [manualDepType, setManualDepType] = useState<'normal' | 'referral_bonus'>('normal');
+  const [honorBusyPhone, setHonorBusyPhone] = useState<string | null>(null);
   const [depositFilter, setDepositFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
   const [withdrawalFilter, setWithdrawalFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
 
@@ -660,6 +666,28 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
   const showToast = (msg: string) => {
     setNotification(msg);
     setTimeout(() => setNotification(null), 3000);
+  };
+
+  // تعديل نقاط الشرف لعضو (موجب للإضافة، سالب للخصم) مع إشعار تلقائي له
+  const handleAdjustHonor = async (phone: string, delta: number) => {
+    if (!phone || !delta) return;
+    setHonorBusyPhone(phone);
+    try {
+      const next = await adjustHonorPoints(phone, delta, true);
+      setUsers(prev => prev.map(u =>
+        (u.phone === phone || u.id === phone)
+          ? ({ ...u, honorPoints: next } as any)
+          : u
+      ));
+      showToast(delta > 0
+        ? `تمت إضافة ${delta} نقطة — الرصيد الآن ${next}`
+        : `تم خصم ${Math.abs(delta)} نقطة — الرصيد الآن ${next}`);
+    } catch (e: any) {
+      console.warn('خطأ بتعديل نقاط الشرف:', e);
+      showToast('تعذّر تعديل النقاط، حاول مرة أخرى');
+    } finally {
+      setHonorBusyPhone(null);
+    }
   };
 
   const handleUpdateSettings = async () => {
@@ -1249,12 +1277,16 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
         Number(manualDepAmount),
         manualDepCurrency,
         manualDepStatus,
-        isoDate
+        isoDate,
+        manualDepType
       );
-      showToast("تم تسجيل الإيداع اليدوي بنجاح! جاري التحديث...");
+      showToast(manualDepType === 'referral_bonus'
+        ? "تم تسجيل مكافأة الإحالة بنجاح! جاري التحديث..."
+        : "تم تسجيل الإيداع اليدوي بنجاح! جاري التحديث...");
       setSelectedUserForDeposit(null);
       setShowManualDepositModal(false);
       setManualDepPhoneInput('');
+      setManualDepType('normal');
       await loadAdminData();
       setTimeout(() => {
         window.location.reload();
@@ -1634,6 +1666,15 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
               </button>
 
               <button
+                onClick={() => setActiveTab('honorPoints')}
+                className="p-3 bg-amber-50 hover:bg-amber-100/80 border border-amber-200/60 rounded-xl text-right transition-all cursor-pointer group"
+              >
+                <Award className="w-5 h-5 text-amber-600 mb-1 group-hover:scale-110 transition-transform" />
+                <div className="text-xs font-bold text-slate-800">نقاط الشرف</div>
+                <div className="text-[10px] text-slate-500">إضافة وخصم نقاط الأعضاء</div>
+              </button>
+
+              <button
                 onClick={() => setActiveTab('settings')}
                 className="p-3 bg-slate-100 hover:bg-slate-200/80 border border-slate-200 rounded-xl text-right transition-all cursor-pointer group"
               >
@@ -1712,6 +1753,92 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
 
             {/* Video Task Pool Management */}
             {(activeTab === 'videoPool') && <VideoPoolManager />}
+
+            {/* Honor Points Management */}
+            {(activeTab === 'honorPoints') && (
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4">
+                <div className="flex items-center gap-2 mb-4 pb-3 border-b border-slate-100">
+                  <Award className="w-5 h-5 text-amber-500" />
+                  <h2 className="text-sm font-extrabold text-slate-800">إدارة نقاط الشرف</h2>
+                </div>
+
+                <div className="relative mb-4">
+                  <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={honorSearch}
+                    onChange={(e) => setHonorSearch(e.target.value)}
+                    placeholder="ابحث بالاسم أو الرقم التعريفي أو الهاتف..."
+                    className="w-full pr-10 pl-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+
+                <div className="space-y-2.5 max-h-[600px] overflow-y-auto">
+                  {users
+                    .filter(u => u.role !== 'admin')
+                    .filter(u => {
+                      const q = honorSearch.trim().toLowerCase();
+                      if (!q) return true;
+                      return (u.username || '').toLowerCase().includes(q) ||
+                             ((u as any).memberId || '').toLowerCase().includes(q) ||
+                             (u.phone || '').includes(honorSearch.trim());
+                    })
+                    .map(u => {
+                      const isActivated = Boolean(u.hasDeposited || (u.vipTier && u.vipTier !== '' && u.vipTier !== 'العضوية العادية'));
+                      const pts = Number((u as any).honorPoints || 0);
+                      return (
+                        <div
+                          key={u.phone || u.id}
+                          className={`border rounded-xl p-3 ${isActivated ? 'bg-white border-slate-200' : 'bg-slate-50/60 border-slate-100 opacity-70'}`}
+                        >
+                          <div className="flex items-center justify-between mb-2.5">
+                            <div className="min-w-0">
+                              <p className="text-xs font-bold text-slate-800 truncate">{u.username}</p>
+                              <p className="text-[10px] text-slate-400 font-mono mt-0.5" dir="ltr">
+                                {(u as any).memberId || '—'} · {isActivated ? (u.vipTier || 'مفعّل') : 'غير مفعّل'}
+                              </p>
+                            </div>
+                            <span className={`text-xl font-black ${isActivated ? 'text-blue-600' : 'text-slate-300'}`}>
+                              {pts}
+                            </span>
+                          </div>
+
+                          {isActivated && (
+                            <div className="grid grid-cols-4 gap-1.5">
+                              {[5, 7, 10].map(v => (
+                                <button
+                                  key={v}
+                                  onClick={() => handleAdjustHonor(u.phone, v)}
+                                  disabled={honorBusyPhone === u.phone}
+                                  className="py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[11px] font-bold rounded-lg transition-all disabled:opacity-50 cursor-pointer"
+                                >
+                                  +{v}
+                                </button>
+                              ))}
+                              <button
+                                onClick={() => {
+                                  const raw = prompt(`تعديل نقاط ${u.username}\nأدخل قيمة موجبة للإضافة أو سالبة للخصم (مثال: 15 أو -5)`);
+                                  if (raw === null) return;
+                                  const val = Number(raw);
+                                  if (!val || isNaN(val)) {
+                                    showToast('أدخل رقمًا صالحًا');
+                                    return;
+                                  }
+                                  handleAdjustHonor(u.phone, val);
+                                }}
+                                disabled={honorBusyPhone === u.phone}
+                                className="py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-[11px] font-bold rounded-lg transition-all disabled:opacity-50 cursor-pointer"
+                              >
+                                ···
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+            )}
             
             {/* Table: Registered Users Panel */}
             {(activeTab === 'users' || activeTab === 'all' || activeTab === 'banned') && (
@@ -5034,6 +5161,24 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                   onChange={(e) => setManualDepAmount(parseFloat(e.target.value) || 0)}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 focus:outline-none text-center"
                 />
+              </div>
+
+              {/* Deposit Type: normal or internal referral bonus */}
+              <div>
+                <label className="block mb-1 font-bold text-slate-600">نوع الإيداع:</label>
+                <select
+                  value={manualDepType}
+                  onChange={(e) => setManualDepType(e.target.value as any)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 focus:outline-none"
+                >
+                  <option value="normal">إيداع عادي</option>
+                  <option value="referral_bonus">🎁 مكافأة إحالة داخلية</option>
+                </select>
+                {manualDepType === 'referral_bonus' && (
+                  <p className="text-[10px] text-emerald-600 font-bold mt-1">
+                    سيُضاف المبلغ لرصيد العضو ويظهر في خانة «مكافأة الإحالة الداخلية».
+                  </p>
+                )}
               </div>
 
               {/* Deposit Network / Currency */}
