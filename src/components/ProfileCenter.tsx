@@ -998,8 +998,8 @@ export default function ProfileCenter({
                           <Award className="w-5 h-5 text-amber-500" />
                         </div>
                         <div>
-                          <span className="text-[10px] font-black text-amber-500 block mb-0.5">ترقية العضوية</span>
-                          <span className="text-[8px] text-slate-400 font-bold">المستوى القادم: {nextTierName}</span>
+                          <span className="text-[10px] font-black text-amber-500 block mb-0.5">جاهزية الترقية</span>
+                          <span className="text-[8px] text-slate-400 font-bold">رصيدك مقابل باقة {nextTierName}</span>
                         </div>
                       </div>
                       <div className="text-right">
