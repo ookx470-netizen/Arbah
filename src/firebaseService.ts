@@ -518,6 +518,50 @@ export async function generateUniqueMemberId(): Promise<string> {
 
 // يضمن وجود رقم تعريفي لأي عضو (يولّده تلقائيًا للأعضاء القدامى الذين
 // أُنشئت حساباتهم قبل إضافة هذه الميزة، ويحفظه بقاعدة البيانات مرة واحدة)
+// عدد نقاط الشرف الممنوحة تلقائيًا عند تفعيل الباقة
+export const HONOR_POINTS_ON_ACTIVATION = 100;
+
+// يضمن حصول أي عضو **مفعّل** على نقاط الشرف الابتدائية (100).
+// يغطي الحسابات القديمة التي فُعّلت قبل إضافة نظام النقاط: تُمنح تلقائيًا
+// عند أول مرة تُجلب فيها بياناته، وتُحفظ مرة واحدة فتبقى ثابتة بعدها.
+export async function ensureActivationHonorPoints(phone: string, userData?: any): Promise<number> {
+  if (!phone) return 0;
+  const cleanPhone = phone.trim();
+
+  const currentPoints = Number(userData?.honorPoints) || 0;
+  if (currentPoints > 0) return currentPoints;
+
+  // نمنحها فقط للأعضاء المفعّلين (لديهم باقة أو سبق لهم الإيداع)
+  const tier = (userData?.vipTier || '').trim();
+  const isActivated = Boolean(userData?.hasDeposited) ||
+    (tier !== '' && tier !== 'العضوية العادية');
+  if (!isActivated) return 0;
+
+  // تحديث التخزين المحلي فورًا
+  try {
+    const localUsers = getLocalUsers();
+    if (localUsers[cleanPhone]) {
+      (localUsers[cleanPhone] as any).honorPoints = HONOR_POINTS_ON_ACTIVATION;
+      saveLocalUsers(localUsers);
+    }
+  } catch (e) {}
+
+  if (!useLocalStorageFallback) {
+    try {
+      await updateDoc(doc(db, "users", cleanPhone), { honorPoints: HONOR_POINTS_ON_ACTIVATION });
+      createNotification(
+        cleanPhone,
+        `🏅 حصلت على ${HONOR_POINTS_ON_ACTIVATION} نقطة شرف كرصيد بداية لعضويتك المفعّلة.`
+      ).catch(() => {});
+    } catch (e) {
+      console.warn('تعذّر منح نقاط الشرف التلقائية:', e);
+      return currentPoints;
+    }
+  }
+
+  return HONOR_POINTS_ON_ACTIVATION;
+}
+
 export async function ensureMemberId(phone: string, existingUser?: any): Promise<string> {
   if (!phone) return '';
   const cleanPhone = phone.trim();
@@ -554,8 +598,6 @@ export async function ensureMemberId(phone: string, existingUser?: any): Promise
 // تبدأ بصفر للحساب الجديد، وتصبح 100 تلقائيًا فور تفعيل الباقة.
 // تُضاف أو تُخصم يدويًا من لوحة الإدارة فقط، مع إشعار فوري للعضو.
 // ============================================================
-
-export const HONOR_POINTS_ON_ACTIVATION = 100;
 
 // تعديل نقاط الشرف لعضو (delta موجب للإضافة، سالب للخصم) — للإدارة فقط
 export async function adjustHonorPoints(
@@ -828,6 +870,17 @@ export async function getUserByPhone(phone: string): Promise<User | null> {
           data.memberId = await ensureMemberId(cleanPhone, data);
         } catch (e) {
           console.warn('تعذّر توليد الرقم التعريفي:', e);
+        }
+      }
+
+      // منح نقاط الشرف الابتدائية (100) تلقائيًا لأي عضو مفعّل نقاطه صفر —
+      // يغطي الحسابات التي فُعّلت قبل إضافة نظام النقاط
+      if (!Number(data.honorPoints)) {
+        try {
+          const pts = await ensureActivationHonorPoints(cleanPhone, data);
+          if (pts > 0) data.honorPoints = pts;
+        } catch (e) {
+          console.warn('تعذّر منح نقاط الشرف:', e);
         }
       }
 
