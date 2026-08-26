@@ -32,8 +32,8 @@ import {
   subscribeToSupportMessages,
   sendSupportMessage,
   markChatAsReadByAdmin,
-  recordUserActivity
-  adjustHonorPoints,
+  recordUserActivity,
+  adjustHonorPoints
 } from '../firebaseService';
 import { db } from '../firebase';
 import { User, Deposit, Withdrawal, SystemSettings, VipPlan, UserNotification, SupportChat, SupportMessage } from '../types';
