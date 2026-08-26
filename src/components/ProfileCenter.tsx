@@ -46,7 +46,6 @@ import {
   Lock,
   Bell,
   Award,
-  Gift,
   X,
   MessageSquare,
   Sun,
@@ -143,11 +142,25 @@ export default function ProfileCenter({
   useEffect(() => {
     let cancelled = false;
     if (!currentUser?.phone) return;
+
+    // إذا كان سجل الإيداعات محمّلًا بالفعل نحسب منه مباشرة (تحديث فوري)،
+    // وإلا نجلبه من قاعدة البيانات. هذا يضمن ظهور المكافأة فور إضافتها
+    // من لوحة الإدارة دون انتظار إعادة تحميل الصفحة.
+    // 1) حساب فوري من السجل المحمّل (إن وُجد) لتحديث لحظي
+    if (deposits && deposits.length > 0) {
+      const localTotal = deposits
+        .filter((d: any) => d.depositType === 'referral_bonus' && d.status === 'approved')
+        .reduce((sum: number, d: any) => sum + (Number(d.amount) || 0), 0);
+      setReferralBonusTotal(localTotal);
+    }
+
+    // 2) جلب مستقل من قاعدة البيانات للتأكد (يعمل حتى لو لم يُفتح سجل الإيداعات)
     getReferralBonusTotal(currentUser.phone)
       .then(total => { if (!cancelled) setReferralBonusTotal(total); })
       .catch(e => console.warn('تعذّر جلب مكافآت الإحالة:', e));
+
     return () => { cancelled = true; };
-  }, [currentUser?.phone, currentUser?.earnings]);
+  }, [currentUser?.phone, currentUser?.earnings, deposits]);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [showBlockWithdrawalModal, setShowBlockWithdrawalModal] = useState<boolean>(false);
   const [showDepositRequiredModal, setShowDepositRequiredModal] = useState<boolean>(false);
@@ -885,32 +898,50 @@ export default function ProfileCenter({
               <div className="flex items-center justify-between px-2 pt-2 border-t border-slate-50">
                 <div className="flex items-center gap-2">
                   <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-                  <span className="text-[10px] font-bold text-slate-400">الأيام الفعالة</span>
+                  <span className="text-[10px] font-bold text-slate-400">حالة الحساب</span>
                 </div>
                 <span className="text-[10px] font-black text-slate-900 bg-slate-50 px-4 py-1.5 rounded-full">
-                  {calculateRemainingEffectiveDays(currentUser, settings.holidayDays ?? [5])}
+                  {calculateRemainingEffectiveDays(currentUser, settings.holidayDays ?? [5])} أيام من النشاط
                 </span>
               </div>
+            </div>
+          </div>
 
-              <div className="flex items-center justify-between px-2 pt-2 border-t border-slate-50">
+          {/* Honor Points + Internal Referral Bonus */}
+          <div className="px-1 mb-5">
+            <div className="bg-[#0f172a] rounded-[2rem] p-5 shadow-lg">
+              <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
-                  <Award className="w-3.5 h-3.5 text-amber-500" />
-                  <span className="text-[10px] font-bold text-slate-400">نقاط الشرف</span>
+                  <Award className="w-4 h-4 text-amber-300" />
+                  <span className="text-[11px] font-bold text-slate-300">نقاط الشرف</span>
                 </div>
-                <span className="text-sm font-black text-sky-600">
+                <span className="text-2xl font-black text-sky-300">
                   {Number(currentUser.honorPoints || 0)}
                 </span>
               </div>
 
-              <div className="flex items-center justify-between px-2 pt-2 border-t border-slate-50">
-                <div className="flex items-center gap-2">
-                  <Gift className="w-3.5 h-3.5 text-emerald-500" />
-                  <span className="text-[10px] font-bold text-slate-400">مكافأة الإحالة الداخلية</span>
-                </div>
-                <span className="text-sm font-black text-emerald-600">
-                  {referralBonusTotal.toFixed(2)} <span className="text-[10px] text-slate-400 font-bold">USDT</span>
-                </span>
+              <div className="h-3.5 bg-white/10 rounded-full overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-all duration-500"
+                  style={{
+                    width: `${Math.min(100, (Number(currentUser.honorPoints || 0) / 200) * 100)}%`,
+                    backgroundImage: 'repeating-linear-gradient(115deg,#2563eb 0 9px,#60a5fa 9px 18px)'
+                  }}
+                ></div>
               </div>
+
+              {Number(currentUser.honorPoints || 0) === 0 && (
+                <p className="text-[10px] text-slate-400 mt-2.5 leading-relaxed">
+                  تبدأ نقاط الشرف من صفر، وتصبح 100 تلقائيًا فور تفعيل باقتك.
+                </p>
+              )}
+            </div>
+
+            <div className="bg-white rounded-[2rem] p-4 mt-3 border border-slate-100 shadow-sm">
+              <p className="text-[10px] font-bold text-slate-400 mb-1">مكافأة الإحالة الداخلية</p>
+              <p className="text-xl font-black text-emerald-600">
+                {referralBonusTotal.toFixed(2)} <span className="text-xs text-slate-400 font-bold">USDT</span>
+              </p>
             </div>
           </div>
 
