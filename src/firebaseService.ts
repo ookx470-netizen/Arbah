@@ -549,6 +549,107 @@ export async function ensureMemberId(phone: string, existingUser?: any): Promise
   return newId;
 }
 
+// ============================================================
+// نقاط الشرف (Honor Points)
+// تبدأ بصفر للحساب الجديد، وتصبح 100 تلقائيًا فور تفعيل الباقة.
+// تُضاف أو تُخصم يدويًا من لوحة الإدارة فقط، مع إشعار فوري للعضو.
+// ============================================================
+
+export const HONOR_POINTS_ON_ACTIVATION = 100;
+
+// تعديل نقاط الشرف لعضو (delta موجب للإضافة، سالب للخصم) — للإدارة فقط
+export async function adjustHonorPoints(
+  phone: string,
+  delta: number,
+  notify: boolean = true
+): Promise<number> {
+  if (!phone || !delta) return 0;
+  const cleanPhone = phone.trim();
+
+  // نقرأ القيمة الحالية من قاعدة البيانات لضمان الدقة
+  let current = 0;
+  try {
+    const snap = await getDoc(doc(db, "users", cleanPhone));
+    if (snap.exists()) {
+      current = Number(snap.data()?.honorPoints) || 0;
+    }
+  } catch (e) {
+    console.warn('تعذّر قراءة نقاط الشرف الحالية:', e);
+    const localUsers = getLocalUsers();
+    current = Number((localUsers[cleanPhone] as any)?.honorPoints) || 0;
+  }
+
+  const next = Math.max(0, current + Number(delta));
+
+  // تحديث التخزين المحلي
+  const users = getLocalUsers();
+  if (users[cleanPhone]) {
+    (users[cleanPhone] as any).honorPoints = next;
+    saveLocalUsers(users);
+  }
+
+  if (!useLocalStorageFallback) {
+    try {
+      await updateDoc(doc(db, "users", cleanPhone), { honorPoints: next });
+    } catch (e) {
+      console.warn('تعذّر حفظ نقاط الشرف:', e);
+      throw e;
+    }
+  }
+
+  // إشعار فوري للعضو
+  if (notify) {
+    const msg = delta > 0
+      ? `🏅 تمت إضافة ${Math.abs(delta)} نقطة شرف إلى حسابك. رصيدك الحالي: ${next} نقطة.`
+      : `⚠️ تم خصم ${Math.abs(delta)} نقطة شرف من حسابك. رصيدك الحالي: ${next} نقطة.`;
+    createNotification(cleanPhone, msg).catch(e => console.warn('تعذّر إرسال إشعار النقاط:', e));
+  }
+
+  return next;
+}
+
+// منح نقاط البداية عند تفعيل الباقة (يُستدعى مرة واحدة عند أول تفعيل)
+export async function grantActivationHonorPoints(phone: string): Promise<void> {
+  if (!phone) return;
+  const cleanPhone = phone.trim();
+  try {
+    const snap = await getDoc(doc(db, "users", cleanPhone));
+    if (!snap.exists()) return;
+    const currentPoints = Number(snap.data()?.honorPoints) || 0;
+    // نمنحها فقط إذا كانت النقاط صفرًا (أي لم يسبق تفعيله)
+    if (currentPoints > 0) return;
+
+    await updateDoc(doc(db, "users", cleanPhone), { honorPoints: HONOR_POINTS_ON_ACTIVATION });
+
+    const users = getLocalUsers();
+    if (users[cleanPhone]) {
+      (users[cleanPhone] as any).honorPoints = HONOR_POINTS_ON_ACTIVATION;
+      saveLocalUsers(users);
+    }
+
+    createNotification(
+      cleanPhone,
+      `🏅 مبروك تفعيل باقتك! حصلت على ${HONOR_POINTS_ON_ACTIVATION} نقطة شرف كبداية.`
+    ).catch(() => {});
+  } catch (e) {
+    console.warn('تعذّر منح نقاط التفعيل:', e);
+  }
+}
+
+// إجمالي مكافآت الإحالة الداخلية للعضو (مجموع الإيداعات المصنّفة كمكافأة)
+export async function getReferralBonusTotal(phone: string): Promise<number> {
+  if (!phone) return 0;
+  try {
+    const deposits = await getUserDeposits(phone);
+    return deposits
+      .filter((d: any) => d.depositType === 'referral_bonus' && d.status === 'approved')
+      .reduce((sum: number, d: any) => sum + (Number(d.amount) || 0), 0);
+  } catch (e) {
+    console.warn('تعذّر حساب مكافآت الإحالة:', e);
+    return 0;
+  }
+}
+
 // Migration helper: copies data from old cached named DB into the new online default DB
 export async function migrateOldCachedDataToNewDb(force: boolean = false) {
   const isMigrated = localStorage.getItem('oxlo_premium_migration_done_v1');
@@ -898,6 +999,7 @@ export async function registerUser(username: string, phone: string, password: st
     rawPassword: password,
     inviteCode: generateInviteCode(),
     memberId: await generateUniqueMemberId(),
+    honorPoints: 0, // تصبح 100 تلقائيًا عند تفعيل الباقة
     referrerCode: finalReferrer,
     walletAddress: "",
     earnings: 0, // تم إلغاء المكافأة الترحيبية — الرصيد يبدأ من صفر
@@ -2412,6 +2514,8 @@ export async function updateUserByAdmin(phoneOrId: string, updates: Partial<User
   
   if (updates.vipTier && updates.vipTier !== "" && updates.vipTier !== "العضوية العادية") {
     finalUpdates.hasDeposited = true;
+    // منح نقاط الشرف الابتدائية تلقائيًا عند أول تفعيل للباقة
+    grantActivationHonorPoints(target).catch(e => console.warn('تعذّر منح نقاط التفعيل:', e));
   }
 
   // 1. ALWAYS write to local cache robustly across all matching keys
@@ -2672,7 +2776,8 @@ export async function addManualDepositByAdmin(
   amount: number,
   currency: string = 'USDT (Polygon)',
   status: 'pending' | 'approved' | 'rejected' = 'approved',
-  createdAt: string = new Date().toISOString()
+  createdAt: string = new Date().toISOString(),
+  depositType: 'normal' | 'referral_bonus' = 'normal'
 ): Promise<Deposit> {
   let username = "عضو يدوي";
   let userId = phone;
@@ -2697,8 +2802,9 @@ export async function addManualDepositByAdmin(
     phone: canonicalPhone,
     amount,
     currency: currency || 'USDT (Polygon)',
-    txHash: 'إيداع يدوي من لوحة التحكم',
+    txHash: depositType === 'referral_bonus' ? 'مكافأة إحالة داخلية' : 'إيداع يدوي من لوحة التحكم',
     status,
+    depositType,
     createdAt: createdAt || new Date().toISOString()
   };
 
@@ -2719,7 +2825,10 @@ export async function addManualDepositByAdmin(
         console.warn("Error updating user balance on manual deposit:", e);
       }
     }
-    createNotification(phone, `💰 تم إضافة إيداع يدوي بقيمة ${amount} USDT إلى حسابك من قبل الإدارة!`).catch(() => {});
+    const depositMsg = depositType === 'referral_bonus'
+      ? `🎁 تهانينا! حصلت على مكافأة إحالة داخلية بقيمة ${amount} USDT، وأُضيفت إلى رصيدك.`
+      : `💰 تم إضافة إيداع يدوي بقيمة ${amount} USDT إلى حسابك من قبل الإدارة!`;
+    createNotification(phone, depositMsg).catch(() => {});
   }
 
   if (useLocalStorageFallback) {
