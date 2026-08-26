@@ -531,10 +531,14 @@ export async function ensureActivationHonorPoints(phone: string, userData?: any)
   const currentPoints = Number(userData?.honorPoints) || 0;
   if (currentPoints > 0) return currentPoints;
 
-  // نمنحها فقط للأعضاء المفعّلين (لديهم باقة أو سبق لهم الإيداع)
+  // نمنحها فقط لمن فعّل باقة استثمارية فعليًا — وجود vipTier صالح.
+  // ملاحظة مهمة: لا نعتمد على hasDeposited لأنه يصبح true بمجرد اعتماد أي
+  // إيداع مالي، فكان يمنح النقاط لمن أودع دون ترقية باقته إطلاقًا.
   const tier = (userData?.vipTier || '').trim();
-  const isActivated = Boolean(userData?.hasDeposited) ||
-    (tier !== '' && tier !== 'العضوية العادية');
+  const isActivated = tier !== '' &&
+    tier !== 'العضوية العادية' &&
+    tier !== 'الباقة العادية' &&
+    tier !== 'VIP0';
   if (!isActivated) return 0;
 
   // تحديث التخزين المحلي فورًا
@@ -1709,17 +1713,20 @@ export async function getUserDeposits(phone: string): Promise<Deposit[]> {
     const variants = phoneVariants(phone);
     const map: Record<string, Deposit> = {};
 
+    // نبحث بحقلي phone و userId معًا لتغطية أي اختلاف بصيغة الحفظ
     for (const v of variants) {
-      try {
-        const q = query(collection(db, "deposits"), where("phone", "==", v));
-        const snap = await getDocs(q);
-        snap.forEach((docSnap) => {
-          const data = docSnap.data() as Deposit;
-          const key = data.id || docSnap.id;
-          if (key) map[key] = { ...data, id: key };
-        });
-      } catch (inner) {
-        console.warn('getUserDeposits variant query failed:', v, inner);
+      for (const field of ['phone', 'userId']) {
+        try {
+          const q = query(collection(db, "deposits"), where(field, "==", v));
+          const snap = await getDocs(q);
+          snap.forEach((docSnap) => {
+            const data = docSnap.data() as Deposit;
+            const key = data.id || docSnap.id;
+            if (key) map[key] = { ...data, id: key };
+          });
+        } catch (inner) {
+          console.warn('getUserDeposits query failed:', field, v, inner);
+        }
       }
     }
 
@@ -1928,11 +1935,23 @@ function phoneVariants(phone: string): string[] {
     noZero,
     '+' + noZero
   ]);
-  // صيغة محلية بصفر بادئ (مثال: 964771... -> 0771...)
+
+  // دولي ← محلي (مثال: 9647519952000 → 07519952000)
   if (noZero.startsWith('964')) {
-    const local = '0' + noZero.substring(3);
+    const local = noZero.substring(3);
     variants.add(local);
+    variants.add('0' + local);
   }
+
+  // محلي ← دولي (مثال: 07519952000 → +9647519952000)
+  // إصلاح مهم: بعض الحسابات (ومنها حساب الإدارة) مخزّنة بالصيغة المحلية،
+  // فكانت السجلات المحفوظة بالصيغة الدولية لا تُطابق ولا تظهر إطلاقًا.
+  if (!noZero.startsWith('964')) {
+    variants.add('964' + noZero);
+    variants.add('+964' + noZero);
+    variants.add('0' + noZero);
+  }
+
   return Array.from(variants).filter(v => v.length > 0);
 }
 
