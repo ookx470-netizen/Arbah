@@ -46,6 +46,7 @@ import {
   Lock,
   Bell,
   Award,
+  Gift,
   X,
   MessageSquare,
   Sun,
@@ -884,50 +885,32 @@ export default function ProfileCenter({
               <div className="flex items-center justify-between px-2 pt-2 border-t border-slate-50">
                 <div className="flex items-center gap-2">
                   <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-                  <span className="text-[10px] font-bold text-slate-400">حالة الحساب</span>
+                  <span className="text-[10px] font-bold text-slate-400">الأيام الفعالة</span>
                 </div>
                 <span className="text-[10px] font-black text-slate-900 bg-slate-50 px-4 py-1.5 rounded-full">
-                  {calculateRemainingEffectiveDays(currentUser, settings.holidayDays ?? [5])} أيام من النشاط
+                  {calculateRemainingEffectiveDays(currentUser, settings.holidayDays ?? [5])}
                 </span>
               </div>
-            </div>
-          </div>
 
-          {/* Honor Points + Internal Referral Bonus */}
-          <div className="px-1 mb-5">
-            <div className="bg-[#0f172a] rounded-[2rem] p-5 shadow-lg">
-              <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center justify-between px-2 pt-2 border-t border-slate-50">
                 <div className="flex items-center gap-2">
-                  <Award className="w-4 h-4 text-amber-300" />
-                  <span className="text-[11px] font-bold text-slate-300">نقاط الشرف</span>
+                  <Award className="w-3.5 h-3.5 text-amber-500" />
+                  <span className="text-[10px] font-bold text-slate-400">نقاط الشرف</span>
                 </div>
-                <span className="text-2xl font-black text-sky-300">
+                <span className="text-sm font-black text-sky-600">
                   {Number(currentUser.honorPoints || 0)}
                 </span>
               </div>
 
-              <div className="h-3.5 bg-white/10 rounded-full overflow-hidden">
-                <div
-                  className="h-full rounded-full transition-all duration-500"
-                  style={{
-                    width: `${Math.min(100, (Number(currentUser.honorPoints || 0) / 200) * 100)}%`,
-                    backgroundImage: 'repeating-linear-gradient(115deg,#2563eb 0 9px,#60a5fa 9px 18px)'
-                  }}
-                ></div>
+              <div className="flex items-center justify-between px-2 pt-2 border-t border-slate-50">
+                <div className="flex items-center gap-2">
+                  <Gift className="w-3.5 h-3.5 text-emerald-500" />
+                  <span className="text-[10px] font-bold text-slate-400">مكافأة الإحالة الداخلية</span>
+                </div>
+                <span className="text-sm font-black text-emerald-600">
+                  {referralBonusTotal.toFixed(2)} <span className="text-[10px] text-slate-400 font-bold">USDT</span>
+                </span>
               </div>
-
-              {Number(currentUser.honorPoints || 0) === 0 && (
-                <p className="text-[10px] text-slate-400 mt-2.5 leading-relaxed">
-                  تبدأ نقاط الشرف من صفر، وتصبح 100 تلقائيًا فور تفعيل باقتك.
-                </p>
-              )}
-            </div>
-
-            <div className="bg-white rounded-[2rem] p-4 mt-3 border border-slate-100 shadow-sm">
-              <p className="text-[10px] font-bold text-slate-400 mb-1">مكافأة الإحالة الداخلية</p>
-              <p className="text-xl font-black text-emerald-600">
-                {referralBonusTotal.toFixed(2)} <span className="text-xs text-slate-400 font-bold">USDT</span>
-              </p>
             </div>
           </div>
 
