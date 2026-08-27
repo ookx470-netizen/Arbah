@@ -129,7 +129,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
   // نقاط الشرف: بحث وحالة تحميل لكل عضو
   const [honorSearch, setHonorSearch] = useState<string>('');
   // نوع الإيداع اليدوي: عادي أو مكافأة إحالة داخلية
-  const [manualDepType, setManualDepType] = useState<'normal' | 'referral_bonus'>('normal');
+  const [manualDepType, setManualDepType] = useState<'normal' | 'referral_bonus' | 'upgrade_support'>('normal');
   const [honorBusyPhone, setHonorBusyPhone] = useState<string | null>(null);
   const [depositFilter, setDepositFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
   const [withdrawalFilter, setWithdrawalFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
@@ -5173,10 +5173,16 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                 >
                   <option value="normal">إيداع عادي</option>
                   <option value="referral_bonus">🎁 مكافأة إحالة داخلية</option>
+                  <option value="upgrade_support">🎯 دعم ترقية (يُسترد من الأرباح)</option>
                 </select>
                 {manualDepType === 'referral_bonus' && (
                   <p className="text-[10px] text-emerald-600 font-bold mt-1">
                     سيُضاف المبلغ لرصيد العضو ويظهر في خانة «مكافأة الإحالة الداخلية».
+                  </p>
+                )}
+                {manualDepType === 'upgrade_support' && (
+                  <p className="text-[10px] text-sky-600 font-bold mt-1 leading-relaxed">
+                    سيُضاف المبلغ لرصيد العضو، ويُسترد تدريجيًا بخصم 50% من أرباح مهامه اليومية حتى اكتماله — دون أي تجميد أو مطالبة.
                   </p>
                 )}
               </div>

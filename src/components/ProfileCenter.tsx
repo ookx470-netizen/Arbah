@@ -47,6 +47,7 @@ import {
   Bell,
   Award,
   Gift,
+  Target,
   X,
   MessageSquare,
   Sun,
@@ -929,6 +930,37 @@ export default function ProfileCenter({
                   {referralBonusTotal.toFixed(2)} <span className="text-[10px] text-slate-400 font-bold">USDT</span>
                 </span>
               </div>
+
+              {/* Upgrade Support progress — shown only while an active support exists */}
+              {(() => {
+                const supTotal = Number((currentUser as any).upgradeSupportTotal) || 0;
+                const supPaid = Number((currentUser as any).upgradeSupportPaid) || 0;
+                if (supTotal <= 0 || supPaid >= supTotal) return null;
+                const pct = Math.min(100, Math.round((supPaid / supTotal) * 100));
+                return (
+                  <div className="px-2 pt-2 border-t border-slate-50">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <div className="flex items-center gap-2">
+                        <Target className="w-3.5 h-3.5 text-sky-500" />
+                        <span className="text-[10px] font-bold text-slate-400">دعم الترقية</span>
+                      </div>
+                      <span className="text-[11px] font-black text-slate-900">
+                        <span className="text-sky-600">{supPaid.toFixed(2)}</span>
+                        <span className="text-slate-300 font-bold"> / {supTotal.toFixed(2)} USDT</span>
+                      </span>
+                    </div>
+                    <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-sky-500 rounded-full transition-all duration-500"
+                        style={{ width: `${pct}%` }}
+                      ></div>
+                    </div>
+                    <p className="text-[9px] text-slate-300 font-bold mt-1.5">
+                      يُخصم 50% من أرباحك اليومية حتى الاكتمال
+                    </p>
+                  </div>
+                );
+              })()}
             </div>
           </div>
 
