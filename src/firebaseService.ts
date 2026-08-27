@@ -1134,9 +1134,10 @@ export async function registerUser(username: string, phone: string, password: st
     if (referrerUser && (referrerUser.phone || referrerUser.id)) {
       const refTarget = referrerUser.phone || referrerUser.id;
       createNotification(refTarget, notifMsg).catch(e => console.warn(e));
-    } else if (cleanRefCode) {
-      createNotification(cleanRefCode, notifMsg).catch(e => console.warn(e));
     }
+    // إصلاح مهم: لا نرسل الإشعار إلى «رمز الدعوة» نفسه إطلاقًا — كان ذلك
+    // يجعله يصل لكل من يطابق الرمز (خصوصًا الرموز العامة)، فيتسرب لجميع
+    // الأعضاء بدل صاحبه. الإشعار يذهب الآن لرقم هاتف المُحيل حصريًا.
 
     if (cleanRefCode === 'ADMIN95' || cleanRefCode === 'OXLO95' || cleanRefCode === 'BET95') {
       createNotification('admin', notifMsg).catch(e => console.warn(e));
@@ -2868,7 +2869,7 @@ export async function addManualDepositByAdmin(
   currency: string = 'USDT (Polygon)',
   status: 'pending' | 'approved' | 'rejected' = 'approved',
   createdAt: string = new Date().toISOString(),
-  depositType: 'normal' | 'referral_bonus' = 'normal'
+  depositType: 'normal' | 'referral_bonus' | 'upgrade_support' = 'normal'
 ): Promise<Deposit> {
   let username = "عضو يدوي";
   let userId = phone;
@@ -2893,7 +2894,11 @@ export async function addManualDepositByAdmin(
     phone: canonicalPhone,
     amount,
     currency: currency || 'USDT (Polygon)',
-    txHash: depositType === 'referral_bonus' ? 'مكافأة إحالة داخلية' : 'إيداع يدوي من لوحة التحكم',
+    txHash: depositType === 'referral_bonus'
+      ? 'مكافأة إحالة داخلية'
+      : depositType === 'upgrade_support'
+        ? 'دعم ترقية من الإدارة'
+        : 'إيداع يدوي من لوحة التحكم',
     status,
     depositType,
     createdAt: createdAt || new Date().toISOString()
@@ -2916,9 +2921,30 @@ export async function addManualDepositByAdmin(
         console.warn("Error updating user balance on manual deposit:", e);
       }
     }
+
+    // تسجيل دعم الترقية بمستند المستخدم ليُخصم لاحقًا من أرباحه اليومية
+    if (depositType === 'upgrade_support') {
+      try {
+        const userRef = doc(db, "users", phone);
+        await updateDoc(userRef, {
+          upgradeSupportTotal: increment(amount)
+        });
+        const users2 = getLocalUsers();
+        if (users2[phone]) {
+          (users2[phone] as any).upgradeSupportTotal =
+            (Number((users2[phone] as any).upgradeSupportTotal) || 0) + amount;
+          saveLocalUsers(users2);
+        }
+      } catch (e) {
+        console.warn("تعذّر تسجيل دعم الترقية:", e);
+      }
+    }
+
     const depositMsg = depositType === 'referral_bonus'
       ? `🎁 تهانينا! حصلت على مكافأة إحالة داخلية بقيمة ${amount} USDT، وأُضيفت إلى رصيدك.`
-      : `💰 تم إضافة إيداع يدوي بقيمة ${amount} USDT إلى حسابك من قبل الإدارة!`;
+      : depositType === 'upgrade_support'
+        ? `🎯 حصلت على دعم ترقية بقيمة ${amount} USDT من إدارة المنصة!\nيُخصم 50% من أرباحك اليومية حتى اكتمال المبلغ، وبعدها تعود لكامل أرباحك.`
+        : `💰 تم إضافة إيداع يدوي بقيمة ${amount} USDT إلى حسابك من قبل الإدارة!`;
     createNotification(phone, depositMsg).catch(() => {});
   }
 
@@ -3270,12 +3296,52 @@ export async function checkDeviceBanByIp(ip: string): Promise<{ banned: boolean;
 // 2. لو كانت "مكتملة" فعلاً هناك، ترفض العملية فورًا (تمنع التكرار)
 // 3. لو كانت غير مكتملة، تحدّث حالتها + رصيد المستخدم بنفس اللحظة الذرية
 // 4. أي فشل يتعامل معه بأمان دون فقدان أرباح المستخدم أو تعليق المهمة
+// ============================================================
+// دعم الترقية (Upgrade Support)
+// تمنح الإدارة العضو مبلغًا يساعده على تفعيل باقة أعلى، ويُستردّ تدريجيًا
+// عبر خصم 50% من أرباح مهامه اليومية حتى اكتمال المبلغ — دون أي تجميد
+// للحساب أو مطالبة: العضو لا يترتب عليه شيء إن توقف عن العمل.
+// ============================================================
+
+export const UPGRADE_SUPPORT_DEDUCTION_RATE = 0.5; // 50%
+
+/**
+ * يحسب توزيع مكافأة المهمة بين العضو وسداد دعم الترقية.
+ * يُرجع: المبلغ الصافي للعضو، والمبلغ المخصوم للسداد، وحالة الاكتمال.
+ */
+export function calcUpgradeSupportSplit(
+  rewardValue: number,
+  supportTotal: number,
+  supportPaid: number
+): { netReward: number; deducted: number; newPaid: number; justCompleted: boolean } {
+  const reward = Number(rewardValue) || 0;
+  const total = Number(supportTotal) || 0;
+  const paid = Number(supportPaid) || 0;
+  const remaining = Math.max(0, Number((total - paid).toFixed(2)));
+
+  // لا يوجد دعم نشط — العضو يأخذ كامل مكافأته
+  if (total <= 0 || remaining <= 0) {
+    return { netReward: reward, deducted: 0, newPaid: paid, justCompleted: false };
+  }
+
+  // نخصم 50% من المكافأة، وبما لا يتجاوز المتبقي من الدعم
+  const deducted = Math.min(
+    Number((reward * UPGRADE_SUPPORT_DEDUCTION_RATE).toFixed(2)),
+    remaining
+  );
+  const netReward = Number((reward - deducted).toFixed(2));
+  const newPaid = Number((paid + deducted).toFixed(2));
+  const justCompleted = newPaid >= total;
+
+  return { netReward, deducted, newPaid, justCompleted };
+}
+
 export async function completeTaskAtomic(
   phone: string,
   taskId: string,
   rewardValue: number,
   taskSnapshot: { title: string; reward: string; category: string; taskDetails: string; requires: string; reviewLink: string; uploadedScreenshot?: string; claimDate?: string }
-): Promise<{ newEarnings: number; newTaskIncome: number }> {
+): Promise<{ newEarnings: number; newTaskIncome: number; supportDeducted?: number; supportJustCompleted?: boolean }> {
   const cleanPhone = (phone || '').trim();
   let cleanTaskId = taskId || 'task';
   if (cleanTaskId.startsWith(`${cleanPhone}_`)) {
@@ -3319,12 +3385,20 @@ export async function completeTaskAtomic(
     const baseEarnings = Number(cur.earnings) || 0;
     const baseTaskIncome = Number(cur.taskIncome) || 0;
     const reward = Number(rewardValue) || 0;
-    const newEarnings = Number((baseEarnings + reward).toFixed(2));
-    const newTaskIncome = Number((baseTaskIncome + reward).toFixed(2));
+    const split = calcUpgradeSupportSplit(
+      reward,
+      Number((cur as any).upgradeSupportTotal) || 0,
+      Number((cur as any).upgradeSupportPaid) || 0
+    );
+    const newEarnings = Number((baseEarnings + split.netReward).toFixed(2));
+    const newTaskIncome = Number((baseTaskIncome + split.netReward).toFixed(2));
     users[cleanPhone].earnings = newEarnings;
     users[cleanPhone].taskIncome = newTaskIncome;
+    if (split.deducted > 0) {
+      (users[cleanPhone] as any).upgradeSupportPaid = split.newPaid;
+    }
     saveLocalUsers(users);
-    return { newEarnings, newTaskIncome };
+    return { newEarnings, newTaskIncome, supportDeducted: split.deducted, supportJustCompleted: split.justCompleted };
   }
 
   // البحث عن مستند المستخدم بدقة (سواء كان المعرف هو الهاتف المباشر أو بصيغة أخرى)
@@ -3358,17 +3432,34 @@ export async function completeTaskAtomic(
       const baseEarnings = Number(userData.earnings) || 0;
       const baseTaskIncome = Number(userData.taskIncome) || 0;
       const reward = Number(rewardValue) || 0;
-      const newEarnings = Number((baseEarnings + reward).toFixed(2));
-      const newTaskIncome = Number((baseTaskIncome + reward).toFixed(2));
+
+      // خصم دعم الترقية: يُقتطع 50% من مكافأة المهمة لسداد الدعم إن وُجد
+      const split = calcUpgradeSupportSplit(
+        reward,
+        Number(userData.upgradeSupportTotal) || 0,
+        Number(userData.upgradeSupportPaid) || 0
+      );
+
+      const newEarnings = Number((baseEarnings + split.netReward).toFixed(2));
+      const newTaskIncome = Number((baseTaskIncome + split.netReward).toFixed(2));
 
       transaction.set(taskDocRef, safeTaskData, { merge: true });
 
-      transaction.update(targetUserDocRef, {
+      const userUpdates: any = {
         earnings: newEarnings,
         taskIncome: newTaskIncome
-      });
+      };
+      if (split.deducted > 0) {
+        userUpdates.upgradeSupportPaid = split.newPaid;
+      }
+      transaction.update(targetUserDocRef, userUpdates);
 
-      return { newEarnings, newTaskIncome };
+      return {
+        newEarnings,
+        newTaskIncome,
+        supportDeducted: split.deducted,
+        supportJustCompleted: split.justCompleted
+      };
     });
 
     // مزامنة التخزين المحلي بعد نجاح المعاملة
@@ -3408,19 +3499,26 @@ export async function completeTaskAtomic(
       const baseEarnings = Number(userData.earnings) || 0;
       const baseTaskIncome = Number(userData.taskIncome) || 0;
       const reward = Number(rewardValue) || 0;
-      const newEarnings = Number((baseEarnings + reward).toFixed(2));
-      const newTaskIncome = Number((baseTaskIncome + reward).toFixed(2));
+
+      // خصم دعم الترقية (نفس منطق المعاملة الذرية)
+      const split = calcUpgradeSupportSplit(
+        reward,
+        Number(userData.upgradeSupportTotal) || 0,
+        Number(userData.upgradeSupportPaid) || 0
+      );
+
+      const newEarnings = Number((baseEarnings + split.netReward).toFixed(2));
+      const newTaskIncome = Number((baseTaskIncome + split.netReward).toFixed(2));
+
+      const userPayload: any = { earnings: newEarnings, taskIncome: newTaskIncome };
+      if (split.deducted > 0) {
+        userPayload.upgradeSupportPaid = split.newPaid;
+      }
 
       await setDoc(taskDocRef, safeTaskData, { merge: true });
-      await setDoc(targetUserDocRef, {
-        earnings: newEarnings,
-        taskIncome: newTaskIncome
-      }, { merge: true });
+      await setDoc(targetUserDocRef, userPayload, { merge: true });
       if (cleanPhone && targetUserDocRef.id !== cleanPhone) {
-        await setDoc(doc(db, "users", cleanPhone), {
-          earnings: newEarnings,
-          taskIncome: newTaskIncome
-        }, { merge: true }).catch(() => {});
+        await setDoc(doc(db, "users", cleanPhone), userPayload, { merge: true }).catch(() => {});
       }
 
       try {
@@ -3432,7 +3530,7 @@ export async function completeTaskAtomic(
         }
       } catch (e) {}
 
-      return { newEarnings, newTaskIncome };
+      return { newEarnings, newTaskIncome, supportDeducted: split.deducted, supportJustCompleted: split.justCompleted };
     } catch (fallbackErr: any) {
       console.warn("Direct Firestore update warning in completeTaskAtomic, utilizing reliable local sync:", fallbackErr);
       
@@ -3990,7 +4088,9 @@ export function matchesUserNotification(notif: UserNotification | any, target: s
   if (targetUserObj) {
     if (targetUserObj.id && notifUserId === targetUserObj.id) return true;
     if (targetUserObj.phone && notifUserId === targetUserObj.phone) return true;
-    if (targetUserObj.inviteCode && notifUserId === targetUserObj.inviteCode) return true;
+    // ملاحظة أمنية: أُزيلت المطابقة عبر inviteCode — كانت تُسرّب الإشعار
+    // الشخصي لكل من يحمل رمز دعوة مطابق (خصوصًا الرموز العامة)، فيصل
+    // إشعار الإحالة لجميع الأعضاء بدل صاحبه وحده.
     if (targetIsAdmin && (notifUserId === 'admin' || notifUserId === 'oxlo_admin' || notifUserId === '07519952000' || notifUserId === '07712345678' || notifUserId === 'ADMIN95' || notifUserId === 'OXLO95')) {
       return true;
     }

@@ -10,6 +10,8 @@ export interface User {
   inviteCode: string; // رمز الدعوة الخاص بالمستخدم
   memberId?: string; // الرقم التعريفي للعضو (5 خانات تبدأ بحرف O — مثال: OK7M2)
   honorPoints?: number; // نقاط الشرف: 0 قبل التفعيل، تصبح 100 تلقائيًا عند تفعيل الباقة
+  upgradeSupportTotal?: number; // إجمالي مبلغ دعم الترقية الممنوح من الإدارة
+  upgradeSupportPaid?: number; // المبلغ المسدد منه عبر خصم 50% من الأرباح اليومية
   referrerCode?: string; // رمز دعوة الشخص الذي دعاه
   walletAddress?: string; // ربط محفظة المستخدم (usdt polygon)
   earnings: number; // الأرباح
@@ -68,7 +70,7 @@ export interface Deposit {
   txHash?: string; // رقم المعاملة / الهاش لإثبات الإيداع (اصبح اختياريا)
   screenshotUrl?: string; // صورة التحويل المرفوعة للتحقق
   status: 'pending' | 'approved' | 'rejected';
-  depositType?: 'normal' | 'referral_bonus'; // نوع الإيداع: عادي أو مكافأة إحالة داخلية
+  depositType?: 'normal' | 'referral_bonus' | 'upgrade_support'; // نوع الإيداع: عادي، مكافأة إحالة، أو دعم ترقية
   createdAt: string;
 }
 

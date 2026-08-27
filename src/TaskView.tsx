@@ -1565,7 +1565,26 @@ export default function TaskView() {
         console.warn("LocalStorage sync error after atomic completion:", e);
       }
       
-      triggerNotification(`🎉 تهانينا! تم تقديم العمل بنجاح وإضافة ${rewardValue} USDT إلى أرباحك مباشرة!`);
+      const deducted = Number((data as any).supportDeducted) || 0;
+      if (deducted > 0) {
+        const net = Number((rewardValue - deducted).toFixed(2));
+        triggerNotification(`🎉 تم تقديم العمل بنجاح! أُضيف ${net} USDT لأرباحك، وخُصم ${deducted} USDT لسداد دعم الترقية.`);
+      } else {
+        triggerNotification(`🎉 تهانينا! تم تقديم العمل بنجاح وإضافة ${rewardValue} USDT إلى أرباحك مباشرة!`);
+      }
+
+      // إشعار اكتمال سداد دعم الترقية
+      if ((data as any).supportJustCompleted) {
+        setTimeout(() => {
+          triggerNotification('🎉 اكتمل سداد دعم الترقية بالكامل! أرباحك اليومية عادت 100% لك من الآن.');
+        }, 3500);
+        import('./firebaseService').then(({ createNotification }) => {
+          createNotification(
+            currentUser.phone,
+            '🎉 اكتمل سداد دعم الترقية بالكامل! أرباحك اليومية عادت 100% لك من الآن.'
+          ).catch(() => {});
+        }).catch(() => {});
+      }
       setCurrentView('list');
       setActiveListTab('completed');
     } catch (err: any) {
