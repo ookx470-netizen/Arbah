@@ -3053,20 +3053,58 @@ export default function TaskView() {
                   <p className="text-xs text-stone-500 mt-1 leading-relaxed">
                     هل أنت متأكد من رغبتك في الاشتراك بـ <strong className="text-blue-600 font-extrabold">{selectedPlanForUpgrade.name}</strong>؟
                   </p>
-                  <p className="text-[10px] text-stone-400 mt-2 bg-stone-50 py-2 px-3 rounded-lg border border-stone-150">
-                    قيمة الترقية: {selectedPlanForUpgrade.price} USDT سيتم خصمها من رصيدك الحالي.
-                  </p>
+                  {(() => {
+                    // حساب فرق الترقية: يُخصم الفارق بين سعر الباقة الجديدة
+                    // وسعر الباقة الحالية فقط، وليس السعر الكامل — فالعضو
+                    // سبق أن دفع قيمة باقته الحالية.
+                    const allPlans = settings.vipPlans && settings.vipPlans.length > 0 ? settings.vipPlans : [];
+                    const myPlan = allPlans.find(p => p.name === currentUser?.vipTier);
+                    const myPlanPrice = myPlan ? Number(myPlan.price) || 0 : 0;
+                    const newPrice = Number(selectedPlanForUpgrade.price) || 0;
+                    const diff = Math.max(0, Number((newPrice - myPlanPrice).toFixed(2)));
+
+                    return (
+                      <p className="text-[10px] text-stone-400 mt-2 bg-stone-50 py-2 px-3 rounded-lg border border-stone-150 leading-relaxed">
+                        {myPlanPrice > 0 ? (
+                          <>
+                            فرق الترقية: <strong className="text-blue-600 font-black">{diff} USDT</strong> سيتم خصمها من رصيدك.
+                            <br />
+                            <span className="text-[9px] text-stone-400">
+                              (سعر {selectedPlanForUpgrade.name}: {newPrice} − باقتك الحالية: {myPlanPrice})
+                            </span>
+                          </>
+                        ) : (
+                          <>قيمة الاشتراك: <strong className="text-blue-600 font-black">{newPrice} USDT</strong> سيتم خصمها من رصيدك الحالي.</>
+                        )}
+                      </p>
+                    );
+                  })()}
                 </div>
                 <div className="flex gap-2">
                   <button
                     onClick={async () => {
                       if (!currentUser) return;
                       
-                      const price = Number(selectedPlanForUpgrade.price) || 0;
+                      const newPlanPrice = Number(selectedPlanForUpgrade.price) || 0;
                       const currentEarnings = Number(currentUser.earnings) || 0;
 
+                      // نخصم فرق الترقية فقط (سعر الجديدة − سعر الحالية)،
+                      // لأن العضو سبق أن دفع قيمة باقته الحالية بالكامل.
+                      const allPlansForCalc = settings.vipPlans && settings.vipPlans.length > 0 ? settings.vipPlans : [];
+                      const myCurrentPlan = allPlansForCalc.find(p => p.name === currentUser?.vipTier);
+                      const myCurrentPrice = myCurrentPlan ? Number(myCurrentPlan.price) || 0 : 0;
+
+                      // منع النزول لباقة أرخص أو مساوية
+                      if (myCurrentPrice > 0 && newPlanPrice <= myCurrentPrice) {
+                        triggerNotification("⚠️ لا يمكن الانتقال إلى باقة بنفس القيمة أو أقل من باقتك الحالية.");
+                        setSelectedPlanForUpgrade(null);
+                        return;
+                      }
+
+                      const price = Math.max(0, Number((newPlanPrice - myCurrentPrice).toFixed(2)));
+
                       if (currentEarnings < price) {
-                        triggerNotification("عفواً، رصيدك الحالي غير كافٍ للاشتراك في هذه الباقة. يرجى الإيداع وتعبئة الرصيد أولاً.");
+                        triggerNotification(`عفواً، رصيدك الحالي غير كافٍ. فرق الترقية المطلوب: ${price} USDT. يرجى تعبئة رصيدك أولاً.`);
                         setSelectedPlanForUpgrade(null);
                         return;
                       }
