@@ -1400,11 +1400,117 @@ export async function creditReferrerCommission(childPhone: string, rewardValue: 
 }
 
 // 4. Update User Wallet
+// يولّد كل الصيغ المحتملة لرقم الهاتف (بعلامة +، بدونها، بصفر بادئ...)
+// لضمان مطابقة السجلات مهما اختلفت صيغة الإدخال بين الأدمن والمستخدم.
+function phoneVariants(phone: string): string[] {
+  const raw = (phone || '').trim();
+  if (!raw) return [];
+  const digits = raw.replace(/\D/g, '');           // أرقام فقط
+  const noZero = digits.replace(/^0+/, '');         // بدون أصفار بادئة
+  const variants = new Set<string>([
+    raw,
+    digits,
+    '+' + digits,
+    noZero,
+    '+' + noZero
+  ]);
+
+  // دولي ← محلي (مثال: 9647519952000 → 07519952000)
+  if (noZero.startsWith('964')) {
+    const local = noZero.substring(3);
+    variants.add(local);
+    variants.add('0' + local);
+  }
+
+  // محلي ← دولي (مثال: 07519952000 → +9647519952000)
+  // إصلاح مهم: بعض الحسابات (ومنها حساب الإدارة) مخزّنة بالصيغة المحلية،
+  // فكانت السجلات المحفوظة بالصيغة الدولية لا تُطابق ولا تظهر إطلاقًا.
+  if (!noZero.startsWith('964')) {
+    variants.add('964' + noZero);
+    variants.add('+964' + noZero);
+    variants.add('0' + noZero);
+  }
+
+  return Array.from(variants).filter(v => v.length > 0);
+}
+
+/**
+ * يتحقق مما إذا كان عنوان المحفظة مرتبطًا بحساب عضو آخر.
+ *
+ * الهدف: منع ربط محفظة واحدة بأكثر من حساب — وهي ثغرة تسمح لشخص واحد
+ * بإنشاء عدة حسابات وتحصيل أرباحها جميعًا على محفظة واحدة.
+ *
+ * المقارنة تتم بأحرف صغيرة موحّدة، لأن عناوين البلوكتشين غير حساسة لحالة
+ * الأحرف (0xAbC و 0xabc محفظة واحدة)، فلا يمكن التحايل بتغيير حالة حرف.
+ *
+ * يُرجع: هل العنوان مستخدم، ومعلومات مالكه إن وُجد.
+ */
+export async function isWalletAddressTaken(
+  walletAddress: string,
+  currentPhone: string
+): Promise<{ taken: boolean; ownerPhone?: string; ownerName?: string }> {
+  const addr = (walletAddress || '').trim().toLowerCase();
+  if (!addr) return { taken: false };
+
+  const myVariants = new Set(phoneVariants(currentPhone).map(v => v.toLowerCase()));
+
+  const isOtherOwner = (u: any): boolean => {
+    const uAddr = (u?.walletAddress || '').trim().toLowerCase();
+    if (!uAddr || uAddr !== addr) return false;
+    // نتجاهل حساب المستخدم نفسه (إعادة ربط العنوان ذاته ليست تعارضًا)
+    const uPhone = (u?.phone || u?.id || '').toLowerCase();
+    return !myVariants.has(uPhone);
+  };
+
+  // 1) فحص التخزين المحلي أولًا (سريع)
+  try {
+    const localUsers = getLocalUsers();
+    const localHit = Object.values(localUsers).find(isOtherOwner);
+    if (localHit) {
+      return {
+        taken: true,
+        ownerPhone: (localHit as any).phone,
+        ownerName: (localHit as any).username
+      };
+    }
+  } catch (e) {}
+
+  if (useLocalStorageFallback) return { taken: false };
+
+  // 2) فحص قاعدة البيانات — المصدر الموثوق
+  try {
+    const snap = await getDocs(collection(db, "users"));
+    let hit: any = null;
+    snap.forEach(d => {
+      if (hit) return;
+      const data = { ...(d.data() as any), id: d.id };
+      if (isOtherOwner(data)) hit = data;
+    });
+    if (hit) {
+      return { taken: true, ownerPhone: hit.phone || hit.id, ownerName: hit.username };
+    }
+  } catch (e) {
+    console.warn('تعذّر فحص تفرّد عنوان المحفظة:', e);
+    // عند فشل الفحص لا نمنع المستخدم — الحماية الحقيقية أن العنوان
+    // لا يمكن تعديله بعد ربطه، وتبقى المراجعة اليدوية متاحة للإدارة.
+  }
+
+  return { taken: false };
+}
+
 export async function updateUserWallet(phone: string, walletAddress: string) {
+  const cleanAddress = (walletAddress || '').trim();
+
+  // منع ربط عنوان محفظة مستخدم بحساب آخر
+  const check = await isWalletAddressTaken(cleanAddress, phone);
+  if (check.taken) {
+    throw new Error('WALLET_ALREADY_LINKED');
+  }
+
   if (useLocalStorageFallback) {
     const users = getLocalUsers();
     if (users[phone]) {
-      users[phone].walletAddress = walletAddress;
+      users[phone].walletAddress = cleanAddress;
       saveLocalUsers(users);
     }
     return;
@@ -1412,13 +1518,13 @@ export async function updateUserWallet(phone: string, walletAddress: string) {
 
   try {
     const userRef = doc(db, "users", phone);
-    await updateDoc(userRef, { walletAddress });
+    await updateDoc(userRef, { walletAddress: cleanAddress });
   } catch (error) {
     console.warn("Firestore updateUserWallet error, falling back:", error);
-    checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
+    checkForQuotaExceeded(error);
     const users = getLocalUsers();
     if (users[phone]) {
-      users[phone].walletAddress = walletAddress;
+      users[phone].walletAddress = cleanAddress;
       saveLocalUsers(users);
     }
   }
@@ -1922,39 +2028,6 @@ export async function createWithdrawal(
   }
 }
 
-// يولّد كل الصيغ المحتملة لرقم الهاتف (بعلامة +، بدونها، بصفر بادئ...)
-// لضمان مطابقة السجلات مهما اختلفت صيغة الإدخال بين الأدمن والمستخدم.
-function phoneVariants(phone: string): string[] {
-  const raw = (phone || '').trim();
-  if (!raw) return [];
-  const digits = raw.replace(/\D/g, '');           // أرقام فقط
-  const noZero = digits.replace(/^0+/, '');         // بدون أصفار بادئة
-  const variants = new Set<string>([
-    raw,
-    digits,
-    '+' + digits,
-    noZero,
-    '+' + noZero
-  ]);
-
-  // دولي ← محلي (مثال: 9647519952000 → 07519952000)
-  if (noZero.startsWith('964')) {
-    const local = noZero.substring(3);
-    variants.add(local);
-    variants.add('0' + local);
-  }
-
-  // محلي ← دولي (مثال: 07519952000 → +9647519952000)
-  // إصلاح مهم: بعض الحسابات (ومنها حساب الإدارة) مخزّنة بالصيغة المحلية،
-  // فكانت السجلات المحفوظة بالصيغة الدولية لا تُطابق ولا تظهر إطلاقًا.
-  if (!noZero.startsWith('964')) {
-    variants.add('964' + noZero);
-    variants.add('+964' + noZero);
-    variants.add('0' + noZero);
-  }
-
-  return Array.from(variants).filter(v => v.length > 0);
-}
 
 export async function getUserWithdrawals(phone: string): Promise<Withdrawal[]> {
   if (useLocalStorageFallback) {
