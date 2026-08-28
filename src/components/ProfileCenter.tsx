@@ -451,8 +451,13 @@ export default function ProfileCenter({
       onUpdateUser({ ...currentUser, walletAddress: bindWalletInput.trim() });
       showToast("تم ربط المحفظة بنجاح! هذا العنوان أصبح ثابتًا ولا يمكن تغييره إلا من الإدارة.");
       setActiveSubView('menu');
-    } catch (err) {
-      showToast("فشل ربط المحفظة");
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      if (msg.includes('WALLET_ALREADY_LINKED')) {
+        showToast("⚠️ عنوان المحفظة هذا مرتبط بحساب آخر بالفعل. لا يمكن ربط المحفظة نفسها بأكثر من حساب — يرجى استخدام عنوان محفظة خاص بك.");
+      } else {
+        showToast("فشل ربط المحفظة");
+      }
     } finally {
       setLoading(false);
     }
@@ -1779,6 +1784,7 @@ export default function ProfileCenter({
                 />
                 {currentUser.walletAddress && (
                   <p className="text-[9px] font-bold text-amber-600 px-1">🔒 عنوان محفظتك ثابت ولا يمكن تعديله ذاتيًا — تواصل مع الدعم لتغييره.</p>
+                  <p className="text-[9px] font-bold text-slate-400 px-1 mt-1 leading-relaxed">ℹ️ لا يمكن ربط عنوان المحفظة نفسه بأكثر من حساب واحد.</p>
                 )}
               </div>
 
