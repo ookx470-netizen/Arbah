@@ -1783,8 +1783,10 @@ export default function ProfileCenter({
                   dir="ltr"
                 />
                 {currentUser.walletAddress && (
-                  <p className="text-[9px] font-bold text-amber-600 px-1">🔒 عنوان محفظتك ثابت ولا يمكن تعديله ذاتيًا — تواصل مع الدعم لتغييره.</p>
-                  <p className="text-[9px] font-bold text-slate-400 px-1 mt-1 leading-relaxed">ℹ️ لا يمكن ربط عنوان المحفظة نفسه بأكثر من حساب واحد.</p>
+                  <>
+                    <p className="text-[9px] font-bold text-amber-600 px-1">🔒 عنوان محفظتك ثابت ولا يمكن تعديله ذاتيًا — تواصل مع الدعم لتغييره.</p>
+                    <p className="text-[9px] font-bold text-slate-400 px-1 mt-1 leading-relaxed">ℹ️ لا يمكن ربط عنوان المحفظة نفسه بأكثر من حساب واحد.</p>
+                  </>
                 )}
               </div>
 
