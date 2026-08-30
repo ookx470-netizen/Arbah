@@ -85,6 +85,102 @@ import {
 import { User, SystemSettings, VipPlan, Task } from './types';
 import { compressBase64Image, formatHourToArabic, isHourInShift } from './utils';
 
+// ============================================================
+// شاشة الربط الإجباري بحساب Telegram
+//
+// تظهر لأي عضو (غير الأدمن) لم يربط حسابه بعد بمعرّف تيليجرام
+// (telegramChatId). الربط لا يعتمد على تطابق رقم الهاتف —
+// العضو يضغط الزر، يفتح تيليجرام على بوتنا برابط خاص (Deep Link)
+// يحمل معرّف حسابه بالمنصة (user.id) كـ start payload، وبمجرد
+// ضغطه على Start داخل تيليجرام، يقوم البوت (المستضاف على Railway)
+// بربط Chat ID الخاص به بحساب هذا العضو مباشرة في قاعدة البيانات.
+//
+// بعد الربط، سيتم اكتشافه تلقائياً خلال 15 ثانية عبر آلية الـ
+// heartbeat الموجودة أصلاً بالتطبيق (بدون أي تعديل إضافي)، أو
+// فوراً عبر زر "أعد التحقق الآن" أدناه.
+//
+// ⚠️ استبدل TELEGRAM_BOT_USERNAME أدناه باسم البوت الفعلي بعد
+// إنشائه عبر BotFather@ (بدون علامة @).
+// ============================================================
+const TELEGRAM_BOT_USERNAME = 'OXLO_Notify_bot';
+
+function TelegramLinkGate({ user, onLogout }: { user: User; onLogout: () => void }) {
+  const [checking, setChecking] = useState(false);
+  const [checkMsg, setCheckMsg] = useState<string | null>(null);
+
+  const deepLink = `https://t.me/${TELEGRAM_BOT_USERNAME}?start=${user.phone.replace(/\D/g, '')}`;
+
+  const handleCheckNow = async () => {
+    setChecking(true);
+    setCheckMsg(null);
+    try {
+      const { getUserByPhone } = await import('./firebaseService');
+      const updated = await getUserByPhone(user.phone);
+      if (updated && updated.telegramChatId) {
+        window.location.reload();
+      } else {
+        setCheckMsg('لم يتم الربط بعد — تأكد من ضغط زر Start داخل تيليجرام ثم أعد المحاولة.');
+      }
+    } catch (e) {
+      setCheckMsg('تعذر التحقق حالياً، يرجى المحاولة مرة أخرى.');
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  return (
+    <div
+      className="min-h-screen bg-gradient-to-b from-[#0f766e] to-[#0a1128] flex items-center justify-center p-6 font-sans"
+      dir="rtl"
+    >
+      <div className="w-full max-w-sm rounded-[28px] p-8 text-center bg-gradient-to-br from-[#14b8a6] to-[#0f766e] shadow-2xl border border-white/10">
+        <div className="w-24 h-24 mx-auto mb-6 rounded-3xl bg-white/10 border border-white/25 flex items-center justify-center overflow-hidden p-2">
+          <img src={oxloLogoImg} alt="OXLO" className="w-full h-full object-contain rounded-2xl" referrerPolicy="no-referrer" />
+        </div>
+
+        <h2 className="text-xl font-black text-white mb-3">ربط حساب Telegram</h2>
+        <p className="text-xs font-bold text-white/85 leading-relaxed mb-7">
+          الخطوة الأخيرة لإتمام إنشاء حسابك — اربط حساب Telegram لتفعيل إشعاراتك الفورية
+        </p>
+
+        <a
+          href={deepLink}
+          target="_blank"
+          rel="noreferrer"
+          className="w-full h-14 rounded-full bg-white/15 border border-white/50 text-white font-black text-sm flex items-center justify-center gap-2 mb-4 hover:bg-white/25 active:scale-95 transition-all"
+        >
+          <Send className="w-4 h-4" />
+          ربط Telegram
+        </a>
+
+        <button
+          type="button"
+          onClick={handleCheckNow}
+          disabled={checking}
+          className="w-full h-11 rounded-full bg-transparent border border-white/30 text-white/90 font-bold text-xs flex items-center justify-center gap-2 mb-3 disabled:opacity-60 cursor-pointer"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${checking ? 'animate-spin' : ''}`} />
+          أعد التحقق الآن
+        </button>
+
+        {checkMsg && (
+          <p className="text-[11px] font-bold text-amber-200 mb-3 leading-relaxed">{checkMsg}</p>
+        )}
+
+        <p className="text-[10px] text-white/60 mb-5">🔒 خطوة تُطلب مرة واحدة فقط لكل حساب</p>
+
+        <button
+          type="button"
+          onClick={onLogout}
+          className="text-[11px] font-bold text-white/50 underline cursor-pointer"
+        >
+          تسجيل الخروج
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // Pure Web Audio API chime synthesizer for celebratory actions (satisfying pings/chimes)
 export const playChimeSound = () => {
   if (localStorage.getItem('sounds_enabled') === 'false') return;
@@ -1665,6 +1761,12 @@ export default function TaskView() {
 
   if (!currentUser) {
     return <AuthPage onLoginSuccess={handleLoginSuccess} settings={settings} />;
+  }
+
+  // بوابة إجبارية: كل عضو (عدا الأدمن) لازم يربط حسابه بتيليجرام
+  // قبل ما يقدر يشوف أي شاشة ثانية بالمنصة
+  if (currentUser.role !== 'admin' && !currentUser.telegramChatId) {
+    return <TelegramLinkGate user={currentUser} onLogout={handleLogout} />;
   }
 
   if (adminMode && currentUser.role === 'admin') {
