@@ -37,9 +37,6 @@ export interface User {
   banReason?: string; // سبب الحظر
   bypassHoliday?: boolean; // استثناء العضو من العطلة الإجبارية وفتح السجل له
   hasDeposited?: boolean; // هل قام المستخدم بالإيداع وتفعيل الحساب؟
-  telegramChatId?: string; // معرّف محادثة Telegram بعد الربط — تُستخدم لإرسال الإشعارات الفورية
-  telegramUsername?: string; // يوزر تيليجرام الخاص بالعضو (اختياري، لأغراض العرض بلوحة الأدمن فقط)
-  telegramLinkedAt?: string; // تاريخ ووقت إتمام ربط الحساب بتيليجرام
 }
 
 export interface UserNotification {
