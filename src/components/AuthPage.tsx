@@ -136,7 +136,12 @@ export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
     try {
       const search = window.location.search || (window.location.hash.includes('?') ? window.location.hash.substring(window.location.hash.indexOf('?')) : '');
       const params = new URLSearchParams(search);
-      const urlRef = params.get('ref') || params.get('invite') || params.get('code') || params.get('inviteCode');
+      // نقرأ الرمز من الرابط، أو من الجلسة إن كان الرابط قد نُظّف مسبقًا
+      // عند تحميل التطبيق (main.tsx يحفظه هناك قبل إزالته من العنوان)
+      const urlRef =
+        params.get('ref') || params.get('invite') ||
+        params.get('code') || params.get('inviteCode') ||
+        sessionStorage.getItem('pending_ref_code');
       if (urlRef && urlRef.trim() !== '') {
         const cleanCode = urlRef.trim().toUpperCase();
         if (cleanCode !== 'ADMIN95') {
@@ -144,6 +149,18 @@ export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
           setInviteCode(cleanCode);
           setSuccessMsg(`🎉 تم إدراج رمز الدعوة تلقائياً من رابط الإحالة: (${cleanCode})`);
         }
+      }
+
+      // تنظيف الرابط: بعد قراءة رمز الدعوة نحذفه من شريط العنوان فورًا
+      // ليبقى الرابط نظيفًا (oxlo.store فقط). الرمز محفوظ بالفعل في حالة
+      // النموذج، فحذفه من الرابط لا يؤثر على التسجيل إطلاقًا — ويشمل ذلك
+      // الروابط القديمة التي ما زال يحملها بعض الأعضاء.
+      const hasRefParam =
+        params.has('ref') || params.has('invite') ||
+        params.has('code') || params.has('inviteCode');
+
+      if (hasRefParam && window.history && window.history.replaceState) {
+        window.history.replaceState({}, document.title, window.location.pathname);
       }
     } catch (e) {
       console.warn("Could not parse URL referral params:", e);
@@ -338,7 +355,10 @@ export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
         );
 
         shadowFirebaseAuth(registeredUser.phone, registeredUser.password || registeredUser.id).catch(e => console.warn(e));
-        
+
+        // انتهت مهمة رمز الدعوة — نمسحه من الجلسة فلا يُستخدم مجددًا
+        try { sessionStorage.removeItem('pending_ref_code'); } catch (e) {}
+
         setSuccessMsg(`🎉 تم تأكيد البريد الإلكتروني وإنشاء حسابك بنجاح! كود الدعوة الخاص بك هو (${registeredUser.inviteCode}).`);
         onLoginSuccess(registeredUser);
       }
