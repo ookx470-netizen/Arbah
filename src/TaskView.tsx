@@ -1852,14 +1852,30 @@ export default function TaskView() {
       // فالرصيد المعروض هو الرصيد الحقيقي المخزّن بقاعدة البيانات.
       // ============================================================
       try {
-        const stillPending = updated.filter(
-          t => t.status !== 'completed' && t.status !== 'rejected' && t.status !== 'reviewing'
-        ).length;
+        // نفحص مهام اليوم فقط (بحسب claimDate)، ونتجاهل المسحوبة —
+        // لأن قائمة tasks تضم أيضًا مهام أيام سابقة ومهامًا مسحوبة،
+        // فلو حسبناها كلها لن يتحقق شرط "أنجز كل مهامه" أبدًا.
+        const todayKey = getRiyadhMidnightDateStr();
+        const todayTasks = updated.filter(
+          t => t.claimDate === todayKey && t.status !== 'withdrawn'
+        );
 
-        if (stillPending === 0 && updated.length > 0) {
-          const doneCount = updated.filter(t => t.status === 'completed').length;
-          const todayStr = new Date().toISOString().split('T')[0];
-          const todayEarnings = updated
+        const stillPending = todayTasks.filter(t => t.status === 'in_progress').length;
+        const doneCount = todayTasks.filter(t => t.status === 'completed').length;
+
+        // تشخيص مؤقت — يوضح بالـConsole سبب الإرسال أو عدمه
+        console.log('📋 فحص إتمام المهام اليومية:', {
+          اليوم: todayKey,
+          مهام_اليوم: todayTasks.length,
+          منجزة: doneCount,
+          متبقية: stillPending,
+          سيُرسل_إشعار: stillPending === 0 && doneCount > 0
+        });
+
+        // نُرسل فقط عند إنجاز آخر مهمة متبقية لليوم
+        if (stillPending === 0 && doneCount > 0) {
+          const todayStr = todayKey;
+          const todayEarnings = todayTasks
             .filter(t => t.status === 'completed')
             .reduce((sum, t) => sum + (parseFloat(String(t.reward).replace(/[^\d.]/g, '')) || 0), 0);
 
@@ -1868,7 +1884,7 @@ export default function TaskView() {
           // 1) إشعار العضو
           const memberMsg =
             `🎉 <b>أحسنت! أنهيت مهامك اليومية</b>\n\n` +
-            `• عدد المهام المنجزة: ${doneCount} / ${updated.length}\n` +
+            `• عدد المهام المنجزة: ${doneCount} / ${todayTasks.length}\n` +
             `• أرباح اليوم: ${todayEarnings.toFixed(2)} USDT\n` +
             `• رصيدك الحالي: ${Number(data.newEarnings).toFixed(2)} USDT\n` +
             `• التاريخ: ${todayStr}\n\n` +
