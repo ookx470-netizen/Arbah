@@ -6,6 +6,7 @@ import { COUNTRY_LIST, CountryInfo } from '../utils/phoneValidation';
 import { isAllowedTrustedEmail } from '../utils/disposableEmailBlocklist';
 import oxloLogoImg from '../assets/images/oxlo_logo_1786416051044.jpg';
 
+
 interface AuthPageProps {
   onLoginSuccess: (user: User) => void;
   settings?: any;
