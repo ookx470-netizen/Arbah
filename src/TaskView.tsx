@@ -104,7 +104,6 @@ import { compressBase64Image, formatHourToArabic, isHourInShift } from './utils'
 // ============================================================
 const TELEGRAM_BOT_USERNAME = 'OXLO_Notify_bot';
 
-
 function TelegramLinkGate({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [checking, setChecking] = useState(false);
   const [checkMsg, setCheckMsg] = useState<string | null>(null);
@@ -741,6 +740,80 @@ export default function TaskView() {
 
   // User Authentication & Admin status
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+
+  // ============================================================
+  // مراقبة حية لحالة ربط تيليجرام.
+  //
+  // المشكلة التي تعالجها: كان فحص الربط يتم مرة واحدة فقط عند فتح
+  // الموقع، فإذا ألغى العضو الربط من داخل البوت بعدها، تبقى الجلسة
+  // تعتبره مربوطًا ولا تظهر له البوابة إلا بعد إعادة تحميل يدوية.
+  // الآن نراقب مستنده في Firestore لحظة بلحظة: فور حذف الحقل
+  // تظهر البوابة تلقائيًا، وفور إعادة الربط تختفي دون أي تدخل.
+  // ============================================================
+  useEffect(() => {
+    if (!currentUser?.phone || currentUser.role === 'admin') return;
+
+    let unsubscribe: (() => void) | null = null;
+    let cancelled = false;
+
+    const watchLinkStatus = async () => {
+      try {
+        const { doc, onSnapshot } = await import('firebase/firestore');
+        const { db } = await import('./firebase');
+
+        // نراقب المستند بالصيغة المخزّنة فعليًا لهذا العضو
+        const candidates = [
+          currentUser.phone,
+          currentUser.phone.replace(/\D/g, ''),
+          '+' + currentUser.phone.replace(/\D/g, '')
+        ].filter(Boolean);
+
+        const { getDoc } = await import('firebase/firestore');
+        let targetId: string | null = null;
+        for (const id of candidates) {
+          try {
+            const snap = await getDoc(doc(db, 'users', id));
+            if (snap.exists()) { targetId = id; break; }
+          } catch (e) { /* نجرب الصيغة التالية */ }
+        }
+        if (!targetId || cancelled) return;
+
+        unsubscribe = onSnapshot(doc(db, 'users', targetId), (snap) => {
+          if (cancelled || !snap.exists()) return;
+          const liveChatId = snap.data()?.telegramChatId || null;
+
+          setCurrentUser(prev => {
+            if (!prev) return prev;
+            const prevChatId = (prev as any).telegramChatId || null;
+            if (prevChatId === liveChatId) return prev;
+
+            // تغيّرت حالة الربط — نحدّث الجلسة المحفوظة أيضًا
+            const updated = { ...prev, telegramChatId: liveChatId } as User;
+            try {
+              const session = JSON.parse(localStorage.getItem('user_session') || '{}');
+              if (liveChatId) session.telegramChatId = liveChatId;
+              else delete session.telegramChatId;
+              localStorage.setItem('user_session', JSON.stringify(session));
+            } catch (e) {}
+            return updated;
+          });
+        }, (err) => {
+          console.warn('تعذّر مراقبة حالة ربط تيليجرام:', err);
+        });
+      } catch (e) {
+        console.warn('تعذّر تفعيل مراقبة الربط:', e);
+      }
+    };
+
+    watchLinkStatus();
+
+    return () => {
+      cancelled = true;
+      if (unsubscribe) {
+        try { unsubscribe(); } catch (e) {}
+      }
+    };
+  }, [currentUser?.phone, currentUser?.role]);
   const currentUserRef = useRef<User | null>(null);
   useEffect(() => {
     currentUserRef.current = currentUser;
