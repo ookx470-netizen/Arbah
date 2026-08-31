@@ -104,6 +104,7 @@ import { compressBase64Image, formatHourToArabic, isHourInShift } from './utils'
 // ============================================================
 const TELEGRAM_BOT_USERNAME = 'OXLO_Notify_bot';
 
+
 function TelegramLinkGate({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [checking, setChecking] = useState(false);
   const [checkMsg, setCheckMsg] = useState<string | null>(null);
