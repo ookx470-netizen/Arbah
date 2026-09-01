@@ -1842,70 +1842,6 @@ export default function TaskView() {
       }
       setCurrentView('list');
       setActiveListTab('completed');
-
-      // ============================================================
-      // كشف إتمام كل المهام اليومية.
-      //
-      // نُرسل إشعارين فقط عند إنجاز آخر مهمة متبقية لليوم (لا بعد كل
-      // مهمة): واحد للعضو نفسه، وآخر للإدارة. الأرقام تُقرأ من نتيجة
-      // العملية الذرية الفعلية (newEarnings) لا من أي قيمة محلية،
-      // فالرصيد المعروض هو الرصيد الحقيقي المخزّن بقاعدة البيانات.
-      // ============================================================
-      try {
-        // نفحص مهام اليوم فقط (بحسب claimDate)، ونتجاهل المسحوبة —
-        // لأن قائمة tasks تضم أيضًا مهام أيام سابقة ومهامًا مسحوبة،
-        // فلو حسبناها كلها لن يتحقق شرط "أنجز كل مهامه" أبدًا.
-        const todayKey = getRiyadhMidnightDateStr();
-        const todayTasks = updated.filter(
-          t => t.claimDate === todayKey && t.status !== 'withdrawn'
-        );
-
-        const stillPending = todayTasks.filter(t => t.status === 'in_progress').length;
-        const doneCount = todayTasks.filter(t => t.status === 'completed').length;
-
-        // تشخيص مؤقت — يوضح بالـConsole سبب الإرسال أو عدمه
-        console.log('📋 فحص إتمام المهام اليومية:', {
-          اليوم: todayKey,
-          مهام_اليوم: todayTasks.length,
-          منجزة: doneCount,
-          متبقية: stillPending,
-          سيُرسل_إشعار: stillPending === 0 && doneCount > 0
-        });
-
-        // نُرسل فقط عند إنجاز آخر مهمة متبقية لليوم
-        if (stillPending === 0 && doneCount > 0) {
-          const todayStr = todayKey;
-          const todayEarnings = todayTasks
-            .filter(t => t.status === 'completed')
-            .reduce((sum, t) => sum + (parseFloat(String(t.reward).replace(/[^\d.]/g, '')) || 0), 0);
-
-          const { createNotification } = await import('./firebaseService');
-
-          // 1) إشعار العضو
-          const memberMsg =
-            `🎉 <b>أحسنت! أنهيت مهامك اليومية</b>\n\n` +
-            `• عدد المهام المنجزة: ${doneCount} / ${todayTasks.length}\n` +
-            `• أرباح اليوم: ${todayEarnings.toFixed(2)} USDT\n` +
-            `• رصيدك الحالي: ${Number(data.newEarnings).toFixed(2)} USDT\n` +
-            `• التاريخ: ${todayStr}\n\n` +
-            `استمر بنفس الالتزام، ونراك غدًا بمهام جديدة 💙`;
-
-          createNotification(currentUser.phone, memberMsg).catch(() => {});
-
-          // 2) إشعار الإدارة
-          const adminMsg =
-            `📋 <b>إنجاز مهام يومية</b>\n\n` +
-            `• العضو: ${currentUser.username || '—'}\n` +
-            `• الرقم التعريفي: <code>${(currentUser as any).memberId || '—'}</code>\n` +
-            `• الباقة: ${currentUser.vipTier || 'غير مفعّلة'}\n` +
-            `• أرباح اليوم: ${todayEarnings.toFixed(2)} USDT\n` +
-            `• الوقت: ${new Date().toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit' })}`;
-
-          createNotification('admin', adminMsg).catch(() => {});
-        }
-      } catch (notifyErr) {
-        console.warn('تعذّر إرسال إشعار إتمام المهام اليومية:', notifyErr);
-      }
     } catch (err: any) {
       console.error("Error confirming task and updating earnings:", err);
       const errorMessage = err.message || "فشل غير معروف";
@@ -3294,7 +3230,12 @@ export default function TaskView() {
                 : visibleCalcPlans;
               const currentSelected = calcPlans.find(p => p.id === calcSelectedPlanId) || calcPlans[0] || rawCalcPlans[0];
               
-              const feeRate = 0.15; // 15% Withdrawal Fee Deduction
+              // نسبة رسوم السحب تُقرأ من الباقة المختارة نفسها
+              // (withdrawFeePercent)، وإن لم تُحدد تُستخدم 15% افتراضيًا.
+              const feePercent = typeof (currentSelected as any)?.withdrawFeePercent === 'number'
+                ? (currentSelected as any).withdrawFeePercent
+                : 15;
+              const feeRate = feePercent / 100;
               const grossDaily = currentSelected.profit;
               const dailyFee = grossDaily * feeRate;
               const netDaily = grossDaily - dailyFee;
@@ -3326,7 +3267,7 @@ export default function TaskView() {
                       <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
                       <span>نسبة رسوم السحب المطبقة:</span>
                     </div>
-                    <span className="font-black bg-amber-200/80 text-amber-950 px-2.5 py-1 rounded-xl text-[11px]">15%</span>
+                    <span className="font-black bg-amber-200/80 text-amber-950 px-2.5 py-1 rounded-xl text-[11px]">{feePercent}%</span>
                   </div>
 
                   <div className="mb-6">
@@ -3376,7 +3317,7 @@ export default function TaskView() {
                   </div>
 
                   <div className="bg-slate-900 p-5 rounded-3xl text-center shadow-lg shadow-slate-900/10 space-y-1">
-                    <span className="text-[9px] text-slate-400 font-bold block">صافي الربح السنوي المتوقع (بعد خصم رسوم السحب 15%)</span>
+                    <span className="text-[9px] text-slate-400 font-bold block">صافي الربح السنوي المتوقع (بعد خصم رسوم السحب {feePercent}%)</span>
                     <span className="text-xl font-black text-blue-400 block">{netAnnual.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT</span>
                     <span className="text-[8px] font-bold text-slate-500 block">إجمالي رسوم السحب السنوية: {(grossAnnual - netAnnual).toLocaleString('en-US', { maximumFractionDigits: 2 })} USDT</span>
                   </div>
