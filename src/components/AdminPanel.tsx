@@ -151,6 +151,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
     }));
   };
 
+
   const openTeamModal = (user: User) => {
     setTeamModalHistory([user]);
     setSelectedUserForTeamModal(user);
