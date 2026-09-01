@@ -96,6 +96,7 @@ export interface VipPlan {
   maxSubscribers?: number; // الحد الأقصى للمشتركين
   isPrivate?: boolean; // باقة خاصة مخفية: لا تظهر إلا للأرقام المحددة أدناه
   allowedPhones?: string[]; // أرقام هواتف الأعضاء المسموح لهم برؤية الباقة الخاصة
+  withdrawFeePercent?: number; // نسبة رسوم السحب الخاصة بهذه الباقة (%) — إن لم تُحدد تُستخدم النسبة العامة
 }
 
 export interface SystemSettings {
