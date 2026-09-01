@@ -665,6 +665,20 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
 
 
 
+  // ============================================================
+  // تعريف موحّد للعضو "المفعّل": من لديه باقة VIP حقيقية.
+  // لا نعتمد على hasDeposited لأنه يصبح true بمجرد أي إيداع مالي،
+  // فيُحتسب من شحن رصيده فقط (دون تفعيل باقة) كمشترك بالخطأ.
+  // ============================================================
+  const isActivatedMember = (u: any): boolean => {
+    if (!u || u.role === 'admin') return false;
+    const tier = (u.vipTier || '').trim();
+    return tier !== '' &&
+           tier !== 'الباقة العادية' &&
+           tier !== 'العضوية العادية' &&
+           tier !== 'VIP0';
+  };
+
   const showToast = (msg: string) => {
     setNotification(msg);
     setTimeout(() => setNotification(null), 3000);
@@ -774,13 +788,11 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
     try {
       const msg = `🔑 رمز المهام اليومي الجديد لفتح السجل الخاص بك هو: ${code}`;
       
-      // Get only active subscribers (المشتركين الفعليين بباقات VIP أو أصحاب الإيداعات)
-      const subscribers = users.filter(u => 
-        u.role !== 'admin' && (
-          u.hasDeposited === true || 
-          (u.vipTier && u.vipTier !== 'الباقة العادية' && u.vipTier !== 'VIP0' && u.vipTier.trim() !== '')
-        )
-      );
+      // المشتركون الفعليون = من فعّل باقة VIP حقيقية فقط.
+      // إصلاح مهم: لا نعتمد على hasDeposited لأنه يصبح true بمجرد اعتماد
+      // أي إيداع مالي — فكان من يشحن رصيده دون تفعيل باقة يُحتسب مشتركًا،
+      // ويصله الرمز، ويظهر ضمن العدد بشكل خاطئ.
+      const subscribers = users.filter(u => isActivatedMember(u));
 
       if (subscribers.length === 0) {
         showToast("⚠️ تنبيه: لا يوجد مشتركون باقات VIP حالياً لإرسال الرمز إليهم.");
@@ -1355,7 +1367,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
   };
 
   // User Online Filter State
-  const [userOnlineFilter, setUserOnlineFilter] = useState<'all' | 'online' | 'offline'>('all');
+  const [userOnlineFilter, setUserOnlineFilter] = useState<'all' | 'online' | 'offline' | 'activated'>('all');
 
   const isUserOnline = (u: User) => {
     if (!u) return false;
@@ -1408,6 +1420,9 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
       return isUserOnline(u);
     } else if (userOnlineFilter === 'offline') {
       return !isUserOnline(u);
+    } else if (userOnlineFilter === 'activated') {
+      // الأعضاء المفعّلون فقط (أصحاب باقات VIP حقيقية)
+      return isActivatedMember(u);
     }
     return true;
   });
@@ -1789,7 +1804,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                              (u.phone || '').includes(honorSearch.trim());
                     })
                     .map(u => {
-                      const isActivated = Boolean(u.hasDeposited || (u.vipTier && u.vipTier !== '' && u.vipTier !== 'العضوية العادية'));
+                      const isActivated = isActivatedMember(u);
                       const pts = Number((u as any).honorPoints || 0);
                       return (
                         <div
@@ -1860,7 +1875,8 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                   {[
                     { id: 'all', label: `الكل (${users.filter(u => !u.isBanned).length})` },
                     { id: 'online', label: `🟢 نشط الآن (${users.filter(u => !u.isBanned && isUserOnline(u)).length})` },
-                    { id: 'offline', label: `🔴 غير نشط (${users.filter(u => !u.isBanned && !isUserOnline(u)).length})` }
+                    { id: 'offline', label: `🔴 غير نشط (${users.filter(u => !u.isBanned && !isUserOnline(u)).length})` },
+                    { id: 'activated', label: `👑 مفعّل (${users.filter(u => !u.isBanned && isActivatedMember(u)).length})` }
                   ].map(f => (
                     <button
                       key={f.id}
@@ -2335,7 +2351,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                 <div className="bg-white/10 border border-white/15 px-3 py-1.5 rounded-xl text-center">
                   <span className="block text-[9px] text-indigo-200 font-medium">المشتركين المودعين</span>
                   <span className="text-xs font-black text-emerald-400">
-                    {users.filter(u => !u.isBanned && u.hasDeposited === true).length} عضو
+                    {users.filter(u => !u.isBanned && isActivatedMember(u)).length} عضو
                   </span>
                 </div>
               </div>
@@ -2348,7 +2364,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                 {[
                   { id: 'has_team', label: `👥 أصحاب الفرق (${users.filter(u => !u.isBanned && getUserTeamBreakdown(u).totalCount > 0).length})` },
                   { id: 'all', label: `📋 كل الأعضاء (${users.filter(u => !u.isBanned).length})` },
-                  { id: 'vip', label: `⭐ باقات VIP (${users.filter(u => !u.isBanned && u.hasDeposited === true && u.vipTier && u.vipTier !== 'الباقة العادية' && u.vipTier !== 'VIP0').length})` },
+                  { id: 'vip', label: `⭐ باقات VIP (${users.filter(u => !u.isBanned && isActivatedMember(u)).length})` },
                   { id: 'deposited', label: `💎 مودعين (${users.filter(u => !u.isBanned && u.hasDeposited === true).length})` }
                 ].map(f => (
                   <button
