@@ -1842,6 +1842,71 @@ export default function TaskView() {
       }
       setCurrentView('list');
       setActiveListTab('completed');
+
+      // ============================================================
+      // كشف إتمام كل المهام اليومية.
+      //
+      // نُرسل إشعارين فقط عند إنجاز آخر مهمة متبقية لليوم (لا بعد كل
+      // مهمة): واحد للعضو نفسه، وآخر للإدارة. الأرقام تُقرأ من نتيجة
+      // العملية الذرية الفعلية (newEarnings) لا من أي قيمة محلية،
+      // فالرصيد المعروض هو الرصيد الحقيقي المخزّن بقاعدة البيانات.
+      // ============================================================
+      try {
+        // نفحص مهام اليوم فقط (بحسب claimDate)، ونتجاهل المسحوبة —
+        // لأن قائمة tasks تضم أيضًا مهام أيام سابقة ومهامًا مسحوبة،
+        // فلو حسبناها كلها لن يتحقق شرط "أنجز كل مهامه" أبدًا.
+        const todayKey = getRiyadhMidnightDateStr();
+        const todayTasks = updated.filter(
+          t => t.claimDate === todayKey && t.status !== 'withdrawn'
+        );
+
+        const stillPending = todayTasks.filter(t => t.status === 'in_progress').length;
+        const doneCount = todayTasks.filter(t => t.status === 'completed').length;
+
+        // تشخيص مؤقت — يوضح بالـConsole سبب الإرسال أو عدمه
+        console.log('📋 فحص إتمام المهام اليومية:', {
+          اليوم: todayKey,
+          مهام_اليوم: todayTasks.length,
+          منجزة: doneCount,
+          متبقية: stillPending,
+          سيُرسل_إشعار: stillPending === 0 && doneCount > 0
+        });
+
+        // نُرسل فقط عند إنجاز آخر مهمة متبقية لليوم
+        if (stillPending === 0 && doneCount > 0) {
+          const todayStr = todayKey;
+          const todayEarnings = todayTasks
+            .filter(t => t.status === 'completed')
+            .reduce((sum, t) => sum + (parseFloat(String(t.reward).replace(/[^\d.]/g, '')) || 0), 0);
+
+          const { createNotification } = await import('./firebaseService');
+
+          // 1) إشعار العضو
+          const memberMsg =
+            `🎉 <b>أحسنت! أنهيت مهامك اليومية</b>\n\n` +
+            `• عدد المهام المنجزة: ${doneCount} / ${todayTasks.length}\n` +
+            `• أرباح اليوم: ${todayEarnings.toFixed(2)} USDT\n` +
+            `• رصيدك الحالي: ${Number(data.newEarnings).toFixed(2)} USDT\n` +
+            `• التاريخ: ${todayStr}\n\n` +
+            `استمر بنفس الالتزام، ونراك غدًا بمهام جديدة 💙`;
+
+          createNotification(currentUser.phone, memberMsg).catch(() => {});
+
+          // 2) إشعار الإدارة
+          const adminMsg =
+            `📋 <b>إنجاز مهام يومية</b>\n\n` +
+            `• العضو: ${currentUser.username || '—'}\n` +
+            `• الرقم التعريفي: <code>${(currentUser as any).memberId || '—'}</code>\n` +
+            `• الباقة: ${currentUser.vipTier || 'غير مفعّلة'}\n` +
+            `• أرباح اليوم: ${todayEarnings.toFixed(2)} USDT\n` +
+            `• الوقت: ${new Date().toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit' })}`;
+
+          createNotification('admin', adminMsg).catch(() => {});
+        }
+      } catch (notifyErr) {
+        console.warn('تعذّر إرسال إشعار إتمام المهام اليومية:', notifyErr);
+      }
+    } catch (err: any) {
     } catch (err: any) {
       console.error("Error confirming task and updating earnings:", err);
       const errorMessage = err.message || "فشل غير معروف";
