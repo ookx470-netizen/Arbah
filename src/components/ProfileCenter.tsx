@@ -1407,18 +1407,30 @@ export default function ProfileCenter({
                     placeholder="0.00"
                     className="w-full h-14 bg-slate-50 border border-slate-100 rounded-2xl px-5 text-sm font-black text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600/10 focus:bg-white transition-all"
                   />
-                  {parseFloat(withdrawAmount) > 0 && (
-                    <div className="bg-amber-50/80 border border-amber-200/60 rounded-xl p-3 text-[10px] space-y-1 mt-1 text-amber-900">
-                      <div className="flex justify-between font-bold">
-                        <span>رسوم السحب (15%):</span>
-                        <span className="text-amber-700 font-black">-{(parseFloat(withdrawAmount) * 0.15).toFixed(2)} USDT</span>
+                  {parseFloat(withdrawAmount) > 0 && (() => {
+                    // نسبة الرسوم تُقرأ من باقة العضو نفسه (withdrawFeePercent)،
+                    // وإن لم تُحدد للباقة تُستخدم 15% كنسبة افتراضية عامة.
+                    const myPlan = (settings.vipPlans || []).find(p => p.name === currentUser.vipTier);
+                    const feePct = typeof myPlan?.withdrawFeePercent === 'number'
+                      ? myPlan.withdrawFeePercent
+                      : 15;
+                    const amt = parseFloat(withdrawAmount);
+                    const feeAmt = amt * (feePct / 100);
+                    const netAmt = amt - feeAmt;
+
+                    return (
+                      <div className="bg-amber-50/80 border border-amber-200/60 rounded-xl p-3 text-[10px] space-y-1 mt-1 text-amber-900">
+                        <div className="flex justify-between font-bold">
+                          <span>رسوم السحب ({feePct}%):</span>
+                          <span className="text-amber-700 font-black">-{feeAmt.toFixed(2)} USDT</span>
+                        </div>
+                        <div className="flex justify-between font-black border-t border-amber-200/50 pt-1 text-emerald-700">
+                          <span>الرصيد الصافي المضمون وصوله المحفظة:</span>
+                          <span>{netAmt.toFixed(2)} USDT</span>
+                        </div>
                       </div>
-                      <div className="flex justify-between font-black border-t border-amber-200/50 pt-1 text-emerald-700">
-                        <span>الرصيد الصافي المضمون وصوله المحفظة:</span>
-                        <span>{(parseFloat(withdrawAmount) * 0.85).toFixed(2)} USDT</span>
-                      </div>
-                    </div>
-                  )}
+                    );
+                  })()}
                 </div>
 
                 <div className="space-y-2">

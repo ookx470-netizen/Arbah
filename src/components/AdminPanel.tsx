@@ -436,6 +436,8 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
   const [planSingleTaskRewardInput, setPlanSingleTaskRewardInput] = useState<number>(0.3);
   const [planIsTrialInput, setPlanIsTrialInput] = useState<boolean>(false);
   const [planMaxSubscribersInput, setPlanMaxSubscribersInput] = useState<number>(0);
+  // نسبة رسوم السحب الخاصة بهذه الباقة (تُطبّق بدل النسبة العامة)
+  const [planWithdrawFeeInput, setPlanWithdrawFeeInput] = useState<number>(15);
   // باقة خاصة مخفية: لا تظهر بصفحة المنصب إلا للأرقام المحددة
   const [planIsPrivateInput, setPlanIsPrivateInput] = useState<boolean>(false);
   const [planAllowedPhonesInput, setPlanAllowedPhonesInput] = useState<string>('');
@@ -1070,6 +1072,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
             tasksCount: Number(planTasksInput),
             isTrial: planIsTrialInput,
             maxSubscribers: Number(planMaxSubscribersInput),
+            withdrawFeePercent: Number(planWithdrawFeeInput),
             isPrivate: planIsPrivateInput,
             allowedPhones: allowedPhonesList
           };
@@ -1083,6 +1086,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
           tasksCount: Number(planTasksInput),
           isTrial: planIsTrialInput,
           maxSubscribers: Number(planMaxSubscribersInput),
+          withdrawFeePercent: Number(planWithdrawFeeInput),
           isPrivate: planIsPrivateInput,
           allowedPhones: allowedPhonesList
         };
@@ -1104,6 +1108,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
       setPlanTasksInput(5);
       setPlanSingleTaskRewardInput(0.3);
       setPlanIsPrivateInput(false);
+      setPlanWithdrawFeeInput(15);
       setPlanAllowedPhonesInput('');
       setEditingPlanId(null);
       setTimeout(() => {
@@ -3894,9 +3899,9 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-3 mt-2">
+              <div className="grid grid-cols-2 gap-3 mt-2">
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 mb-1">الحد الأقصى للمشتركين (0 = عدد غير محدود)</label>
+                  <label className="block text-[10px] font-bold text-slate-400 mb-1">الحد الأقصى للمشتركين (0 = غير محدود)</label>
                   <input
                     type="number"
                     value={planMaxSubscribersInput}
@@ -3904,7 +3909,21 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                     className="w-full px-2.5 py-2 bg-[#0B1528] border border-blue-900/40 rounded-lg text-xs font-bold text-white text-center focus:outline-none focus:border-[#F39C12]"
                   />
                 </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-amber-400 mb-1">رسوم السحب لهذه الباقة (%)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={planWithdrawFeeInput}
+                    onChange={(e) => setPlanWithdrawFeeInput(Number(e.target.value))}
+                    className="w-full px-2.5 py-2 bg-[#0B1528] border border-amber-500/40 rounded-lg text-xs font-bold text-amber-300 text-center focus:outline-none focus:border-[#F39C12]"
+                  />
+                </div>
               </div>
+              <p className="text-[9px] text-slate-500 mt-1 text-right">
+                * تُطبّق هذه النسبة على سحوبات أعضاء هذه الباقة بدل النسبة العامة.
+              </p>
 
               {/* باقة خاصة مخفية — تظهر فقط للأرقام المحددة */}
               <div className="grid grid-cols-1 gap-3 mt-2">
@@ -3993,7 +4012,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                           {plan.isPrivate && <span className="text-purple-400 text-[10px] ml-1">🔒 خاصة ({(plan.allowedPhones || []).length} عضو)</span>}
                         </span>
                         <span className="text-[10px] text-slate-400 block mt-0.5">
-                          السعر: <strong className="text-[#F39C12]">{plan.price}$</strong> • الربح: <strong className="text-emerald-400">{plan.profit}$</strong> • مهام: {plan.tasksCount}
+                          السعر: <strong className="text-[#F39C12]">{plan.price}$</strong> • الربح: <strong className="text-emerald-400">{plan.profit}$</strong> • مهام: {plan.tasksCount} • رسوم السحب: <strong className="text-amber-400">{typeof plan.withdrawFeePercent === 'number' ? plan.withdrawFeePercent : 15}%</strong>
                         </span>
                         <span className="text-[10px] text-blue-400 block mt-0.5">
                           عدد المشتركين: <strong>{planSubscribers}</strong> {plan.maxSubscribers ? `من ${plan.maxSubscribers}` : ''} عضو
@@ -4051,6 +4070,9 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                           setPlanTasksInput(plan.tasksCount || 5);
                           setPlanIsTrialInput(plan.isTrial || false);
                           setPlanMaxSubscribersInput(plan.maxSubscribers || 0);
+                          setPlanWithdrawFeeInput(
+                            typeof plan.withdrawFeePercent === 'number' ? plan.withdrawFeePercent : 15
+                          );
                           setPlanIsPrivateInput(plan.isPrivate || false);
                           setPlanAllowedPhonesInput((plan.allowedPhones || []).join('\n'));
                           const singleReward = plan.tasksCount && plan.tasksCount > 0 ? Number((plan.profit / plan.tasksCount).toFixed(2)) : 0;
