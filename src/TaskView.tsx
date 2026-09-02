@@ -1907,7 +1907,6 @@ export default function TaskView() {
         console.warn('تعذّر إرسال إشعار إتمام المهام اليومية:', notifyErr);
       }
     } catch (err: any) {
-    } catch (err: any) {
       console.error("Error confirming task and updating earnings:", err);
       const errorMessage = err.message || "فشل غير معروف";
       triggerNotification(`🔴 فشل تحديث الرصيد: ${errorMessage}`);
