@@ -39,6 +39,7 @@ export interface User {
   hasDeposited?: boolean; // هل قام المستخدم بالإيداع وتفعيل الحساب؟
 }
 
+
 export interface UserNotification {
   id: string;
   userId: string;
