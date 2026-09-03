@@ -15,7 +15,8 @@ interface AuthPageProps {
 export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
   const [isLogin, setIsLogin] = useState<boolean>(true);
   const [fullName, setFullName] = useState<string>('');
-  const [selectedCountry, setSelectedCountry] = useState<CountryInfo>(COUNTRY_LIST[0]); // Iraq (+964) default
+  // يبدأ فارغًا ليختار المستخدم دولته بنفسه بدل تثبيت العراق افتراضيًا
+  const [selectedCountry, setSelectedCountry] = useState<CountryInfo | null>(null);
   const [phoneInput, setPhoneInput] = useState<string>('');
   const [email, setEmail] = useState<string>('');
   const [emailOtp, setEmailOtp] = useState<string>('');
@@ -191,7 +192,7 @@ export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
     if (cleanedLocal.startsWith('0')) {
       cleanedLocal = cleanedLocal.substring(1);
     }
-    return `${selectedCountry.code}${cleanedLocal}`;
+    return `${selectedCountry?.code || ''}${cleanedLocal}`;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -208,6 +209,12 @@ export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
     // For login, we allow the attempt to verify if the ban has been lifted in the database.
     if (!isLogin && localStorage.getItem('oxlo_device_banned') === 'true') {
       setErrorMsg("لا يمكنك إنشاء حساب جديد، هذا الجهاز محظور من استخدام المنصة.");
+      setLoading(false);
+      return;
+    }
+
+      if (!selectedCountry) {
+      setErrorMsg("يرجى اختيار الدولة أولاً من القائمة");
       setLoading(false);
       return;
     }
@@ -236,10 +243,10 @@ export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
           user = await getUserByPhone(cleanInput);
         }
         if (!user && !cleanInput.startsWith('+')) {
-          user = await getUserByPhone(`${selectedCountry.code}${cleanInput}`);
+          user = await getUserByPhone(`${selectedCountry?.code || ''}${cleanInput}`);
         }
         if (!user && cleanInput.startsWith('0')) {
-          user = await getUserByPhone(`${selectedCountry.code}${cleanInput.substring(1)}`);
+          user = await getUserByPhone(`${selectedCountry?.code || ''}${cleanInput.substring(1)}`);
         }
 
         if (!user) {
@@ -486,24 +493,33 @@ export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
 
             {/* Field: Phone Number with Country Selector */}
             {(() => {
-              const liveValidation = selectedCountry.validate(phoneInput);
+              const liveValidation = selectedCountry
+                ? selectedCountry.validate(phoneInput)
+                : { isValid: false, message: 'اختر الدولة أولاً' };
               const hasTypedPhone = phoneInput.trim().length > 0;
 
               return (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between px-1">
                     <label className="text-[10px] font-black text-slate-500">رقم الهاتف المحلي</label>
-                    <span className="text-[9px] font-black text-blue-600 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-100 flex items-center gap-1">
-                      <span>{selectedCountry.flag}</span>
-                      <span>{selectedCountry.code}</span>
-                    </span>
+                    {selectedCountry ? (
+                      <span className="text-[9px] font-black text-blue-600 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-100 flex items-center gap-1">
+                        <span>{selectedCountry.flag}</span>
+                        <span>{selectedCountry.code}</span>
+                      </span>
+                    ) : (
+                      <span className="text-[9px] font-black text-slate-400 bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-200 flex items-center gap-1">
+                        <span>🌐</span>
+                        <span>لم تُحدد</span>
+                      </span>
+                    )}
                   </div>
 
                   <div className="flex gap-2">
                     {/* Country Code Dropdown */}
                     <div className="relative shrink-0">
                       <select
-                        value={selectedCountry.code}
+                        value={selectedCountry?.code || ''}
                         onChange={(e) => {
                           const found = COUNTRY_LIST.find(c => c.code === e.target.value);
                           if (found) {
@@ -511,11 +527,16 @@ export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
                             setErrorMsg(null);
                           }
                         }}
-                        className="h-14 px-3 bg-slate-50 border border-slate-100 rounded-2xl text-xs font-black text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600/10 appearance-none cursor-pointer pr-8 text-right"
+                        className={`h-14 px-3 rounded-2xl text-xs font-black focus:outline-none focus:ring-2 focus:ring-blue-600/10 appearance-none cursor-pointer pr-8 text-right transition-all ${
+                          selectedCountry
+                            ? 'bg-slate-50 border border-slate-100 text-slate-900'
+                            : 'bg-white border-2 border-dashed border-slate-300 text-slate-500'
+                        }`}
                       >
+                        <option value="" disabled>🌐 اختر الدولة</option>
                         {COUNTRY_LIST.map((c) => (
                           <option key={`${c.code}-${c.name}`} value={c.code}>
-                            {c.flag} {c.code}
+                            {c.flag} {c.code} — {c.name}
                           </option>
                         ))}
                       </select>
@@ -541,7 +562,7 @@ export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
                             ? 'border-emerald-500 bg-emerald-50/20'
                             : 'border-rose-400 bg-rose-50/20'
                         } rounded-2xl pr-12 pl-12 text-xs font-black text-slate-900 focus:outline-none transition-all text-left font-mono`}
-                        placeholder={selectedCountry.example}
+                        placeholder={selectedCountry ? selectedCountry.example : 'اختر الدولة أولاً'}
                         dir="ltr"
                       />
                       <Phone className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300" />
