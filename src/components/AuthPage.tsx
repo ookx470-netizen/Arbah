@@ -530,13 +530,13 @@ export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
                         className={`h-14 px-3 rounded-2xl text-xs font-black focus:outline-none focus:ring-2 focus:ring-blue-600/10 appearance-none cursor-pointer pr-8 text-right transition-all ${
                           selectedCountry
                             ? 'bg-slate-50 border border-slate-100 text-slate-900'
-                            : 'bg-white border-2 border-dashed border-slate-300 text-slate-500'
+                            : 'bg-white border border-dashed border-slate-400 text-slate-500'
                         }`}
                       >
-                        <option value="" disabled>🌐 اختر الدولة</option>
+                        <option value="" disabled>🌐 الدولة</option>
                         {COUNTRY_LIST.map((c) => (
                           <option key={`${c.code}-${c.name}`} value={c.code}>
-                            {c.flag} {c.code} — {c.name}
+                            {c.flag} {c.code}
                           </option>
                         ))}
                       </select>
