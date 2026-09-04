@@ -1354,17 +1354,51 @@ export async function creditReferrerCommission(childPhone: string, rewardValue: 
       }
 
       if (childReferrerCode) {
-        // Query user with inviteCode == childReferrerCode
-        const q = query(collection(db, "users"), where("inviteCode", "==", childReferrerCode));
-        const querySnapshot = await getDocs(q);
-        if (!querySnapshot.empty) {
-          const referrerDoc = querySnapshot.docs[0];
-          referrerPhone = referrerDoc.id; // user document ID is phone
+        // البحث عن المُحيل برمز الدعوة. نجرّب كل صيغ حالة الأحرف لأن
+        // استعلامات Firestore حساسة لحالة الحرف، وبعض الرموز مخزّنة
+        // بحالة مختلفة عمّا يُرسله الكود — فكانت العمولة تصل لبعض
+        // الأعضاء وتفشل صامتة مع غيرهم.
+        const codeVariants = Array.from(new Set([
+          childReferrerCode,
+          childReferrerCode.toUpperCase(),
+          childReferrerCode.toLowerCase()
+        ]));
+
+        for (const variant of codeVariants) {
+          const q = query(collection(db, "users"), where("inviteCode", "==", variant));
+          const querySnapshot = await getDocs(q);
+          if (!querySnapshot.empty) {
+            referrerPhone = querySnapshot.docs[0].id;
+            break;
+          }
+        }
+
+        // احتياط أخير: مسح شامل بمقارنة غير حساسة لحالة الأحرف
+        if (!referrerPhone) {
+          try {
+            const allSnap = await getDocs(collection(db, "users"));
+            allSnap.forEach(d => {
+              if (referrerPhone) return;
+              const code = (d.data()?.inviteCode || '').trim().toUpperCase();
+              if (code && code === childReferrerCode) {
+                referrerPhone = d.id;
+              }
+            });
+          } catch (scanErr) {
+            console.warn('تعذّر المسح الشامل للبحث عن المُحيل:', scanErr);
+          }
         }
       }
     } catch (err) {
       console.warn("Firestore error in creditReferrerCommission finding referrer:", err);
     }
+  }
+
+  if (!referrerPhone) {
+    console.warn('⚠️ لم يُعثر على مُحيل لهذا العضو:', {
+      العضو: childPhone,
+      رمز_الإحالة: childReferrerCode || '(لا يوجد)'
+    });
   }
 
   // If referrer is found, increment their earnings (credit balance) and send notification!
@@ -1385,8 +1419,13 @@ export async function creditReferrerCommission(childPhone: string, rewardValue: 
         await updateDoc(refUserRef, {
           earnings: increment(commission)
         });
+        console.log('💰 عمولة إحالة: تمت إضافة', commission, 'إلى', referrerPhone);
       } catch (err) {
-        console.warn("Firestore error in creditReferrerCommission updating referrer:", err);
+        console.error('❌ فشل إضافة عمولة الإحالة:', {
+          المُحيل: referrerPhone,
+          العمولة: commission,
+          الخطأ: (err as any)?.code || err
+        });
       }
     }
 
