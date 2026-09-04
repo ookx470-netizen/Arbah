@@ -295,7 +295,6 @@ export default function ProfileCenter({
     }
   };
 
-
   // Profile & Password Edit states
   const [editUsername, setEditUsername] = useState<string>(currentUser.username || '');
   const [editAvatar, setEditAvatar] = useState<string>(currentUser.avatar || '');
@@ -1136,6 +1135,26 @@ export default function ProfileCenter({
                   </div>
                 </div>
                 <ChevronLeft className="w-4 h-4 text-rose-300 group-hover:translate-x-[-4px] transition-transform" />
+              </button>
+
+              {/* زر تحديث التطبيق — حل يدوي احتياطي لو بقي المتصفح على نسخة قديمة */}
+              <button
+                onClick={async () => {
+                  const { forceRefreshApp } = await import('../utils/appVersion');
+                  await forceRefreshApp();
+                }}
+                className="w-full p-6 flex items-center justify-between hover:bg-sky-50/50 transition-all group active:bg-sky-50 border-t border-slate-50"
+              >
+                <div className="flex items-center gap-4">
+                  <div className="w-11 h-11 bg-sky-50 rounded-xl flex items-center justify-center text-sky-500 shrink-0 shadow-sm border border-white/50">
+                    <RefreshCw className="w-5 h-5 stroke-[2.5]" />
+                  </div>
+                  <div className="text-right">
+                    <span className="text-xs font-black text-sky-600 block">تحديث التطبيق</span>
+                    <span className="text-[9px] font-bold text-sky-300 block mt-0.5">إن واجهت أي خلل بالعرض</span>
+                  </div>
+                </div>
+                <ChevronLeft className="w-4 h-4 text-sky-300 group-hover:translate-x-[-4px] transition-transform" />
               </button>
 
             </div>
