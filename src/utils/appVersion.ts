@@ -91,6 +91,7 @@ export async function checkForUpdate(): Promise<void> {
     if (!canReloadNow()) return;
 
     await clearAllCaches();
+    clearLocalAppData();
     localStorage.setItem(VERSION_KEY, serverVersion);
     markReloaded();
 
@@ -119,11 +120,49 @@ export function startAutoUpdate(): void {
 }
 
 /**
+ * يمسح البيانات المحلية المؤقتة (المهام، الإعدادات المخزّنة، حالة
+ * التنقّل) مع الحفاظ على جلسة الدخول فلا يُخرَج المستخدم من حسابه.
+ *
+ * ضروري لأن مسح الكاش وحده لا يكفي: كانت بيانات المهام المحفوظة
+ * محليًا تستمر بالظهور للعضو كأنها مكتملة، بينما قاعدة البيانات
+ * تقول غير ذلك — فيرى هو نتيجة والإدارة نتيجة مختلفة.
+ */
+function clearLocalAppData(): void {
+  const KEEP = ['user_session', 'logged_in_phone', VERSION_KEY, LAST_RELOAD_KEY];
+
+  try {
+    const toRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key) continue;
+      if (KEEP.includes(key)) continue;
+
+      // نمسح بيانات المهام والإعدادات والتنقّل المخزّنة محليًا
+      if (
+        key.startsWith('micro_tasks_data') ||
+        key.startsWith('nav_') ||
+        key.startsWith('tasks_code_verified') ||
+        key.startsWith('local_db_') ||
+        key.startsWith('oxlo_settings') ||
+        key.startsWith('cached_')
+      ) {
+        toRemove.push(key);
+      }
+    }
+    toRemove.forEach((k) => localStorage.removeItem(k));
+  } catch (e) {
+    console.warn('تعذّر مسح البيانات المحلية:', e);
+  }
+}
+
+/**
  * تحديث يدوي فوري (لزر "تحديث التطبيق" بالمركز الشخصي).
- * يمسح كل شيء ويعيد التحميل دون شروط.
+ * يمسح الكاش والبيانات المحلية المؤقتة ثم يعيد التحميل —
+ * مع إبقاء المستخدم مسجّل الدخول.
  */
 export async function forceRefreshApp(): Promise<void> {
   await clearAllCaches();
+  clearLocalAppData();
   try {
     localStorage.removeItem(VERSION_KEY);
     localStorage.removeItem(LAST_RELOAD_KEY);
