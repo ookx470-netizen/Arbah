@@ -132,6 +132,12 @@ export default function ProfileCenter({
     }).length;
   }, [teamList]);
 
+  // نسبة عمولة الإحالة الخاصة بهذا العضو (تحددها الإدارة، الافتراضي 10%)
+  const myCommissionRate = React.useMemo(() => {
+    const r = Number((currentUser as any)?.commissionRate);
+    return (!isNaN(r) && r > 0 && r <= 100) ? r : 10;
+  }, [(currentUser as any)?.commissionRate]);
+
   const leaderRank = React.useMemo(() => {
     const RANKS: Record<number, any> = {
       3: { level: 3, label: 'قائد المستوى الثالث', icon: '🥇',
@@ -1664,14 +1670,14 @@ export default function ProfileCenter({
               <div className="bg-white p-4 rounded-3xl border border-slate-100 shadow-sm text-center">
                 <span className="text-[10px] font-bold text-slate-500 uppercase block mb-1">أرباح الفريق</span>
                 <span className="text-lg font-black text-blue-800 font-mono">
-                  ${teamList.filter(m => (m.teamLevel || 1) === 1).reduce((sum, m) => sum + ((m.taskIncome || 0) * 0.10), 0).toFixed(2)}
+                  ${teamList.filter(m => (m.teamLevel || 1) === 1).reduce((sum, m) => sum + ((m.taskIncome || 0) * (myCommissionRate / 100)), 0).toFixed(2)}
                 </span>
               </div>
 
               <div className="bg-white p-4 rounded-3xl border border-slate-100 shadow-sm text-center">
                 <span className="text-[10px] font-bold text-slate-500 uppercase block mb-1">نسبة العمولة</span>
                 <span className="text-lg font-black text-blue-800 font-mono">
-                  10%
+                  {myCommissionRate}%
                 </span>
               </div>
             </div>
