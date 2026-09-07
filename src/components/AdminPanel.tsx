@@ -472,6 +472,10 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
   // States for Advanced User Edit modal
   const [selectedUserForEdit, setSelectedUserForEdit] = useState<User | null>(null);
   const [editUsernameInput, setEditUsernameInput] = useState<string>('');
+  // نسبة عمولة الإحالة لهذا العضو (%) — تُحدد يدويًا، الافتراضي 10
+  const [editCommissionRate, setEditCommissionRate] = useState<number>(10);
+  // رتبة قيادة تُمنح يدويًا (0 = تلقائي حسب عدد الفريق)
+  const [editLeaderLevel, setEditLeaderLevel] = useState<number>(0);
   const [editPhoneInput, setEditPhoneInput] = useState<string>('');
   const [editPasswordInput, setEditPasswordInput] = useState<string>('');
   const [editWalletAddressInput, setEditWalletAddressInput] = useState<string>('');
@@ -543,6 +547,12 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
       setEditEffectiveDays(calculateRemainingEffectiveDays(selectedUserForEdit, settings.holidayDays ?? [5]));
       setEditWithdrawalBlocked(!!selectedUserForEdit.isWithdrawalBlocked);
       setEditBypassHoliday(!!selectedUserForEdit.bypassHoliday);
+      setEditCommissionRate(
+        typeof (selectedUserForEdit as any).commissionRate === 'number'
+          ? (selectedUserForEdit as any).commissionRate
+          : 10
+      );
+      setEditLeaderLevel(Number((selectedUserForEdit as any).manualLeaderLevel) || 0);
     }
   }, [selectedUserForEdit]);
 
@@ -908,9 +918,35 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
         vipStartDate: new Date().toISOString(),
         isWithdrawalBlocked: editWithdrawalBlocked,
         bypassHoliday: editBypassHoliday,
+        commissionRate: Number(editCommissionRate),
+        manualLeaderLevel: Number(editLeaderLevel),
         isBanned: editIsBanned,
         banReason: editBanReason
       });
+
+      // إشعار تهنئة عند منح رتبة قيادة جديدة (لم تكن ممنوحة له من قبل)
+      const prevLeaderLevel = Number((selectedUserForEdit as any).manualLeaderLevel) || 0;
+      const newLeaderLevel = Number(editLeaderLevel) || 0;
+      if (newLeaderLevel > 0 && newLeaderLevel !== prevLeaderLevel) {
+        const RANK_INFO: Record<number, { icon: string; name: string }> = {
+          1: { icon: '🥉', name: 'قائد المستوى الأول' },
+          2: { icon: '🥈', name: 'قائد المستوى الثاني' },
+          3: { icon: '🥇', name: 'قائد المستوى الثالث' },
+        };
+        const info = RANK_INFO[newLeaderLevel];
+        if (info) {
+          const msg =
+            `${info.icon} <b>تهانينا! أصبحت ${info.name}</b>\n\n` +
+            `تقديرًا لجهودك في بناء فريقك ونشاطك المتميّز على المنصة، ` +
+            `منحتك الإدارة رتبة <b>${info.name}</b>.\n\n` +
+            `✨ شارة القيادة أصبحت ظاهرة في مركزك الشخصي\n` +
+            `📈 واصل نفس التميّز لترتقي إلى رتبة أعلى\n\n` +
+            `نفخر بوجودك بين قادة OXLO 💙`;
+          createNotification(targetId, msg).catch(e =>
+            console.warn('تعذّر إرسال إشعار رتبة القيادة:', e)
+          );
+        }
+      }
 
       setUsers(prev => prev.map(u => {
         if (u.phone === targetId || u.id === targetId) {
@@ -927,6 +963,8 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
             vipStartDate: new Date().toISOString(),
             isWithdrawalBlocked: editWithdrawalBlocked,
             bypassHoliday: editBypassHoliday,
+            commissionRate: Number(editCommissionRate),
+            manualLeaderLevel: Number(editLeaderLevel),
             isBanned: editIsBanned,
             banReason: editBanReason
           };
@@ -4885,6 +4923,77 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                     ⚠️ عند حظر السحب، لن يتمكن هذا العضو من تقديم أي طلبات سحب، وسيظهر له تنبيه يطالبه بجلب (2) من المشتركين الجدد والنشطين على الأقل في فئة VIP (B1) ليستعيد ميزة السحب التلقائي لديه.
                   </p>
                 )}
+              </div>
+
+              {/* نسبة عمولة الإحالة — تُحدد يدويًا لكل عضو */}
+              <div className="p-3 bg-indigo-50/50 border border-indigo-200/60 rounded-xl space-y-2">
+                <span className="block text-[10px] text-indigo-800 font-extrabold flex items-center gap-1.5 justify-end">
+                  نسبة عمولة الإحالة لهذا العضو:
+                  <Users className="w-4 h-4 text-indigo-600" />
+                </span>
+                <div className="flex gap-2 items-center">
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={editCommissionRate}
+                    onChange={(e) => setEditCommissionRate(Number(e.target.value))}
+                    className="flex-1 px-3 py-2 bg-white border border-indigo-200 rounded-lg text-xs font-bold text-indigo-700 text-center focus:outline-none focus:border-indigo-500"
+                  />
+                  <span className="text-xs font-black text-indigo-600">%</span>
+                </div>
+                <div className="flex gap-1.5">
+                  {[10, 15, 17].map(r => (
+                    <button
+                      key={r}
+                      type="button"
+                      onClick={() => setEditCommissionRate(r)}
+                      className={`flex-1 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                        editCommissionRate === r
+                          ? 'bg-indigo-600 text-white'
+                          : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      {r}%
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[9px] text-indigo-500 font-bold text-right">
+                  الافتراضي 10% — ارفعها للقادة حسب تقديرك.
+                </p>
+              </div>
+
+              {/* منح رتبة القيادة يدويًا — تتجاوز الشرط التلقائي */}
+              <div className="p-3 bg-purple-50/50 border border-purple-200/60 rounded-xl space-y-2">
+                <span className="block text-[10px] text-purple-800 font-extrabold flex items-center gap-1.5 justify-end">
+                  رتبة القيادة (منح يدوي):
+                  <Award className="w-4 h-4 text-purple-600" />
+                </span>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {[
+                    { v: 0, l: 'تلقائي (حسب الفريق)' },
+                    { v: 1, l: '🥉 المستوى الأول' },
+                    { v: 2, l: '🥈 المستوى الثاني' },
+                    { v: 3, l: '🥇 المستوى الثالث' },
+                  ].map(o => (
+                    <button
+                      key={o.v}
+                      type="button"
+                      onClick={() => setEditLeaderLevel(o.v)}
+                      className={`py-2 px-2 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                        editLeaderLevel === o.v
+                          ? 'bg-purple-600 text-white shadow-sm'
+                          : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      {o.l}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[9px] text-purple-500 font-bold text-right leading-relaxed">
+                  «تلقائي» يمنح الرتبة حسب عدد أعضاء فريقه المفعّلين (3 / 6 / 10).
+                  أما التحديد اليدوي فيمنحها فورًا حتى دون تحقق الشرط.
+                </p>
               </div>
 
               {/* Holiday Bypass Setting */}

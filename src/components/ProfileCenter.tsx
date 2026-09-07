@@ -119,6 +119,40 @@ export default function ProfileCenter({
   const [teamLevelFilter, setTeamLevelFilter] = useState<'all' | '1' | '2' | '3'>('all');
   const [teamSearchQuery, setTeamSearchQuery] = useState<string>('');
 
+  // ============================================================
+  // رتبة القيادة — تُحتسب تلقائيًا من عدد أعضاء الفريق المفعّلين.
+  // يُشترط أن يكون العضو مفعّلاً فعليًا (لديه باقة VIP حقيقية)،
+  // فلا تُحتسب الحسابات المسجّلة غير المفعّلة.
+  // ============================================================
+  const activatedTeamCount = React.useMemo(() => {
+    return teamList.filter(m => {
+      const tier = ((m as any)?.vipTier || '').trim();
+      return tier !== '' && tier !== 'الباقة العادية' &&
+             tier !== 'العضوية العادية' && tier !== 'VIP0';
+    }).length;
+  }, [teamList]);
+
+  const leaderRank = React.useMemo(() => {
+    const RANKS: Record<number, any> = {
+      3: { level: 3, label: 'قائد المستوى الثالث', icon: '🥇',
+           cls: 'from-amber-400 to-yellow-500', text: 'text-amber-900' },
+      2: { level: 2, label: 'قائد المستوى الثاني', icon: '🥈',
+           cls: 'from-slate-300 to-slate-400', text: 'text-slate-800' },
+      1: { level: 1, label: 'قائد المستوى الأول', icon: '🥉',
+           cls: 'from-orange-300 to-amber-400', text: 'text-amber-900' },
+    };
+
+    // رتبة ممنوحة يدويًا من الإدارة — تتجاوز الشرط التلقائي
+    const manual = Number((currentUser as any)?.manualLeaderLevel) || 0;
+    if (manual >= 1 && manual <= 3) return RANKS[manual];
+
+    // وإلا تُحتسب تلقائيًا من عدد أعضاء الفريق المفعّلين
+    if (activatedTeamCount >= 10) return RANKS[3];
+    if (activatedTeamCount >= 6) return RANKS[2];
+    if (activatedTeamCount >= 3) return RANKS[1];
+    return null;
+  }, [activatedTeamCount, (currentUser as any)?.manualLeaderLevel]);
+
   // Notifications State
   const [notifications, setNotifications] = useState<UserNotification[]>([]);
   const [showNotifModal, setShowNotifModal] = useState<boolean>(false);
@@ -839,6 +873,18 @@ export default function ProfileCenter({
                         </button>
                       </>
                     )}
+                    {leaderRank && (
+                      <>
+                        <div className="h-1 w-1 bg-slate-700 rounded-full shrink-0"></div>
+                        <span
+                          title={`${leaderRank.label} — ${activatedTeamCount} أعضاء مفعّلين`}
+                          className={`inline-flex items-center gap-1 bg-gradient-to-l ${leaderRank.cls} ${leaderRank.text} text-[9.5px] font-black px-2 py-0.5 rounded-full shrink-0 shadow-sm`}
+                        >
+                          <span>{leaderRank.icon}</span>
+                          <span>{leaderRank.label}</span>
+                        </span>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
@@ -933,6 +979,19 @@ export default function ProfileCenter({
                 </div>
                 <span className="text-sm font-black text-emerald-600">
                   {referralBonusTotal.toFixed(2)} <span className="text-[10px] text-slate-400 font-bold">USDT</span>
+                </span>
+              </div>
+
+              {/* نسبة عمولة الإحالة الحالية — تُحدد من الإدارة، الافتراضي 10% */}
+              <div className="flex items-center justify-between px-2 pt-2 border-t border-slate-50">
+                <div className="flex items-center gap-2">
+                  <Users className="w-3.5 h-3.5 text-indigo-500" />
+                  <span className="text-[10px] font-bold text-slate-400">نسبة عمولة الإحالة</span>
+                </div>
+                <span className="text-sm font-black text-indigo-600">
+                  {typeof (currentUser as any).commissionRate === 'number'
+                    ? (currentUser as any).commissionRate
+                    : 10}%
                 </span>
               </div>
 
