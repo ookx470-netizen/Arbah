@@ -15,8 +15,7 @@ interface AuthPageProps {
 export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
   const [isLogin, setIsLogin] = useState<boolean>(true);
   const [fullName, setFullName] = useState<string>('');
-  // يبدأ فارغًا ليختار المستخدم دولته بنفسه بدل تثبيت العراق افتراضيًا
-  const [selectedCountry, setSelectedCountry] = useState<CountryInfo | null>(null);
+  const [selectedCountry, setSelectedCountry] = useState<CountryInfo>(COUNTRY_LIST[0]); // Iraq (+964) default
   const [phoneInput, setPhoneInput] = useState<string>('');
   const [email, setEmail] = useState<string>('');
   const [emailOtp, setEmailOtp] = useState<string>('');
@@ -30,6 +29,8 @@ export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
   const [globalNotification, setGlobalNotification] = useState<string>(settings?.globalNotification ?? '');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [generatedOtpCode, setGeneratedOtpCode] = useState<string>('');
+  // التوقيع المشفّر للرمز — يُرسل للخادم عند التحقق (لا يحوي الرمز نفسه)
+  const [otpToken, setOtpToken] = useState<string>('');
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   // OTP Resend Countdown Timer
@@ -91,13 +92,15 @@ export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
       if (data && data.success) {
         setOtpSent(true);
         setOtpCountdown(45);
-        if (data.otpCode) {
-          setGeneratedOtpCode(data.otpCode);
+        if (data.otpToken) {
+          setOtpToken(data.otpToken);
         }
+        // ملاحظة أمنية: الخادم لم يعد يُرسل الرمز نفسه إطلاقًا،
+        // فالتحقق يتم عبر الخادم حصريًا لا بمقارنة محلية.
+        setGeneratedOtpCode('');
         if (data.devMode && data.previewCode) {
           setEmailOtp(data.previewCode);
-          setGeneratedOtpCode(data.previewCode);
-          setSuccessMsg(`✅ تم توليد رمز التحقق: ${data.previewCode} (تم تعبئته تلقائياً)`);
+          setSuccessMsg(`✅ وضع التطوير — رمز التحقق: ${data.previewCode}`);
         } else {
           setSuccessMsg(data.message || "تم إرسال رمز التحقق إلى بريدك الإلكتروني بنجاح!");
         }
@@ -192,7 +195,7 @@ export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
     if (cleanedLocal.startsWith('0')) {
       cleanedLocal = cleanedLocal.substring(1);
     }
-    return `${selectedCountry?.code || ''}${cleanedLocal}`;
+    return `${selectedCountry.code}${cleanedLocal}`;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -209,12 +212,6 @@ export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
     // For login, we allow the attempt to verify if the ban has been lifted in the database.
     if (!isLogin && localStorage.getItem('oxlo_device_banned') === 'true') {
       setErrorMsg("لا يمكنك إنشاء حساب جديد، هذا الجهاز محظور من استخدام المنصة.");
-      setLoading(false);
-      return;
-    }
-
-      if (!selectedCountry) {
-      setErrorMsg("يرجى اختيار الدولة أولاً من القائمة");
       setLoading(false);
       return;
     }
@@ -243,10 +240,10 @@ export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
           user = await getUserByPhone(cleanInput);
         }
         if (!user && !cleanInput.startsWith('+')) {
-          user = await getUserByPhone(`${selectedCountry?.code || ''}${cleanInput}`);
+          user = await getUserByPhone(`${selectedCountry.code}${cleanInput}`);
         }
         if (!user && cleanInput.startsWith('0')) {
-          user = await getUserByPhone(`${selectedCountry?.code || ''}${cleanInput.substring(1)}`);
+          user = await getUserByPhone(`${selectedCountry.code}${cleanInput.substring(1)}`);
         }
 
         if (!user) {
@@ -315,33 +312,49 @@ export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
           throw new Error("يرجى إدخال رمز التحقق المكون من 6 أرقام المرسل إلى بريدك الإلكتروني.");
         }
 
-        // Verify OTP (Check client state or backend API)
+        // ============================================================
+        // التحقق من الرمز — عبر الخادم حصريًا.
+        //
+        // الثغرة السابقة: كان الكود يعتبر أي رد ناجح (200) تحققًا
+        // صحيحًا، حتى لو كان الرد صفحة HTML لأن مسار التحقق غير
+        // موجود. فكان أي رمز يمر ويُنشأ الحساب ببريد لا يملكه صاحبه.
+        //
+        // الآن: لا يُقبل التحقق إلا برد JSON صريح يحمل success: true،
+        // وأي فشل أو خطأ شبكة يعني رفض التسجيل — لا تجاوزه.
+        // ============================================================
         let isOtpVerified = false;
-        if (generatedOtpCode && cleanOtp === generatedOtpCode) {
-          isOtpVerified = true;
-        } else {
-          try {
-            const verifyRes = await fetch('/api/verify-email-otp', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ email: cleanEmail, code: cleanOtp })
-            });
-            const contentType = verifyRes.headers.get('content-type') || '';
-            if (contentType.includes('application/json')) {
-              const verifyData = await verifyRes.json();
-              if (verifyRes.ok && verifyData.success) {
-                isOtpVerified = true;
-              }
-            } else if (verifyRes.ok) {
-              isOtpVerified = true;
-            }
-          } catch (e) {
-            console.warn("Verify OTP fetch error:", e);
-          }
+        let verifyError = "رمز التحقق غير صحيح أو انتهت صلاحيته. يرجى طلب رمز جديد.";
+
+        if (!otpToken) {
+          throw new Error("يرجى طلب رمز التحقق أولاً قبل إتمام التسجيل.");
         }
 
-        if (!isOtpVerified && (!generatedOtpCode || cleanOtp !== generatedOtpCode)) {
-          throw new Error("رمز التحقق غير صحيح أو انتهت صلاحيته. يرجى طلب رمز جديد.");
+        try {
+          const verifyRes = await fetch('/api/verify-email-otp', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: cleanEmail, code: cleanOtp, otpToken })
+          });
+
+          const contentType = verifyRes.headers.get('content-type') || '';
+          if (contentType.includes('application/json')) {
+            const verifyData = await verifyRes.json();
+            if (verifyRes.ok && verifyData?.success === true) {
+              isOtpVerified = true;
+            } else if (verifyData?.message) {
+              verifyError = verifyData.message;
+            }
+          } else {
+            // رد غير متوقع (صفحة HTML مثلاً) — نرفض التحقق ولا نتجاوزه
+            verifyError = "تعذّر التحقق من الرمز حاليًا. يرجى المحاولة بعد قليل.";
+          }
+        } catch (e) {
+          console.warn("Verify OTP fetch error:", e);
+          verifyError = "تعذّر الاتصال بخادم التحقق. يرجى المحاولة مرة أخرى.";
+        }
+
+        if (!isOtpVerified) {
+          throw new Error(verifyError);
         }
 
         if (password.length < 6) {
@@ -493,33 +506,24 @@ export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
 
             {/* Field: Phone Number with Country Selector */}
             {(() => {
-              const liveValidation = selectedCountry
-                ? selectedCountry.validate(phoneInput)
-                : { isValid: false, message: 'اختر الدولة أولاً' };
+              const liveValidation = selectedCountry.validate(phoneInput);
               const hasTypedPhone = phoneInput.trim().length > 0;
 
               return (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between px-1">
                     <label className="text-[10px] font-black text-slate-500">رقم الهاتف المحلي</label>
-                    {selectedCountry ? (
-                      <span className="text-[9px] font-black text-blue-600 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-100 flex items-center gap-1">
-                        <span>{selectedCountry.flag}</span>
-                        <span>{selectedCountry.code}</span>
-                      </span>
-                    ) : (
-                      <span className="text-[9px] font-black text-slate-400 bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-200 flex items-center gap-1">
-                        <span>🌐</span>
-                        <span>لم تُحدد</span>
-                      </span>
-                    )}
+                    <span className="text-[9px] font-black text-blue-600 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-100 flex items-center gap-1">
+                      <span>{selectedCountry.flag}</span>
+                      <span>{selectedCountry.code}</span>
+                    </span>
                   </div>
 
                   <div className="flex gap-2">
                     {/* Country Code Dropdown */}
                     <div className="relative shrink-0">
                       <select
-                        value={selectedCountry?.code || ''}
+                        value={selectedCountry.code}
                         onChange={(e) => {
                           const found = COUNTRY_LIST.find(c => c.code === e.target.value);
                           if (found) {
@@ -527,13 +531,8 @@ export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
                             setErrorMsg(null);
                           }
                         }}
-                        className={`h-14 px-3 rounded-2xl text-xs font-black focus:outline-none focus:ring-2 focus:ring-blue-600/10 appearance-none cursor-pointer pr-8 text-right transition-all ${
-                          selectedCountry
-                            ? 'bg-slate-50 border border-slate-100 text-slate-900'
-                            : 'bg-white border border-dashed border-slate-400 text-slate-500'
-                        }`}
+                        className="h-14 px-3 bg-slate-50 border border-slate-100 rounded-2xl text-xs font-black text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600/10 appearance-none cursor-pointer pr-8 text-right"
                       >
-                        <option value="" disabled>🌐 الدولة</option>
                         {COUNTRY_LIST.map((c) => (
                           <option key={`${c.code}-${c.name}`} value={c.code}>
                             {c.flag} {c.code}
@@ -562,7 +561,7 @@ export default function AuthPage({ onLoginSuccess, settings }: AuthPageProps) {
                             ? 'border-emerald-500 bg-emerald-50/20'
                             : 'border-rose-400 bg-rose-50/20'
                         } rounded-2xl pr-12 pl-12 text-xs font-black text-slate-900 focus:outline-none transition-all text-left font-mono`}
-                        placeholder={selectedCountry ? selectedCountry.example : 'اختر الدولة أولاً'}
+                        placeholder={selectedCountry.example}
                         dir="ltr"
                       />
                       <Phone className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300" />
