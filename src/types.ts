@@ -10,6 +10,8 @@ export interface User {
   inviteCode: string; // رمز الدعوة الخاص بالمستخدم
   memberId?: string; // الرقم التعريفي للعضو (5 خانات تبدأ بحرف O — مثال: OK7M2)
   honorPoints?: number; // نقاط الشرف: 0 قبل التفعيل، تصبح 100 تلقائيًا عند تفعيل الباقة
+  commissionRate?: number; // نسبة عمولة الإحالة لهذا العضو (%) — تُحدد يدويًا من الإدارة، الافتراضي 10
+  manualLeaderLevel?: number; // رتبة قيادة تُمنح يدويًا (1/2/3) وتتجاوز الشرط التلقائي — 0 أو غير محددة تعني الاعتماد على العدد الفعلي
   upgradeSupportTotal?: number; // إجمالي مبلغ دعم الترقية الممنوح من الإدارة
   upgradeSupportPaid?: number; // المبلغ المسدد منه عبر خصم 50% من الأرباح اليومية
   referrerCode?: string; // رمز دعوة الشخص الذي دعاه

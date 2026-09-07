@@ -1320,8 +1320,9 @@ export async function updateUserStats(phone: string, updates: Partial<Pick<User,
 export async function creditReferrerCommission(childPhone: string, rewardValue: number, childUsername: string): Promise<void> {
   if (!childPhone || rewardValue <= 0) return;
 
-  const commission = Number((rewardValue * 0.10).toFixed(2));
-  if (commission <= 0) return;
+  // ملاحظة: النسبة لم تعد ثابتة — تُقرأ من حقل commissionRate الخاص
+  // بالمُحيل نفسه (تحدده الإدارة يدويًا)، والافتراضي 10% لمن لم تُحدد له.
+  if (rewardValue <= 0) return;
 
   let referrerPhone: string | null = null;
   let childReferrerCode = "";
@@ -1403,7 +1404,25 @@ export async function creditReferrerCommission(childPhone: string, rewardValue: 
 
   // If referrer is found, increment their earnings (credit balance) and send notification!
   if (referrerPhone) {
-    const notifMsg = `💰 حصلت على عمولة قدرها ${commission} USDT من إتمام العضو (${childUsername}) لمهمته بنجاح!`;
+    // نقرأ نسبة العمولة الخاصة بهذا المُحيل (يحددها الأدمن يدويًا)
+    let rate = 10;
+    try {
+      const refSnap = await getDoc(doc(db, "users", referrerPhone));
+      if (refSnap.exists()) {
+        const r = Number(refSnap.data()?.commissionRate);
+        if (!isNaN(r) && r > 0 && r <= 100) rate = r;
+      }
+    } catch (e) {
+      // تعذّر القراءة — نستخدم النسبة الافتراضية
+      const lu = getLocalUsers();
+      const r = Number((lu[referrerPhone] as any)?.commissionRate);
+      if (!isNaN(r) && r > 0 && r <= 100) rate = r;
+    }
+
+    const commission = Number((rewardValue * (rate / 100)).toFixed(2));
+    if (commission <= 0) return;
+
+    const notifMsg = `💰 حصلت على عمولة قدرها ${commission} USDT (${rate}%) من إتمام العضو (${childUsername}) لمهمته بنجاح!`;
 
     // 1. Update in local storage
     const updatedLocalUsers = getLocalUsers();
