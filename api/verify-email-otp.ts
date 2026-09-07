@@ -1,49 +1,84 @@
-import type { IncomingMessage, ServerResponse } from 'http';
+import crypto from 'crypto';
 
-type VercelRequest = IncomingMessage & {
-  body?: any;
-  query?: { [key: string]: string | string[] };
-  cookies?: { [key: string]: string };
-};
+/**
+ * ============================================================
+ * التحقق من رمز البريد — نسخة آمنة
+ * ============================================================
+ *
+ * يستقبل: البريد، الرمز الذي أدخله المستخدم، والتوقيع المشفّر
+ * الذي أُرسل عند طلب الرمز.
+ *
+ * يعيد حساب التوقيع من الرمز المُدخل ويقارنه بالتوقيع الأصلي —
+ * فإن تطابقا كان الرمز صحيحًا، وإلا فهو خاطئ. لا يمكن تزويره
+ * دون معرفة المفتاح السري الموجود على الخادم فقط.
+ */
 
-type VercelResponse = ServerResponse & {
-  send: (body: any) => VercelResponse;
-  json: (jsonBody: any) => VercelResponse;
-  status: (statusCode: number) => VercelResponse;
-  setHeader: (name: string, value: string | string[]) => VercelResponse;
-};
+function getSecret(): string {
+  return process.env.OTP_SECRET || process.env.RESEND_API_KEY || 'oxlo-fallback-secret-key';
+}
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
-  res.setHeader(
-    'Access-Control-Allow-Headers',
-    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
-  );
+function signOtp(email: string, code: string, expiresAt: number): string {
+  return crypto
+    .createHmac('sha256', getSecret())
+    .update(`${email.trim().toLowerCase()}:${code}:${expiresAt}`)
+    .digest('hex');
+}
 
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-
+export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
-    return res.status(405).json({ success: false, message: 'Method Not Allowed' });
+    return res.status(405).json({ success: false, message: 'Method not allowed' });
   }
 
   try {
-    const { email, code } = req.body || {};
-    const cleanEmail = (email || "").trim().toLowerCase();
-    const cleanCode = (code || "").trim();
+    const { email, code, otpToken } = req.body || {};
 
-    if (!cleanEmail || !cleanCode) {
-      return res.status(400).json({ success: false, message: "يرجى إدخال البريد الإلكتروني ورمز التحقق." });
+    if (!email || !code || !otpToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'بيانات التحقق غير مكتملة. يرجى طلب رمز جديد.'
+      });
     }
 
-    return res.json({
-      success: true,
-      message: "تم التحقق بنجاح."
-    });
+    const cleanEmail = String(email).trim().toLowerCase();
+    const cleanCode = String(code).trim();
+
+    // التوقيع بصيغة: {تاريخ الانتهاء}.{البصمة}
+    const parts = String(otpToken).split('.');
+    if (parts.length !== 2) {
+      return res.status(400).json({ success: false, message: 'رمز التحقق غير صالح. يرجى طلب رمز جديد.' });
+    }
+
+    const expiresAt = Number(parts[0]);
+    const originalSig = parts[1];
+
+    if (!expiresAt || isNaN(expiresAt)) {
+      return res.status(400).json({ success: false, message: 'رمز التحقق غير صالح. يرجى طلب رمز جديد.' });
+    }
+
+    // فحص انتهاء الصلاحية
+    if (Date.now() > expiresAt) {
+      return res.status(400).json({
+        success: false,
+        message: 'انتهت صلاحية رمز التحقق. يرجى طلب رمز جديد.'
+      });
+    }
+
+    // إعادة حساب التوقيع ومقارنته بأمان (مقارنة ثابتة الزمن)
+    const expectedSig = signOtp(cleanEmail, cleanCode, expiresAt);
+
+    const a = Buffer.from(expectedSig, 'utf8');
+    const b = Buffer.from(String(originalSig), 'utf8');
+    const isValid = a.length === b.length && crypto.timingSafeEqual(a, b);
+
+    if (!isValid) {
+      return res.status(400).json({
+        success: false,
+        message: 'رمز التحقق غير صحيح. يرجى المحاولة مرة أخرى.'
+      });
+    }
+
+    return res.json({ success: true, message: 'تم التحقق من البريد الإلكتروني بنجاح' });
   } catch (err: any) {
-    return res.status(500).json({ success: false, message: err.message || "خطأ أثناء التحقق" });
+    return res.status(500).json({ success: false, message: err?.message || 'خطأ غير متوقع' });
   }
 }
