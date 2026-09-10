@@ -33,7 +33,8 @@ import {
   sendSupportMessage,
   markChatAsReadByAdmin,
   recordUserActivity,
-  adjustHonorPoints
+  adjustHonorPoints,
+  getMemberDailyReport
 } from '../firebaseService';
 import { db } from '../firebase';
 import { User, Deposit, Withdrawal, SystemSettings, VipPlan, UserNotification, SupportChat, SupportMessage } from '../types';
@@ -471,6 +472,9 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
 
   // States for Advanced User Edit modal
   const [selectedUserForEdit, setSelectedUserForEdit] = useState<User | null>(null);
+  // تقرير العضو اليومي — يُجلب تلقائيًا عند فتح أي عضو
+  const [memberReport, setMemberReport] = useState<any | null>(null);
+  const [reportLoading, setReportLoading] = useState<boolean>(false);
   const [editUsernameInput, setEditUsernameInput] = useState<string>('');
   // نسبة عمولة الإحالة لهذا العضو (%) — تُحدد يدويًا، الافتراضي 10
   const [editCommissionRate, setEditCommissionRate] = useState<number>(10);
@@ -553,6 +557,16 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
           : 10
       );
       setEditLeaderLevel(Number((selectedUserForEdit as any).manualLeaderLevel) || 0);
+
+      // جلب التقرير اليومي لهذا العضو
+      setMemberReport(null);
+      setReportLoading(true);
+      getMemberDailyReport(selectedUserForEdit)
+        .then(r => setMemberReport(r))
+        .catch(e => console.warn('تعذّر جلب تقرير العضو:', e))
+        .finally(() => setReportLoading(false));
+    } else {
+      setMemberReport(null);
     }
   }, [selectedUserForEdit]);
 
@@ -2563,7 +2577,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                                     {inviterUser.username}
                                   </span>
                                   <span className="font-mono text-[10px] text-slate-500 block" dir="ltr">
-                                    {inviterUser.phone}
+                                    {(inviterUser as any).memberId || inviterUser.phone}
                                   </span>
                                 </div>
                               ) : u.referrerCode ? (
@@ -4699,6 +4713,125 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
             </div>
 
             <div className="p-5 space-y-4 font-semibold text-right text-xs text-slate-700">
+
+              {/* ===== تقرير العضو اليومي ===== */}
+              <div className="bg-[#0B1528] border border-blue-900/40 rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between pb-2 border-b border-blue-900/30">
+                  <div className="min-w-0">
+                    <p className="text-[13px] font-black text-white truncate">{selectedUserForEdit.username}</p>
+                    <p className="text-[10px] text-slate-500 font-mono mt-0.5" dir="ltr">
+                      {(selectedUserForEdit as any).memberId || '—'} · {selectedUserForEdit.vipTier || 'غير مفعّل'}
+                    </p>
+                  </div>
+                  <span className={`text-[9px] font-bold px-2.5 py-1 rounded-full ${
+                    selectedUserForEdit.isOnline
+                      ? 'bg-emerald-500/20 text-emerald-300'
+                      : 'bg-slate-500/20 text-slate-400'
+                  }`}>
+                    {selectedUserForEdit.isOnline ? 'نشط الآن' : 'غير متصل'}
+                  </span>
+                </div>
+
+                {reportLoading && (
+                  <div className="flex items-center justify-center gap-2 py-4">
+                    <div className="w-4 h-4 border-2 border-blue-500/30 border-t-blue-400 rounded-full animate-spin"></div>
+                    <span className="text-[10px] text-slate-400 font-bold">جاري تحميل التقرير...</span>
+                  </div>
+                )}
+
+                {!reportLoading && memberReport && (
+                  <>
+                    {/* أرباح اليوم مفصّلة */}
+                    <div>
+                      <p className="text-[10px] text-[#F39C12] font-black mb-2">📊 أرباح اليوم (مفصّلة)</p>
+                      <div className="bg-[#070D19] rounded-lg p-3 space-y-1.5">
+                        <div className="flex justify-between text-[10.5px]">
+                          <span className="text-slate-500">📋 أرباح مهامه ({memberReport.todayTasksDone}/{memberReport.todayTasksTotal})</span>
+                          <span className="text-white font-bold">{memberReport.todayGrossTasks.toFixed(2)}</span>
+                        </div>
+                        {memberReport.todaySupportDeducted > 0 && (
+                          <div className="flex justify-between text-[10.5px]">
+                            <span className="text-slate-500">🎯 خصم دعم الترقية</span>
+                            <span className="text-rose-400 font-bold">−{memberReport.todaySupportDeducted.toFixed(2)}</span>
+                          </div>
+                        )}
+                        {memberReport.todayCommission > 0 && (
+                          <div className="flex justify-between text-[10.5px]">
+                            <span className="text-slate-500">💰 عمولة الإحالة</span>
+                            <span className="text-emerald-400 font-bold">+{memberReport.todayCommission.toFixed(2)}</span>
+                          </div>
+                        )}
+                        <div className="flex justify-between text-[11.5px] pt-1.5 border-t border-blue-900/30">
+                          <span className="text-[#F39C12] font-black">صافي اليوم</span>
+                          <span className="text-[#7fd4e8] font-black">{memberReport.todayNet.toFixed(2)} USDT</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* الفريق والعضوية */}
+                    <div>
+                      <p className="text-[10px] text-[#F39C12] font-black mb-1.5">👥 الفريق والعضوية</p>
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-[10.5px]">
+                          <span className="text-slate-500">أعضاء فريقه</span>
+                          <span className="text-white font-bold">{memberReport.teamTotal} ({memberReport.teamActivated} مفعّل)</span>
+                        </div>
+                        <div className="flex justify-between text-[10.5px]">
+                          <span className="text-slate-500">نسبة عمولته</span>
+                          <span className="text-purple-300 font-bold">
+                            {typeof (selectedUserForEdit as any).commissionRate === 'number'
+                              ? (selectedUserForEdit as any).commissionRate : 10}%
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-[10.5px]">
+                          <span className="text-slate-500">نقاط الشرف</span>
+                          <span className="text-[#7fd4e8] font-bold">{Number((selectedUserForEdit as any).honorPoints) || 0}</span>
+                        </div>
+                        <div className="flex justify-between text-[10.5px]">
+                          <span className="text-slate-500">الرصيد الحالي</span>
+                          <span className="text-white font-bold">{(Number(selectedUserForEdit.earnings) || 0).toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between text-[10.5px]">
+                          <span className="text-slate-500">إجمالي أرباح المهام</span>
+                          <span className="text-white font-bold">{(Number(selectedUserForEdit.taskIncome) || 0).toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between text-[10.5px]">
+                          <span className="text-slate-500">أضافه</span>
+                          <span className={memberReport.referrerName ? 'text-emerald-400 font-bold' : 'text-slate-600 font-bold'}>
+                            {memberReport.referrerName
+                              ? `${memberReport.referrerName}${memberReport.referrerMemberId ? ' · ' + memberReport.referrerMemberId : ''}`
+                              : '— تسجيل مباشر'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* الحركة المالية */}
+                    <div>
+                      <p className="text-[10px] text-[#F39C12] font-black mb-1.5">💰 الحركة المالية</p>
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-[10.5px]">
+                          <span className="text-slate-500">إجمالي الإيداعات</span>
+                          <span className="text-emerald-400 font-bold">{memberReport.totalDeposits.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between text-[10.5px]">
+                          <span className="text-slate-500">إجمالي السحوبات</span>
+                          <span className="text-amber-400 font-bold">{memberReport.totalWithdrawals.toFixed(2)}</span>
+                        </div>
+                        {memberReport.supportTotal > 0 && (
+                          <div className="flex justify-between text-[10.5px]">
+                            <span className="text-slate-500">دعم الترقية</span>
+                            <span className="text-[#7fd4e8] font-bold">
+                              {memberReport.supportPaid} / {memberReport.supportTotal}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+
               <div className="p-3 bg-blue-50 border border-blue-100 rounded-xl space-y-1">
                 <span className="block text-[10px] text-blue-600 font-extrabold">المعرف الفريد (الهاتف):</span>
                 <span className="block font-mono font-bold text-slate-800" dir="ltr">{selectedUserForEdit.phone}</span>
