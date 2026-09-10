@@ -2200,6 +2200,151 @@ export async function updateWithdrawalStatus(withdrawalId: string, status: 'appr
 }
 
 // 8. Team (Invited users query - multi-level 1, 2, 3 supported)
+// ============================================================
+// تقرير العضو اليومي (للوحة الإدارة)
+//
+// يجمع في استدعاء واحد كل ما يخص العضو: مهام اليوم وأرباحها،
+// مصادر دخله اليوم مفصّلة (مهام / عمولة إحالة / خصم دعم الترقية)،
+// حالة فريقه، وحركته المالية — فيرى الأدمن صورة كاملة دون تنقّل.
+// ============================================================
+
+export interface MemberDailyReport {
+  todayTasksDone: number;
+  todayTasksTotal: number;
+  todayTaskEarnings: number;   // ما ربحه من مهامه اليوم (صافي بعد الخصم)
+  todayGrossTasks: number;     // قيمة مهامه اليوم قبل أي خصم
+  todaySupportDeducted: number; // ما خُصم اليوم لسداد دعم الترقية
+  todayCommission: number;     // عمولة الإحالة من نشاط فريقه اليوم
+  todayNet: number;            // صافي ما أُضيف لرصيده اليوم
+  teamTotal: number;
+  teamActivated: number;
+  referrerName: string | null;
+  referrerMemberId: string | null;
+  totalDeposits: number;
+  totalWithdrawals: number;
+  supportPaid: number;
+  supportTotal: number;
+}
+
+/** تاريخ اليوم بتوقيت مكة (YYYY-MM-DD) */
+function todayKeyRiyadh(): string {
+  const now = new Date();
+  const riyadh = new Date(now.getTime() + (3 * 60 - now.getTimezoneOffset()) * 60000);
+  return riyadh.toISOString().split('T')[0];
+}
+
+export async function getMemberDailyReport(user: any): Promise<MemberDailyReport> {
+  const phone = user?.phone || user?.id || '';
+  const today = todayKeyRiyadh();
+
+  const report: MemberDailyReport = {
+    todayTasksDone: 0, todayTasksTotal: 0, todayTaskEarnings: 0,
+    todayGrossTasks: 0, todaySupportDeducted: 0, todayCommission: 0, todayNet: 0,
+    teamTotal: 0, teamActivated: 0,
+    referrerName: null, referrerMemberId: null,
+    totalDeposits: 0, totalWithdrawals: 0,
+    supportPaid: Number(user?.upgradeSupportPaid) || 0,
+    supportTotal: Number(user?.upgradeSupportTotal) || 0,
+  };
+
+  if (!phone) return report;
+
+  // 1) مهام اليوم
+  try {
+    const tasks = await getUserTasks(phone);
+    const todayTasks = (tasks || []).filter(
+      (t: any) => t.claimDate === today && t.status !== 'withdrawn'
+    );
+    report.todayTasksTotal = todayTasks.length;
+
+    const done = todayTasks.filter((t: any) => t.status === 'completed');
+    report.todayTasksDone = done.length;
+
+    report.todayGrossTasks = done.reduce(
+      (s: number, t: any) => s + (parseFloat(String(t.reward).replace(/[^\d.]/g, '')) || 0), 0
+    );
+
+    // خصم دعم الترقية = 50% من قيمة المهام إن كان له دعم غير مكتمل
+    const remaining = Math.max(0, report.supportTotal - report.supportPaid);
+    if (report.supportTotal > 0 && remaining > 0) {
+      report.todaySupportDeducted = Math.min(
+        Number((report.todayGrossTasks * 0.5).toFixed(2)), remaining
+      );
+    }
+    report.todayTaskEarnings = Number(
+      (report.todayGrossTasks - report.todaySupportDeducted).toFixed(2)
+    );
+  } catch (e) {
+    console.warn('تعذّر جلب مهام اليوم:', e);
+  }
+
+  // 2) الفريق + عمولة اليوم المقدّرة
+  try {
+    const team = await getReferralTeam(user?.inviteCode || phone);
+    report.teamTotal = (team || []).length;
+
+    const isActivated = (m: any) => {
+      const t = (m?.vipTier || '').trim();
+      return t !== '' && t !== 'الباقة العادية' && t !== 'العضوية العادية' && t !== 'VIP0';
+    };
+    report.teamActivated = (team || []).filter(isActivated).length;
+
+    // العمولة اليومية المتوقعة من المستوى الأول النشط
+    const rate = (() => {
+      const r = Number(user?.commissionRate);
+      return (!isNaN(r) && r > 0 && r <= 100) ? r : 10;
+    })();
+
+    const level1Daily = (team || [])
+      .filter((m: any) => (m.teamLevel || 1) === 1 && isActivated(m))
+      .reduce((s: number, m: any) => s + (Number(m.dailyProfit) || 0), 0);
+
+    report.todayCommission = Number((level1Daily * (rate / 100)).toFixed(2));
+  } catch (e) {
+    console.warn('تعذّر جلب الفريق:', e);
+  }
+
+  // 3) من أضافه (المُحيل)
+  try {
+    const refCode = (user?.referrerCode || '').trim();
+    if (refCode) {
+      const variants = Array.from(new Set([refCode, refCode.toUpperCase(), refCode.toLowerCase()]));
+      for (const v of variants) {
+        const qs = await getDocs(query(collection(db, "users"), where("inviteCode", "==", v)));
+        if (!qs.empty) {
+          const d: any = qs.docs[0].data();
+          report.referrerName = d?.username || qs.docs[0].id;
+          report.referrerMemberId = d?.memberId || null;
+          break;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('تعذّر جلب بيانات المُحيل:', e);
+  }
+
+  // 4) الحركة المالية
+  try {
+    const deps = await getUserDeposits(phone);
+    report.totalDeposits = (deps || [])
+      .filter((d: any) => d.status === 'approved')
+      .reduce((s: number, d: any) => s + (Number(d.amount) || 0), 0);
+  } catch (e) {}
+
+  try {
+    const wds = await getUserWithdrawals(phone);
+    report.totalWithdrawals = (wds || [])
+      .filter((w: any) => w.status === 'approved')
+      .reduce((s: number, w: any) => s + (Number(w.amount) || 0), 0);
+  } catch (e) {}
+
+  report.todayNet = Number(
+    (report.todayTaskEarnings + report.todayCommission).toFixed(2)
+  );
+
+  return report;
+}
+
 export async function getReferralTeam(myInviteCodeOrPhone: string): Promise<(User & { teamLevel?: number })[]> {
   if (!myInviteCodeOrPhone) return [];
   const cleanInput = myInviteCodeOrPhone.trim().toUpperCase();
