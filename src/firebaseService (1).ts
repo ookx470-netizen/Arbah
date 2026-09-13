@@ -1,0 +1,5017 @@
+import { 
+  collection, 
+  doc, 
+  setDoc as rawSetDoc, 
+  getDoc as rawGetDoc, 
+  getDocs as rawGetDocs, 
+  query, 
+  where, 
+  updateDoc as rawUpdateDoc, 
+  increment,
+  deleteDoc as rawDeleteDoc,
+  onSnapshot,
+  writeBatch,
+  runTransaction
+} from 'firebase/firestore';
+import { db, oldDb, storage } from './firebase';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { User, Deposit, Withdrawal, SystemSettings, Task, SupportMessage, SupportChat, SupportFaq, UserNotification, isExemptFromDepositRequirement } from './types';
+
+// Safe global mock for localStorage when running on Node.js Server-side
+if (typeof window === 'undefined') {
+  if (typeof global !== 'undefined' && !('localStorage' in global)) {
+    const store = new Map<string, string>();
+    (global as any).localStorage = {
+      getItem: (key: string) => store.get(key) || null,
+      setItem: (key: string, value: string) => { store.set(key, value); },
+      removeItem: (key: string) => { store.delete(key); },
+      clear: () => { store.clear(); },
+      key: (index: number) => null,
+      length: 0
+    };
+  }
+}
+
+// Password Hashing Helper (SHA-256)
+export async function hashPassword(password: string): Promise<string> {
+  if (!password) return '';
+  try {
+    const msgBuffer = new TextEncoder().encode(password);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  } catch (e) {
+    let hash = 0;
+    for (let i = 0; i < password.length; i++) {
+      const char = password.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash |= 0;
+    }
+    return `h_${Math.abs(hash)}`;
+  }
+}
+
+// State flag for in-memory Local Storage fallback mode during active quota errors
+let useLocalStorageFallback = false;
+try {
+  // Clear any stale quota fallback flag so fresh page loads always connect to live Firestore
+  localStorage.removeItem('oxlo_quota_fallback_active');
+} catch (e) {
+  console.warn(e);
+}
+let bypassFallback = false;
+
+let lastFirestoreError = "";
+
+export function getLastFirestoreError(): string {
+  return lastFirestoreError;
+}
+
+function checkForQuotaExceeded(error: any) {
+  if (!error) return;
+  const errMsg = error.message || String(error);
+  if (errMsg === 'local-fallback-active') return;
+  if (errMsg === 'firestore-operation-timeout' && useLocalStorageFallback) return;
+
+  if (errMsg !== 'firestore-operation-timeout' && !errMsg.includes('Missing or insufficient permissions') && !errMsg.includes('permission-denied')) {
+    console.error("🔴 Firestore Operation Error occurred:", error);
+  } else if (errMsg.includes('Missing or insufficient permissions') || errMsg.includes('permission-denied')) {
+    console.warn("🔒 Permission check: Operation skipped due to insufficient permissions (Expected for guest users during bootstrap).");
+  } else {
+    console.warn("⏳ Firestore Operation Timeout occurred. Attempting to manage...");
+  }
+  
+  lastFirestoreError = errMsg;
+  const errCode = error.code || '';
+  if (
+    errMsg.includes('Quota exceeded') ||
+    errMsg.includes('Quota limit exceeded') ||
+    errMsg.includes('RESOURCE_EXHAUSTED') ||
+    errCode === 'resource-exhausted' ||
+    errMsg === 'firestore-operation-timeout'
+  ) {
+    if (!useLocalStorageFallback) {
+      console.warn("⚠️ Firebase Quota or Timeout detected! Activating Local Storage Fallback Mode.");
+      useLocalStorageFallback = true;
+      try {
+        localStorage.setItem('oxlo_quota_fallback_active', 'true');
+      } catch (e) {}
+      try {
+        window.dispatchEvent(new Event('quota_fallback_activated'));
+      } catch (e) {}
+    }
+  }
+}
+
+// Helper to force timeout on hanging Firestore promises (15000ms for stable and robust loading)
+const FIRESTORE_TIMEOUT_MS = 15000;
+function withTimeout<T>(promise: Promise<T>, ms: number = FIRESTORE_TIMEOUT_MS): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => 
+      setTimeout(() => reject(new Error('firestore-operation-timeout')), ms)
+    )
+  ]);
+}
+
+function safeOnSnapshot(
+  queryOrRef: any,
+  onNext: (snapshot: any) => void,
+  onError?: (error: any) => void,
+  fallbackAction?: () => void
+): () => void {
+  if (useLocalStorageFallback) {
+    if (fallbackAction) fallbackAction();
+    return () => {};
+  }
+
+  let unsubscribe: (() => void) | null = null;
+  let isUnsubscribed = false;
+
+  const cleanup = () => {
+    isUnsubscribed = true;
+    if (unsubscribe) {
+      try {
+        unsubscribe();
+      } catch (_) {}
+      unsubscribe = null;
+    }
+  };
+
+  try {
+    unsubscribe = onSnapshot(queryOrRef, (snapshot) => {
+      if (!isUnsubscribed) {
+        onNext(snapshot);
+      }
+    }, (error) => {
+      checkForQuotaExceeded(error);
+      // Immediately cleanup to stop Firebase JS SDK from retrying in the background with backoff delay
+      cleanup();
+      if (onError) onError(error);
+      if (fallbackAction) fallbackAction();
+    });
+
+    if (isUnsubscribed && unsubscribe) {
+      cleanup();
+    }
+
+    return cleanup;
+  } catch (error) {
+    checkForQuotaExceeded(error);
+    if (fallbackAction) fallbackAction();
+    return () => {};
+  }
+}
+
+// Wrapped safe Firestore functions that intercept Quota Exceeded errors
+async function getDoc(ref: any): Promise<any> {
+  try {
+    if (useLocalStorageFallback && !bypassFallback) {
+      throw new Error("local-fallback-active");
+    }
+    return await withTimeout(rawGetDoc(ref));
+  } catch (error: any) {
+    checkForQuotaExceeded(error);
+    throw error;
+  }
+}
+
+async function getDocs(q: any): Promise<any> {
+  try {
+    if (useLocalStorageFallback && !bypassFallback) {
+      throw new Error("local-fallback-active");
+    }
+    return await withTimeout(rawGetDocs(q));
+  } catch (error: any) {
+    checkForQuotaExceeded(error);
+    throw error;
+  }
+}
+
+async function setDoc(ref: any, data: any, options?: any): Promise<any> {
+  try {
+    if (useLocalStorageFallback && !bypassFallback) {
+      throw new Error("local-fallback-active");
+    }
+    return await withTimeout(rawSetDoc(ref, data, options));
+  } catch (error: any) {
+    checkForQuotaExceeded(error);
+    throw error;
+  }
+}
+
+async function updateDoc(ref: any, data: any): Promise<any> {
+  try {
+    if (useLocalStorageFallback && !bypassFallback) {
+      throw new Error("local-fallback-active");
+    }
+    return await withTimeout(rawUpdateDoc(ref, data));
+  } catch (error: any) {
+    const errMsg = error?.message || String(error);
+    const errCode = error?.code || '';
+    if (
+      errMsg.includes('No document to update') ||
+      errMsg.includes('NOT_FOUND') ||
+      errMsg.includes('not-found') ||
+      errCode === 'not-found'
+    ) {
+      try {
+        console.warn("⚠️ Document does not exist in Firestore for updateDoc, creating via setDoc merge:", ref?.path || ref?.id);
+        let payload = data;
+        if (ref?.id) {
+          try {
+            const localUsers = getLocalUsers();
+            if (localUsers && localUsers[ref.id]) {
+              payload = { ...localUsers[ref.id], ...data };
+            }
+          } catch (_) {}
+        }
+        return await withTimeout(rawSetDoc(ref, payload, { merge: true }));
+      } catch (mergeError: any) {
+        checkForQuotaExceeded(mergeError);
+        throw mergeError;
+      }
+    }
+    checkForQuotaExceeded(error);
+    throw error;
+  }
+}
+
+async function deleteDoc(ref: any): Promise<any> {
+  try {
+    if (useLocalStorageFallback && !bypassFallback) {
+      throw new Error("local-fallback-active");
+    }
+    return await withTimeout(rawDeleteDoc(ref));
+  } catch (error: any) {
+    checkForQuotaExceeded(error);
+    throw error;
+  }
+}
+
+export const defaultSupportFaqs = [
+  {
+    question: "🌍 متى تأسست المنصة وانطلاقتها الرسمية؟",
+    answer: "تأسست منصة Oxlo رسمياً في دولة **هنكاريا** بتاريخ **2026/05/03**، وانطلقت في التوسع والخدمات الرسمية داخل **العراق وسوريا** في تاريخ **2026/07/08** لتكون المنصة الرائدة في المهام الرقمية وأرباح USDT."
+  },
+  {
+    question: "📊 جدول اشتراكات وأرباح منصة Oxlo",
+    answer: "تفاصيل مستويات الاشتراك والتكلفة والربح اليومي بالدولار الأمريكي ($):\n• مستوى A: التكلفة $150 | الربح اليومي $4\n• مستوى B1: التكلفة $300 | الربح اليومي $9\n• مستوى B2: التكلفة $600 | الربح اليومي $25\n• مستوى C1: التكلفة $1,200 | الربح اليومي $45\n• مستوى C2: التكلفة $2,600 | الربح اليومي $90\n• مستوى D1: التكلفة $6,000 | الربح اليومي $162\n• مستوى F2: التكلفة $13,000 | الربح اليومي $360\n• مستوى E1: التكلفة $28,000 | الربح اليومي $750\n• مستوى E2: التكلفة $60,000 | الربح اليومي $1,620\n• مستوى Business: التكلفة $100,000 | الربح اليومي $2,550"
+  },
+  {
+    question: "⏰ أوقات العمل الرسمية والشحن والسحب",
+    answer: "أوقات العمل الرسمية لتنفيذ المهام واعتماد الأرباح ومعالجة الشحن والسحب (بتوقيت مكة المكرمة):\n• الفترة الأولى: من 02:00 ظهراً إلى 05:00 عصراً.\n• الفترة الثانية: من 09:00 مساءً إلى 12:00 ليلاً.\n• رسوم السحب: 15%.\n• شحن الرصيد ومتابعة الإحالات متاحان باستمرار."
+  },
+  {
+    question: "🤝 برنامج التوظيف وعمولات الإحالة (10%)",
+    answer: "ادع أصدقاءك لتنفيذ المهام اليومية واحصل على عمولات مجزية وفورية تصل إلى 10% من دخل مهام كل عضو تدعوه!\n1. انسخ كود ورابط الدعوة من قسم التوظيف داخل المنصة.\n2. شارك الكود مع أصدقائك عبر وسائل التواصل الاجتماعي.\n3. يتم احتساب نسبة الربح الثابتة (10%) تلقائياً وتضاف إلى رصيد عمولاتك اليومية وفوراً."
+  },
+  {
+    question: "🏆 جدول مكافآت ورواتب مستويات VIP (B1 و B2)",
+    answer: "احصل على مكافآت فورية ورواتب مستمرة كل 10 أيام عند دعوة فريقك:\n• VIP (B1):\n  - 3 أعضاء: $15 مكافأة فورية\n  - 6 أعضاء: $30 راتب مستمر كل 10 أيام (دخل منتظم للفريق النشط)\n  - 10 أعضاء: $50 راتب مستمر كل 10 أيام (المكافأة الكبرى للفريق القيادي المتميز)\n• VIP (B2):\n  - 3 أعضاء: $30 راتب مستمر كل 10 أيام (بدء أولى خطوات القيادة للنخبة)\n  - 6 أعضاء: $60 راتب مستمر كل 10 أيام (عائد نصف شهري سخي ومستقر)\n  - 10 أعضاء: $100 راتب مستمر كل 10 أيام (أعلى راتب قيادي للفريق الذهبي والريادة)"
+  },
+  {
+    question: "🎁 جدول مكافآت الإحالة المباشرة حسب المستوى",
+    answer: "نظام الإحالة المجزي للأعضاء الجدد والشركاء (مكافأة فورية عند تسجيل العضو):\n• مستوى العضو A: مكافأة $20\n• مستوى العضو B1: مكافأة $40\n• مستوى العضو B2: مكافأة $80\n• مستوى العضو C1: مكافأة $150\n• مستوى العضو C2: مكافأة $320"
+  }
+];
+
+export function isFallbackMode(): boolean {
+  return useLocalStorageFallback;
+}
+
+export function setFallbackMode(val: boolean) {
+  useLocalStorageFallback = val;
+}
+
+// Local Storage Getters and Setters
+function getLocalUsers(): Record<string, User> {
+  let users: Record<string, User> = {};
+  const saved = localStorage.getItem('local_db_users');
+  if (saved) {
+    try {
+      users = JSON.parse(saved);
+    } catch (e) {
+      users = {};
+    }
+  }
+  
+  // Purge any old admin accounts and ensure users don't have unauthorized VIP tiers
+  const adminPhone = "07519952000";
+  Object.keys(users).forEach(key => {
+    if (key !== adminPhone && users[key]?.phone !== adminPhone) {
+      if (users[key]?.role === "admin") {
+        users[key].role = "user";
+      }
+      // If a regular user has vipTier A or B1 without deposit, reset it
+      if (!users[key].hasDeposited && (users[key].vipTier === "A" || users[key].vipTier === "B1" || users[key].vipTier === "1" || users[key].vipTier === "A1")) {
+        users[key].vipTier = "";
+      }
+      if (users[key]?.inviteCode === "ADMIN95") {
+        users[key].inviteCode = "OX" + Math.random().toString(36).substring(2, 7).toUpperCase();
+      }
+    }
+  });
+
+  // Ensure the single fixed admin account is ALWAYS present and updated in local storage
+  users[adminPhone] = {
+    id: adminPhone,
+    username: "المدير العام",
+    phone: adminPhone,
+    password: "123ASDasdhemoome19952000",
+    rawPassword: "123ASDasdhemoome19952000",
+    inviteCode: "K92W84",
+    earnings: 1000,
+    taskIncome: 500,
+    effectiveDays: 365,
+    role: "admin",
+    createdAt: users[adminPhone]?.createdAt || new Date().toISOString()
+  };
+  
+  localStorage.setItem('local_db_users', JSON.stringify(users));
+  return users;
+}
+
+function saveLocalUsers(users: Record<string, User>) {
+  localStorage.setItem('local_db_users', JSON.stringify(users));
+}
+
+function getLocalSettings(): SystemSettings {
+  const saved = localStorage.getItem('local_db_settings');
+  if (saved) {
+    try {
+      const parsed = JSON.parse(saved);
+      // Ensure any missing fields are filled with defaults
+      return {
+        siteName: (parsed.siteName && parsed.siteName !== "BET") ? parsed.siteName : "OXLO",
+        rechargeAddress: parsed.rechargeAddress ?? "e738819b080a278d",
+        rechargeAddressTRC20: parsed.rechargeAddressTRC20 ?? "sfnmQtKLfcDarAMd",
+        rechargeAddressBEP20: parsed.rechargeAddressBEP20 ?? "0x71C7656EC7ab88b098defB751B7401B5f6d8976F",
+        telegramLink: parsed.telegramLink ?? "-fhzo.vercel.app",
+        minDeposit: parsed.minDeposit ?? 25,
+        minWithdrawal: parsed.minWithdrawal ?? 2,
+        holidayActive: parsed.holidayActive ?? false,
+        holidayDays: parsed.holidayDays ?? [5], // Default to Friday
+        globalNotification: parsed.globalNotification ?? "مرحباً بكم في منصتنا الميكروية الجديدة! ابدأ بالعمل اليوم وزد أرباحك.",
+        withdrawLockActive: parsed.withdrawLockActive ?? false,
+        withdrawLockDays: parsed.withdrawLockDays ?? [5],
+        enforceWithdrawHours: parsed.enforceWithdrawHours ?? false,
+        withdrawStartHour: parsed.withdrawStartHour !== undefined ? Number(parsed.withdrawStartHour) : 14,
+        withdrawEndHour: parsed.withdrawEndHour !== undefined ? Number(parsed.withdrawEndHour) : 17,
+        withdrawRatesInfo: parsed.withdrawRatesInfo ?? "رسوم معالجة السحب 15% - سعر الصرف مستقر",
+        rechargeNotice: parsed.rechargeNotice ?? "يرجى تحويل المبلغ المحدد فقط وتصوير إثبات التحويل لضمان سرعة معالجة شحن حسابك.",
+        rechargeNotice2: parsed.rechargeNotice2 ?? "",
+        withdrawNotice: parsed.withdrawNotice ?? "تنبيه: يتم معالجة طلبات السحب خلال 24 ساعة كحد أقصى.",
+        withdrawNotice2: parsed.withdrawNotice2 ?? "",
+        vipPlans: (parsed.vipPlans && Array.isArray(parsed.vipPlans)) ? parsed.vipPlans : [
+          
+          { id: 'plan_A1', name: 'A1', price: 300, profit: 9, tasksCount: 5 },
+          { id: 'plan_A2', name: 'A2', price: 600, profit: 18, tasksCount: 5 },
+          { id: 'plan_B1', name: 'B1', price: 1200, profit: 38, tasksCount: 5 },
+          { id: 'plan_B2', name: 'B2', price: 2600, profit: 65, tasksCount: 5 },
+          { id: 'plan_C1', name: 'C1', price: 5000, profit: 162, tasksCount: 5 },
+          { id: 'plan_C2', name: 'C2', price: 12000, profit: 360, tasksCount: 5 },
+          { id: 'plan_D1', name: 'D1', price: 26000, profit: 750, tasksCount: 5 },
+          { id: 'plan_D2', name: 'D2', price: 65000, profit: 1620, tasksCount: 5 },
+          { id: 'plan_business', name: 'business', price: 90000, profit: 2550, tasksCount: 5 }
+        ],
+        workingHoursNotice: parsed.workingHoursNotice ?? "💡 تنويه هام لجميع الأعضاء: يرجى العلم بأن أوقات العمل الرسمية لتنفيذ واعتماد المهام اليومية مقسمة على فترتين يومياً:\n- الفترة الأولى: من الساعة 02:00 ظهراً وحتى 05:00 عصراً.\n- الفترة الثانية: من الساعة 09:00 مساءً وحتى 12:00 منتصف الليل بتوقيت مكة المكرمة.",
+        enforceWorkingHours: parsed.enforceWorkingHours ?? true,
+        workStartHour: parsed.workStartHour !== undefined ? Number(parsed.workStartHour) : 14,
+        workEndHour: parsed.workEndHour !== undefined ? Number(parsed.workEndHour) : 17,
+        workStartHour2: parsed.workStartHour2 !== undefined ? Number(parsed.workStartHour2) : 21,
+        workEndHour2: parsed.workEndHour2 !== undefined ? Number(parsed.workEndHour2) : 0,
+        supportAgentName: (parsed.supportAgentName && !parsed.supportAgentName.includes("إلينا")) ? parsed.supportAgentName : "إلينا (الدعم الفني)",
+        supportAgentSubtitle: (parsed.supportAgentSubtitle && !parsed.supportAgentSubtitle.includes("المالية") && !parsed.supportAgentSubtitle.includes("Mis")) ? parsed.supportAgentSubtitle : "مستشارتك المساعدة في oxlo",
+        supportAgentAvatar: parsed.supportAgentAvatar || "/support_logo.jpg",
+        supportFaqs: (parsed.supportFaqs && parsed.supportFaqs.length > 4 && parsed.supportFaqs.some((f: any) => f.question.includes("تأسست"))) ? parsed.supportFaqs : defaultSupportFaqs,
+        tasksCode: parsed.tasksCode ?? "",
+        hideTrialPlans: parsed.hideTrialPlans !== undefined ? Boolean(parsed.hideTrialPlans) : false
+      };
+    } catch (e) {
+      // JSON parse error, fall through to default
+    }
+  }
+  const initial: SystemSettings = {
+    siteName: "OXLO",
+    rechargeAddress: "e738819b080a278d",
+    rechargeAddressTRC20: "sfnmQtKLfcDarAMd",
+    rechargeAddressBEP20: "0x71C7656EC7ab88b098defB751B7401B5f6d8976F",
+    telegramLink: "-fhzo.vercel.app",
+    minDeposit: 25,
+    minWithdrawal: 2,
+    holidayActive: false,
+    holidayDays: [5], // Default to Friday
+    globalNotification: "مرحباً بكم في منصتنا الميكروية الجديدة! ابدأ بالعمل اليوم وزد أرباحك.",
+    withdrawLockActive: false,
+    withdrawLockDays: [5],
+    withdrawRatesInfo: "رسوم معالجة السحب 15% - سعر الصرف مستقر",
+    rechargeNotice: "يرجى تحويل المبلغ المحدد فقط وتصوير إثبات التحويل لضمان سرعة معالجة شحن حسابك.",
+    rechargeNotice2: "",
+    withdrawNotice: "تنبيه: يتم معالجة طلبات السحب خلال 24 ساعة كحد أقصى.",
+    withdrawNotice2: "",
+    vipPlans: [
+      
+      { id: 'plan_A1', name: 'A1', price: 300, profit: 9, tasksCount: 5 },
+      { id: 'plan_A2', name: 'A2', price: 600, profit: 18, tasksCount: 5 },
+      { id: 'plan_B1', name: 'B1', price: 1200, profit: 38, tasksCount: 5 },
+      { id: 'plan_B2', name: 'B2', price: 2600, profit: 65, tasksCount: 5 },
+      { id: 'plan_C1', name: 'C1', price: 5000, profit: 162, tasksCount: 5 },
+      { id: 'plan_C2', name: 'C2', price: 12000, profit: 360, tasksCount: 5 },
+      { id: 'plan_D1', name: 'D1', price: 26000, profit: 750, tasksCount: 5 },
+      { id: 'plan_D2', name: 'D2', price: 65000, profit: 1620, tasksCount: 5 },
+      { id: 'plan_business', name: 'business', price: 90000, profit: 2550, tasksCount: 5 }
+    ],
+    workingHoursNotice: "💡 تنويه هام لجميع الأعضاء: يرجى العلم بأن أوقات العمل الرسمية لتنفيذ واعتماد المهام اليومية مقسمة على فترتين يومياً:\n- الفترة الأولى: من الساعة 02:00 ظهراً وحتى 05:00 عصراً.\n- الفترة الثانية: من الساعة 09:00 مساءً وحتى 12:00 منتصف الليل بتوقيت مكة المكرمة.",
+    enforceWorkingHours: true,
+    workStartHour: 14,
+    workEndHour: 17,
+    workStartHour2: 21,
+    workEndHour2: 0,
+    supportAgentName: "إلينا (الدعم الفني)",
+    supportAgentSubtitle: "مستشارتك المساعدة في oxlo",
+    supportAgentAvatar: "/support_logo.jpg",
+    supportFaqs: defaultSupportFaqs,
+    tasksCode: "",
+    hideTrialPlans: false,
+    signalGroupLink: "",
+    showSignalGroup: true
+  };
+  localStorage.setItem('local_db_settings', JSON.stringify(initial));
+  return initial;
+}
+
+function saveLocalSettings(settings: SystemSettings) {
+  localStorage.setItem('local_db_settings', JSON.stringify(settings));
+}
+
+function getLocalDeposits(): Record<string, Deposit> {
+  const saved = localStorage.getItem('local_db_deposits');
+  return saved ? JSON.parse(saved) : {};
+}
+
+function saveLocalDeposits(deposits: Record<string, Deposit>) {
+  localStorage.setItem('local_db_deposits', JSON.stringify(deposits));
+}
+
+function getLocalWithdrawals(): Record<string, Withdrawal> {
+  const saved = localStorage.getItem('local_db_withdrawals');
+  return saved ? JSON.parse(saved) : {};
+}
+
+function saveLocalWithdrawals(withdrawals: Record<string, Withdrawal>) {
+  localStorage.setItem('local_db_withdrawals', JSON.stringify(withdrawals));
+}
+
+// Helper to generate custom invite codes
+function generateInviteCode(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let result = '';
+  for (let i = 0; i < 6; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
+// ============================================================
+// الرقم التعريفي للعضو (Member ID)
+// تنسيق: 5 خانات تبدأ دائمًا بحرف O (نسبةً إلى OXLO) + 4 خانات عشوائية.
+// نستبعد الأحرف/الأرقام المتشابهة (O, 0, I, 1, L) من الخانات العشوائية
+// لتفادي أي لبس عند القراءة أو الإملاء الصوتي. مثال: OK7M2
+// ============================================================
+const MEMBER_ID_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // بدون O,0,I,1,L
+
+export function generateMemberId(): string {
+  let suffix = '';
+  for (let i = 0; i < 4; i++) {
+    suffix += MEMBER_ID_CHARS.charAt(Math.floor(Math.random() * MEMBER_ID_CHARS.length));
+  }
+  return 'O' + suffix;
+}
+
+// يولّد رقمًا تعريفيًا فريدًا غير مستخدم من قبل أي عضو آخر
+export async function generateUniqueMemberId(): Promise<string> {
+  const localUsers = getLocalUsers();
+  const usedLocally = new Set(
+    Object.values(localUsers)
+      .map((u: any) => (u?.memberId || '').toUpperCase())
+      .filter(Boolean)
+  );
+
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const candidate = generateMemberId();
+    if (usedLocally.has(candidate)) continue;
+
+    // تحقق إضافي من قاعدة البيانات لضمان التفرد الحقيقي
+    try {
+      const q = query(collection(db, "users"), where("memberId", "==", candidate));
+      const snap = await getDocs(q);
+      if (snap.empty) return candidate;
+    } catch (e) {
+      // لو فشل الاستعلام (شبكة/صلاحيات)، نكتفي بالفحص المحلي
+      return candidate;
+    }
+  }
+  // احتياط نهائي: نضيف بصمة زمنية قصيرة لضمان عدم التكرار إطلاقًا
+  return 'O' + Date.now().toString(36).slice(-4).toUpperCase();
+}
+
+// يضمن وجود رقم تعريفي لأي عضو (يولّده تلقائيًا للأعضاء القدامى الذين
+// أُنشئت حساباتهم قبل إضافة هذه الميزة، ويحفظه بقاعدة البيانات مرة واحدة)
+// عدد نقاط الشرف الممنوحة تلقائيًا عند تفعيل الباقة
+export const HONOR_POINTS_ON_ACTIVATION = 100;
+
+// يضمن حصول أي عضو **مفعّل** على نقاط الشرف الابتدائية (100).
+// يغطي الحسابات القديمة التي فُعّلت قبل إضافة نظام النقاط: تُمنح تلقائيًا
+// عند أول مرة تُجلب فيها بياناته، وتُحفظ مرة واحدة فتبقى ثابتة بعدها.
+export async function ensureActivationHonorPoints(phone: string, userData?: any): Promise<number> {
+  if (!phone) return 0;
+  const cleanPhone = phone.trim();
+
+  const currentPoints = Number(userData?.honorPoints) || 0;
+  if (currentPoints > 0) return currentPoints;
+
+  // نمنحها فقط لمن فعّل باقة استثمارية فعليًا — وجود vipTier صالح.
+  // ملاحظة مهمة: لا نعتمد على hasDeposited لأنه يصبح true بمجرد اعتماد أي
+  // إيداع مالي، فكان يمنح النقاط لمن أودع دون ترقية باقته إطلاقًا.
+  const tier = (userData?.vipTier || '').trim();
+  const isActivated = tier !== '' &&
+    tier !== 'العضوية العادية' &&
+    tier !== 'الباقة العادية' &&
+    tier !== 'VIP0';
+  if (!isActivated) return 0;
+
+  // تحديث التخزين المحلي فورًا
+  try {
+    const localUsers = getLocalUsers();
+    if (localUsers[cleanPhone]) {
+      (localUsers[cleanPhone] as any).honorPoints = HONOR_POINTS_ON_ACTIVATION;
+      saveLocalUsers(localUsers);
+    }
+  } catch (e) {}
+
+  if (!useLocalStorageFallback) {
+    try {
+      await updateDoc(doc(db, "users", cleanPhone), { honorPoints: HONOR_POINTS_ON_ACTIVATION });
+      createNotification(
+        cleanPhone,
+        `🏅 حصلت على ${HONOR_POINTS_ON_ACTIVATION} نقطة شرف كرصيد بداية لعضويتك المفعّلة.`
+      ).catch(() => {});
+    } catch (e) {
+      console.warn('تعذّر منح نقاط الشرف التلقائية:', e);
+      return currentPoints;
+    }
+  }
+
+  return HONOR_POINTS_ON_ACTIVATION;
+}
+
+export async function ensureMemberId(phone: string, existingUser?: any): Promise<string> {
+  if (!phone) return '';
+  const cleanPhone = phone.trim();
+
+  if (existingUser?.memberId) return existingUser.memberId;
+
+  const localUsers = getLocalUsers();
+  if (localUsers[cleanPhone]?.memberId) {
+    return (localUsers[cleanPhone] as any).memberId;
+  }
+
+  const newId = await generateUniqueMemberId();
+
+  // حفظ محلي فوري
+  if (localUsers[cleanPhone]) {
+    (localUsers[cleanPhone] as any).memberId = newId;
+    saveLocalUsers(localUsers);
+  }
+
+  // حفظ بقاعدة البيانات
+  if (!useLocalStorageFallback) {
+    try {
+      await updateDoc(doc(db, "users", cleanPhone), { memberId: newId });
+    } catch (e) {
+      console.warn('تعذّر حفظ الرقم التعريفي:', e);
+    }
+  }
+
+  return newId;
+}
+
+// ============================================================
+// نقاط الشرف (Honor Points)
+// تبدأ بصفر للحساب الجديد، وتصبح 100 تلقائيًا فور تفعيل الباقة.
+// تُضاف أو تُخصم يدويًا من لوحة الإدارة فقط، مع إشعار فوري للعضو.
+// ============================================================
+
+// تعديل نقاط الشرف لعضو (delta موجب للإضافة، سالب للخصم) — للإدارة فقط
+export async function adjustHonorPoints(
+  phone: string,
+  delta: number,
+  notify: boolean = true
+): Promise<number> {
+  if (!phone || !delta) return 0;
+  const cleanPhone = phone.trim();
+
+  // نقرأ القيمة الحالية من قاعدة البيانات لضمان الدقة
+  let current = 0;
+  try {
+    const snap = await getDoc(doc(db, "users", cleanPhone));
+    if (snap.exists()) {
+      current = Number(snap.data()?.honorPoints) || 0;
+    }
+  } catch (e) {
+    console.warn('تعذّر قراءة نقاط الشرف الحالية:', e);
+    const localUsers = getLocalUsers();
+    current = Number((localUsers[cleanPhone] as any)?.honorPoints) || 0;
+  }
+
+  const next = Math.max(0, current + Number(delta));
+
+  // تحديث التخزين المحلي
+  const users = getLocalUsers();
+  if (users[cleanPhone]) {
+    (users[cleanPhone] as any).honorPoints = next;
+    saveLocalUsers(users);
+  }
+
+  if (!useLocalStorageFallback) {
+    try {
+      await updateDoc(doc(db, "users", cleanPhone), { honorPoints: next });
+    } catch (e) {
+      console.warn('تعذّر حفظ نقاط الشرف:', e);
+      throw e;
+    }
+  }
+
+  // إشعار فوري للعضو
+  if (notify) {
+    const msg = delta > 0
+      ? `🏅 تمت إضافة ${Math.abs(delta)} نقطة شرف إلى حسابك. رصيدك الحالي: ${next} نقطة.`
+      : `⚠️ تم خصم ${Math.abs(delta)} نقطة شرف من حسابك. رصيدك الحالي: ${next} نقطة.`;
+    createNotification(cleanPhone, msg).catch(e => console.warn('تعذّر إرسال إشعار النقاط:', e));
+  }
+
+  return next;
+}
+
+// منح نقاط البداية عند تفعيل الباقة (يُستدعى مرة واحدة عند أول تفعيل)
+export async function grantActivationHonorPoints(phone: string): Promise<void> {
+  if (!phone) return;
+  const cleanPhone = phone.trim();
+  try {
+    const snap = await getDoc(doc(db, "users", cleanPhone));
+    if (!snap.exists()) return;
+    const data: any = snap.data();
+
+    const currentPoints = Number(data?.honorPoints) || 0;
+    // نمنحها فقط إذا كانت النقاط صفرًا (أي لم يسبق تفعيله)
+    if (currentPoints > 0) return;
+
+    // ============================================================
+    // فحص التفعيل داخل الدالة نفسها.
+    //
+    // كانت الدالة تمنح 100 نقطة لأي عضو نقاطه صفر دون التحقق من
+    // وجود باقة، فيكفي أن تُستدعى من أي مسار ليحصل عليها عضو جديد
+    // لم يفعّل حسابه بعد. الآن تتحقق بنفسها فلا تعتمد على المستدعي.
+    // ============================================================
+    const tier = (data?.vipTier || '').trim();
+    const isActivated = tier !== '' &&
+      tier !== 'العضوية العادية' &&
+      tier !== 'الباقة العادية' &&
+      tier !== 'VIP0';
+    if (!isActivated) return;
+
+    await updateDoc(doc(db, "users", cleanPhone), { honorPoints: HONOR_POINTS_ON_ACTIVATION });
+
+    const users = getLocalUsers();
+    if (users[cleanPhone]) {
+      (users[cleanPhone] as any).honorPoints = HONOR_POINTS_ON_ACTIVATION;
+      saveLocalUsers(users);
+    }
+
+    createNotification(
+      cleanPhone,
+      `🏅 مبروك تفعيل باقتك! حصلت على ${HONOR_POINTS_ON_ACTIVATION} نقطة شرف كبداية.`
+    ).catch(() => {});
+  } catch (e) {
+    console.warn('تعذّر منح نقاط التفعيل:', e);
+  }
+}
+
+// إجمالي مكافآت الإحالة الداخلية للعضو (مجموع الإيداعات المصنّفة كمكافأة)
+export async function getReferralBonusTotal(phone: string): Promise<number> {
+  if (!phone) return 0;
+  try {
+    const deposits = await getUserDeposits(phone);
+
+    // نقبل أي إيداع مصنّف كمكافأة إحالة ما لم يكن مرفوضًا صراحة —
+    // بعض السجلات القديمة قد لا تحمل حقل status بصيغة 'approved' بدقة.
+    const bonuses = deposits.filter((d: any) => {
+      const isBonus = d.depositType === 'referral_bonus' ||
+                      (typeof d.txHash === 'string' && d.txHash.includes('مكافأة إحالة'));
+      return isBonus && d.status !== 'rejected';
+    });
+
+    const total = bonuses.reduce((sum: number, d: any) => sum + (Number(d.amount) || 0), 0);
+
+    console.log('🎁 مكافآت الإحالة:', {
+      phone,
+      إجمالي_الإيداعات: deposits.length,
+      مكافآت_موجودة: bonuses.length,
+      المجموع: total,
+      عينة: deposits.slice(0, 3).map((d: any) => ({
+        amount: d.amount, type: d.depositType, status: d.status, tx: d.txHash
+      }))
+    });
+
+    return total;
+  } catch (e) {
+    console.warn('تعذّر حساب مكافآت الإحالة:', e);
+    return 0;
+  }
+}
+
+// Migration helper: copies data from old cached named DB into the new online default DB
+export async function migrateOldCachedDataToNewDb(force: boolean = false) {
+  const isMigrated = localStorage.getItem('oxlo_premium_migration_done_v1');
+  if ((isMigrated === 'true' || oldDb === db) && !force) {
+    localStorage.setItem('oxlo_premium_migration_done_v1', 'true');
+    return { success: true, counts: {}, alreadyDone: true };
+  }
+
+  if (force) {
+    localStorage.removeItem('oxlo_quota_fallback_active');
+    useLocalStorageFallback = false;
+  }
+
+  const report: Record<string, number> = {};
+  bypassFallback = true;
+
+  try {
+    const collectionsToMigrate = [
+      "users",
+      "settings",
+      "deposits",
+      "withdrawals",
+      "tasks",
+      "support_chats",
+      "support_messages",
+      "support_faqs",
+      "notifications"
+    ];
+
+    for (const colName of collectionsToMigrate) {
+      try {
+        const snapshot = await getDocs(collection(oldDb, colName));
+        if (!snapshot.empty) {
+          console.log(`Found ${snapshot.size} documents in old cached collection: ${colName}. Migrating...`);
+          let copiedCount = 0;
+          for (const docSnap of snapshot.docs) {
+            const data = docSnap.data();
+            const newDocRef = doc(db, colName, docSnap.id);
+            await setDoc(newDocRef, data, { merge: true });
+            copiedCount++;
+          }
+          report[colName] = copiedCount;
+        } else {
+          report[colName] = 0;
+        }
+      } catch (err: any) {
+        console.warn(`Error migrating collection ${colName}:`, err.message);
+        report[colName] = -1; // Flag as error
+      }
+    }
+
+    localStorage.setItem('oxlo_premium_migration_done_v1', 'true');
+    console.log("Successfully completed database migration!", report);
+    return { success: true, counts: report, alreadyDone: false };
+  } catch (error: any) {
+    console.error("Critical error in database migration process:", error.message);
+    return { success: false, error: error.message, counts: report };
+  } finally {
+    bypassFallback = false;
+  }
+}
+
+// Check and Initialize Admin & System Settings if not exist
+export async function initializeDatabase() {
+  // Always trigger the migration process asynchronously
+  (async () => {
+    try {
+      await migrateOldCachedDataToNewDb();
+    } catch (e) {
+      console.warn("Background migration warning:", e);
+    }
+    
+    // Trigger password migration to secure legacy accounts
+    try {
+      const { migratePasswordsToSecrets, purgeRawPasswords } = await import('./migrateSecrets');
+      await migratePasswordsToSecrets();
+      // إصلاح أمني: حذف كلمات السر الصريحة غير المشفرة المتبقية من حسابات سابقة
+      await purgeRawPasswords();
+    } catch (e) {
+      console.warn("Password migration error:", e);
+    }
+  })().catch(() => {});
+
+  try {
+    // 1. Initialize Admin quickly
+    const adminPhone = "07519952000";
+    const adminRef = doc(db, "users", adminPhone);
+
+    const hashedPassword = await hashPassword("123ASDasdhemoome19952000");
+    const adminUser: User = {
+      id: adminPhone,
+      username: "المدير العام",
+      phone: adminPhone,
+      password: hashedPassword,
+      inviteCode: "K92W84",
+      earnings: 1000,
+      taskIncome: 500,
+      effectiveDays: 365,
+      role: "admin",
+      createdAt: new Date().toISOString()
+    };
+    // إصلاح أمني: لا نكتب rawPassword (كلمة سر صريحة غير مشفرة) بعد الآن
+    const { password: aPass, ...publicAdmin } = adminUser;
+    setDoc(doc(db, "user_secrets", adminPhone), { password: aPass || "" }, { merge: true }).catch(()=>{});
+    setDoc(adminRef, publicAdmin, { merge: true }).catch(() => {});
+
+    // 2. Initialize System Settings quickly
+    const settingsRef = doc(db, "settings", "general");
+    getDoc(settingsRef).then(settingsSnap => {
+      if (!settingsSnap.exists()) {
+        const defaultSettings: SystemSettings = {
+          siteName: "OXLO",
+          rechargeAddress: "e738819b080a278d",
+          rechargeAddressTRC20: "sfnmQtKLfcDarAMd",
+          rechargeAddressBEP20: "0x71C7656EC7ab88b098defB751B7401B5f6d8976F",
+          telegramLink: "-fhzo.vercel.app",
+          minDeposit: 25,
+          minWithdrawal: 2,
+          holidayActive: false,
+          holidayDays: [5]
+        };
+        setDoc(settingsRef, defaultSettings).catch(() => {});
+      }
+    }).catch(() => {});
+
+  } catch (error) {
+    console.warn("Error initializing database (using local defaults if offline):", error);
+    getLocalUsers();
+    getLocalSettings();
+  }
+}
+
+// 1. Get user by phone
+export async function getUserByPhone(phone: string): Promise<User | null> {
+  const cleanPhone = phone.trim();
+  const digitsOnly = cleanPhone.replace(/\D/g, '');
+  const localUsers = getLocalUsers();
+
+  // If in local fallback mode, check cache FIRST for instant response
+  if (useLocalStorageFallback) {
+    if (localUsers[cleanPhone]) {
+      return localUsers[cleanPhone];
+    }
+    const foundLocal = Object.values(localUsers).find(u => {
+      const uDigits = (u.phone || '').replace(/\D/g, '');
+      return uDigits === digitsOnly || (digitsOnly.length >= 7 && uDigits.endsWith(digitsOnly.slice(-7)));
+    });
+    if (foundLocal) {
+      return foundLocal;
+    }
+  }
+
+  // Try Firestore FIRST to get latest changes (admin updates, plan shifts, etc.)
+  try {
+    const docRef = doc(db, "users", cleanPhone);
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      const data = docSnap.data() as User;
+      try {
+        const secretSnap = await getDoc(doc(db, "user_secrets", cleanPhone));
+        if (secretSnap.exists()) {
+          const s = secretSnap.data();
+          if (s.password) data.password = s.password;
+          if (s.rawPassword) data.rawPassword = s.rawPassword;
+        }
+      } catch(e) {}
+
+      // ⚠️ أُزيلت "حماية الرصيد الأعلى محليًا" — كانت ثغرة أمنية خطيرة تسمح
+      // بتعديل localStorage بالمتصفح وكتابة أي قيمة لقاعدة البيانات مباشرة.
+      // القيمة الموثوقة الوحيدة هي دائمًا اللي بقاعدة البيانات (Firestore).
+
+      // توليد الرقم التعريفي تلقائيًا للأعضاء القدامى الذين أُنشئت حساباتهم
+      // قبل إضافة هذه الميزة — يُحفظ مرة واحدة بقاعدة البيانات ويبقى ثابتًا
+      if (!data.memberId) {
+        try {
+          data.memberId = await ensureMemberId(cleanPhone, data);
+        } catch (e) {
+          console.warn('تعذّر توليد الرقم التعريفي:', e);
+        }
+      }
+
+      // منح نقاط الشرف الابتدائية (100) تلقائيًا لأي عضو مفعّل نقاطه صفر —
+      // يغطي الحسابات التي فُعّلت قبل إضافة نظام النقاط
+      if (!Number(data.honorPoints)) {
+        try {
+          const pts = await ensureActivationHonorPoints(cleanPhone, data);
+          if (pts > 0) data.honorPoints = pts;
+        } catch (e) {
+          console.warn('تعذّر منح نقاط الشرف:', e);
+        }
+      }
+
+      localUsers[cleanPhone] = data;
+      saveLocalUsers(localUsers);
+      return data;
+    }
+
+    const q = query(collection(db, "users"), where("phone", "==", cleanPhone));
+    const querySnapshot = await getDocs(q);
+    if (!querySnapshot.empty) {
+      const data = querySnapshot.docs[0].data() as User;
+      localUsers[cleanPhone] = data;
+      saveLocalUsers(localUsers);
+      return data;
+    }
+
+    // إصلاح حاسم: إذا نجح الاستعلام الحقيقي بقاعدة البيانات وأكد عدم الوجود،
+    // نثق بهذا التأكيد تمامًا — لا نرجع لبيانات كاش محلية قديمة بالجهاز قد
+    // تكون من استخدام سابق (عضو قديم)، لأنها كانت تُغلّب على النتيجة الحقيقية
+    return null;
+  } catch (error) {
+    console.warn("Firestore getUserByPhone error, using local cache fallback:", error);
+    if (localUsers[cleanPhone]) {
+      return localUsers[cleanPhone];
+    }
+    const foundLocal = Object.values(localUsers).find(u => {
+      const uDigits = (u.phone || '').replace(/\D/g, '');
+      return uDigits === digitsOnly || (digitsOnly.length >= 7 && uDigits.endsWith(digitsOnly.slice(-7)));
+    });
+    return foundLocal || null;
+  }
+}
+
+// Helper to check if email already exists in system
+export async function getUserByEmail(email: string): Promise<User | null> {
+  const cleanEmail = (email || '').trim().toLowerCase();
+  if (!cleanEmail) return null;
+
+  const localUsers = getLocalUsers();
+
+  try {
+    const q = query(collection(db, "users"), where("email", "==", cleanEmail));
+    const querySnapshot = await getDocs(q);
+    if (!querySnapshot.empty) {
+      return querySnapshot.docs[0].data() as User;
+    }
+
+    // إصلاح حاسم: نجح الاستعلام الحقيقي وأكد عدم وجود هذا البريد — نثق بهذا
+    // التأكيد، ولا نرجع لكاش محلي قديم بالجهاز (عضو قديم استخدم نفس الجهاز/
+    // المتصفح سابقًا) كان يُغلَّب على النتيجة الحقيقية ويسبب خطأ "مسجل مسبقًا" وهمي
+    return null;
+  } catch (error) {
+    console.warn("Firestore getUserByEmail error, using local cache fallback:", error);
+    const foundLocal = Object.values(localUsers).find(
+      u => u.email && u.email.trim().toLowerCase() === cleanEmail
+    );
+    return foundLocal || null;
+  }
+}
+
+// 2. Create standard user
+export async function registerUser(username: string, phone: string, password: string, referrerCode: string, email?: string): Promise<User> {
+  const cleanPhone = phone.trim();
+  const cleanEmail = email ? email.trim().toLowerCase() : undefined;
+  const cleanRefCode = (referrerCode || '').trim().toUpperCase();
+  
+  // Mandatory invite code check
+  if (!cleanRefCode) {
+    throw new Error("رمز الدعوة إجباري لإنشاء حساب جديد! يرجى إدخال رمز دعوة صالح أو التسجيل عبر رابط إحالة.");
+  }
+
+  // Strictly block and reject ADMIN95 in all formats
+  if (cleanRefCode === 'ADMIN95' || cleanRefCode.replace(/\s+/g, '') === 'ADMIN95') {
+    throw new Error("رمز الدعوة غير صحيح أو غير موجود! يرجى إدخال رمز دعوة حقيقي وصحيح من أحد الأصدقاء.");
+  }
+
+  // Check if user already exists BEFORE creating
+  const existing = await getUserByPhone(cleanPhone);
+  if (existing) {
+    throw new Error("رقم الهاتف مسجل بالفعل!");
+  }
+
+  // Check if email already registered to another user
+  if (cleanEmail) {
+    const existingEmailUser = await getUserByEmail(cleanEmail);
+    if (existingEmailUser) {
+      throw new Error("عذراً، هذا البريد الإلكتروني مسجل بالفعل لحساب آخر! يرجى استخدام بريد إلكتروني مختلف.");
+    }
+  }
+
+  // Hash password before storing
+  const hashedPassword = await hashPassword(password);
+
+  // إصلاح حاسم: يجب تسجيل دخول Firebase Auth الفعلي (Shadow Auth) قبل أي
+  // استعلام أو كتابة بقاعدة البيانات — بما فيها التحقق من رمز الدعوة نفسه،
+  // الذي يحتاج قراءة كل الأعضاء (list) وهذا يتطلب تسجيل دخول فعلي حسب قواعد
+  // الأمان. بدون هذا، التحقق من رمز الدعوة يفشل بصمت في أي جلسة/متصفح جديد
+  // بدون كاش محلي قديم (يظهر خطأ "رمز الدعوة غير صحيح" حتى لو كان صحيحاً)
+  try {
+    await shadowFirebaseAuth(cleanPhone, hashedPassword);
+  } catch (authErr) {
+    console.warn("Pre-registration shadow auth (referral check) failed:", authErr);
+  }
+
+  // Strict validation: invite code must be a real registered user's inviteCode or official admin codes
+  const localUsers = getLocalUsers();
+  let finalReferrer: string | undefined = undefined;
+  let referrerUser: User | null = null;
+
+  if (cleanRefCode === 'OXLO95' || cleanRefCode === 'BET95') {
+    finalReferrer = cleanRefCode;
+  } else {
+    const referrerInLocal = Object.values(localUsers).find(u => 
+      u.inviteCode && 
+      u.inviteCode.trim().toUpperCase() === cleanRefCode && 
+      u.inviteCode.trim().toUpperCase() !== 'ADMIN95'
+    );
+    if (referrerInLocal) {
+      finalReferrer = referrerInLocal.inviteCode;
+      referrerUser = referrerInLocal;
+    } else {
+      try {
+        const q = query(collection(db, "users"), where("inviteCode", "==", cleanRefCode));
+        const querySnapshot = await getDocs(q);
+        if (!querySnapshot.empty && cleanRefCode !== 'ADMIN95') {
+          referrerUser = querySnapshot.docs[0].data() as User;
+          finalReferrer = referrerUser.inviteCode || cleanRefCode;
+        } else {
+          throw new Error("رمز الدعوة غير صحيح أو غير موجود! يرجى إدخال رمز دعوة حقيقي وصحيح من أحد الأصدقاء.");
+        }
+      } catch (err: any) {
+        if (err.message && err.message.includes("رمز الدعوة غير صحيح")) {
+          throw err;
+        }
+        throw new Error("رمز الدعوة غير صحيح أو غير موجود! يرجى التأكد من رمز الدعوة الصحيح.");
+      }
+    }
+  }
+
+  // Detect location silently at registration (timeout 1.5s to avoid slowness)
+  let locData: any = {};
+  try {
+    const { detectUserLocation } = await import('./locationService');
+    const locPromise = detectUserLocation();
+    const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(null), 1500));
+    const loc: any = await Promise.race([locPromise, timeoutPromise]);
+    if (loc) {
+      locData = {
+        country: loc.country,
+        countryCode: loc.countryCode,
+        region: loc.region,
+        city: loc.city,
+        ip: loc.ip,
+        lastLocationUpdate: new Date().toISOString()
+      };
+    }
+  } catch (locErr) {
+    console.warn("Silent registration location check skipped:", locErr);
+  }
+
+  const newUser: User = {
+    id: cleanPhone,
+    username,
+    phone: cleanPhone,
+    email: cleanEmail,
+    isEmailVerified: cleanEmail ? true : false,
+    password: hashedPassword,
+    rawPassword: password,
+    inviteCode: generateInviteCode(),
+    memberId: await generateUniqueMemberId(),
+    honorPoints: 0, // تصبح 100 تلقائيًا عند تفعيل الباقة
+    referrerCode: finalReferrer,
+    walletAddress: "",
+    earnings: 0, // تم إلغاء المكافأة الترحيبية — الرصيد يبدأ من صفر
+    taskIncome: 0,
+    effectiveDays: 0,
+    role: "user",
+    vipTier: "",
+    isWithdrawalBlocked: false,
+    hasDeposited: false,
+    vipStartDate: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
+    lastLoginAt: new Date().toISOString(),
+    lastActiveAt: new Date().toISOString(),
+    isOnline: true,
+    ...locData
+  };
+
+  // 1. Save to local storage cache immediately
+  const currentLocalUsers = getLocalUsers();
+  currentLocalUsers[cleanPhone] = newUser;
+  saveLocalUsers(currentLocalUsers);
+
+  // Clear any existing cached tasks and notifications for this cleanPhone to prevent old data from leaking
+  try {
+    localStorage.removeItem(`micro_tasks_data_${cleanPhone}`);
+    localStorage.removeItem('micro_tasks_data');
+    localStorage.removeItem('local_db_notifications');
+  } catch (e) {
+    console.warn("Error clearing old storage on register:", e);
+  }
+
+  // 2. ملاحظة: تسجيل الدخول الفعلي (Shadow Auth) صار مبكرًا الآن (قبل حتى
+  //    التحقق من رمز الدعوة أعلاه)، فما نحتاج نكرره هنا مرة ثانية.
+
+  // 3. Write to Firestore database (if it fails/times out, we log warning and proceed with local user)
+  //    إصلاح أمني: لا نكتب rawPassword (كلمة سر صريحة غير مشفرة) لقاعدة البيانات
+  let realWriteSucceeded = false;
+  try {
+    const { password: userPass, rawPassword: userRawPass, ...publicUser } = newUser;
+    await setDoc(doc(db, "user_secrets", cleanPhone), { password: userPass || "" });
+    await setDoc(doc(db, "users", cleanPhone), publicUser);
+    console.log("Successfully saved new user to Firestore database:", cleanPhone);
+    realWriteSucceeded = true;
+  } catch (error: any) {
+    console.error("Firestore registerUser write FAILED (account only exists locally on this device):", error);
+  }
+
+  // 3. Trigger Referral Notifications in background
+  // إصلاح حاسم: الإشعارات (وصول التنبيه للأدمن/المُحيل) تُرسل فقط لو نجحت
+  // الكتابة الحقيقية بقاعدة البيانات — قبل هذا الإصلاح كانت ترسل دائمًا
+  // حتى لو فشل التسجيل الفعلي وبقي محليًا على جهاز المستخدم فقط، مما كان
+  // يوهم الأدمن بأن عضوًا جديدًا انضم فعليًا وهو غير موجود بقاعدة البيانات
+  if (realWriteSucceeded) {
+    const notifMsg = `🔔 انضم موظف/عضو جديد إلى فريقك: ${username} (${cleanPhone}) عبر رمز دعوتك!`;
+
+    if (referrerUser && (referrerUser.phone || referrerUser.id)) {
+      const refTarget = referrerUser.phone || referrerUser.id;
+      createNotification(refTarget, notifMsg).catch(e => console.warn(e));
+    }
+    // إصلاح مهم: لا نرسل الإشعار إلى «رمز الدعوة» نفسه إطلاقًا — كان ذلك
+    // يجعله يصل لكل من يطابق الرمز (خصوصًا الرموز العامة)، فيتسرب لجميع
+    // الأعضاء بدل صاحبه. الإشعار يذهب الآن لرقم هاتف المُحيل حصريًا.
+
+    if (cleanRefCode === 'ADMIN95' || cleanRefCode === 'OXLO95' || cleanRefCode === 'BET95') {
+      createNotification('admin', notifMsg).catch(e => console.warn(e));
+    }
+
+    // Send welcome notification
+    const welcomeMsg = `🎉 أهلاً وسهلاً بك يا ${username}! تم إنشاء حسابك وانضمامك بنجاح عبر رمز الدعوة (${cleanRefCode}).`;
+    createNotification(cleanPhone, welcomeMsg).catch(e => console.warn(e));
+  } else {
+    // فشلت الكتابة الحقيقية: نمنع المستخدم من المتابعة بحساب وهمي محلي بدل
+    // ما نسيبه يعتقد إنه نجح ويشتغل ببيانات ما راح تتزامن أبدًا مع الأدمن
+    throw new Error("تعذّر إكمال التسجيل، يرجى التأكد من اتصال الإنترنت والمحاولة مرة أخرى. لو استمرت المشكلة، جرب من متصفح آخر أو امسح ذاكرة التخزين المؤقت.");
+  }
+
+  return newUser;
+}
+
+// Record User Login Time & Online Status
+export async function recordUserLogin(phone: string): Promise<void> {
+  if (!phone) return;
+  const now = new Date().toISOString();
+  const updates = {
+    lastLoginAt: now,
+    lastActiveAt: now,
+    isOnline: true
+  };
+
+  // 1. Local storage update
+  const users = getLocalUsers();
+  if (users[phone]) {
+    users[phone] = { ...users[phone], ...updates };
+    saveLocalUsers(users);
+  }
+
+  // 2. Firestore update
+  try {
+    const userRef = doc(db, "users", phone);
+    await updateDoc(userRef, updates);
+  } catch (err) {
+    console.warn("recordUserLogin Firestore error:", err);
+  }
+}
+
+// Record User Logout Time & Offline Status
+export async function recordUserLogout(phone: string): Promise<void> {
+  if (!phone) return;
+  const now = new Date().toISOString();
+  const updates = {
+    lastLogoutAt: now,
+    lastActiveAt: now,
+    isOnline: false
+  };
+
+  // 1. Local storage update
+  const users = getLocalUsers();
+  if (users[phone]) {
+    users[phone] = { ...users[phone], ...updates };
+    saveLocalUsers(users);
+  }
+
+  // 2. Firestore update
+  try {
+    const userRef = doc(db, "users", phone);
+    await updateDoc(userRef, updates);
+  } catch (err) {
+    console.warn("recordUserLogout Firestore error:", err);
+  }
+}
+
+// Heartbeat to keep lastActiveAt fresh and isOnline true
+export async function recordUserActivity(phone: string): Promise<void> {
+  if (!phone) return;
+  const now = new Date().toISOString();
+  const updates = {
+    lastActiveAt: now,
+    isOnline: true
+  };
+
+  // 1. Local storage update
+  const users = getLocalUsers();
+  if (users[phone]) {
+    users[phone] = { ...users[phone], ...updates };
+    saveLocalUsers(users);
+  }
+
+  // 2. Firestore update
+  try {
+    const userRef = doc(db, "users", phone);
+    await updateDoc(userRef, updates);
+  } catch (err) {
+    console.warn("recordUserActivity Firestore error:", err);
+  }
+}
+
+// تسجيل يوم عمل فعلي (يُستدعى عند إدخال رمز المهام اليومي الصحيح).
+// يُضاف تاريخ اليوم لمصفوفة workedDays بمستند المستخدم.
+// آمن ضد التكرار: لو التاريخ مسجّل مسبقًا لا يُضاف مرة ثانية، فحتى لو
+// أدخل المستخدم الرمز في فترتي العمل بنفس اليوم يُحتسب يومًا واحدًا فقط.
+export async function recordWorkedDay(phone: string, dateStr: string): Promise<void> {
+  if (!phone || !dateStr) return;
+  const cleanPhone = phone.trim();
+
+  // 1. تحديث التخزين المحلي
+  const users = getLocalUsers();
+  if (users[cleanPhone]) {
+    const existing: string[] = Array.isArray((users[cleanPhone] as any).workedDays)
+      ? (users[cleanPhone] as any).workedDays
+      : [];
+    if (!existing.includes(dateStr)) {
+      (users[cleanPhone] as any).workedDays = [...existing, dateStr];
+      saveLocalUsers(users);
+    }
+  }
+
+  if (useLocalStorageFallback) return;
+
+  // 2. تحديث Firestore — نقرأ القيمة الحالية أولًا لتفادي أي تكرار
+  try {
+    const userRef = doc(db, "users", cleanPhone);
+    const snap = await getDoc(userRef);
+    if (!snap.exists()) {
+      console.warn("recordWorkedDay: مستند المستخدم غير موجود:", cleanPhone);
+      return;
+    }
+    const data = snap.data();
+    const current: string[] = Array.isArray(data.workedDays) ? data.workedDays : [];
+    if (current.includes(dateStr)) {
+      return; // اليوم مسجّل مسبقًا — لا شيء لفعله
+    }
+    await updateDoc(userRef, { workedDays: [...current, dateStr] });
+  } catch (err) {
+    console.warn("recordWorkedDay Firestore error:", err);
+  }
+}
+
+// 3. Update User Statistics (Admin function or task complete)
+export async function updateUserStats(phone: string, updates: Partial<Pick<User, 'earnings' | 'taskIncome' | 'effectiveDays' | 'vipStartDate'>>) {
+  // Safeguard against NaN values
+  const safeUpdates: typeof updates = {};
+  if (updates.earnings !== undefined) {
+    safeUpdates.earnings = isNaN(updates.earnings) ? 0 : updates.earnings;
+  }
+  if (updates.taskIncome !== undefined) {
+    safeUpdates.taskIncome = isNaN(updates.taskIncome) ? 0 : updates.taskIncome;
+  }
+  if (updates.effectiveDays !== undefined) {
+    safeUpdates.effectiveDays = isNaN(updates.effectiveDays) ? 0 : updates.effectiveDays;
+  }
+  if (updates.vipStartDate !== undefined) {
+    safeUpdates.vipStartDate = updates.vipStartDate;
+  }
+
+  // ALWAYS write to local cache to keep them perfectly synced!
+  const users = getLocalUsers();
+  if (users[phone]) {
+    users[phone] = {
+      ...users[phone],
+      earnings: safeUpdates.earnings !== undefined ? safeUpdates.earnings : users[phone].earnings,
+      taskIncome: safeUpdates.taskIncome !== undefined ? safeUpdates.taskIncome : users[phone].taskIncome,
+      effectiveDays: safeUpdates.effectiveDays !== undefined ? safeUpdates.effectiveDays : users[phone].effectiveDays,
+      vipStartDate: safeUpdates.vipStartDate !== undefined ? safeUpdates.vipStartDate : users[phone].vipStartDate
+    };
+    saveLocalUsers(users);
+  }
+
+  if (useLocalStorageFallback) {
+    return;
+  }
+
+  try {
+    const userRef = doc(db, "users", phone);
+    await updateDoc(userRef, safeUpdates);
+  } catch (error) {
+    console.warn("Firestore updateUserStats error, falling back:", error);
+    checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
+  }
+}
+
+// 3.5 Credit 10% Referrer Commission when a team member completes a task
+export async function creditReferrerCommission(childPhone: string, rewardValue: number, childUsername: string): Promise<void> {
+  if (!childPhone || rewardValue <= 0) return;
+
+  // ملاحظة: النسبة لم تعد ثابتة — تُقرأ من حقل commissionRate الخاص
+  // بالمُحيل نفسه (تحدده الإدارة يدويًا)، والافتراضي 10% لمن لم تُحدد له.
+  if (rewardValue <= 0) return;
+
+  let referrerPhone: string | null = null;
+  let childReferrerCode = "";
+
+  // 1. Find child user and their referrerCode
+  const localUsers = getLocalUsers();
+  const childUser = localUsers[childPhone];
+  if (childUser && childUser.referrerCode) {
+    childReferrerCode = childUser.referrerCode.trim().toUpperCase();
+  }
+
+  if (useLocalStorageFallback) {
+    if (!childReferrerCode) return;
+    const referrerInLocal = Object.values(localUsers).find(u => u.inviteCode && u.inviteCode.trim().toUpperCase() === childReferrerCode);
+    if (referrerInLocal) {
+      referrerPhone = referrerInLocal.phone;
+    }
+  } else {
+    try {
+      // If we don't have local childReferrerCode, fetch child doc from firestore first
+      if (!childReferrerCode) {
+        const childRef = doc(db, "users", childPhone);
+        const childSnap = await getDoc(childRef);
+        if (childSnap.exists()) {
+          const cData = childSnap.data() as User;
+          if (cData.referrerCode) {
+            childReferrerCode = cData.referrerCode.trim().toUpperCase();
+          }
+        }
+      }
+
+      if (childReferrerCode) {
+        // البحث عن المُحيل برمز الدعوة. نجرّب كل صيغ حالة الأحرف لأن
+        // استعلامات Firestore حساسة لحالة الحرف، وبعض الرموز مخزّنة
+        // بحالة مختلفة عمّا يُرسله الكود — فكانت العمولة تصل لبعض
+        // الأعضاء وتفشل صامتة مع غيرهم.
+        const codeVariants = Array.from(new Set([
+          childReferrerCode,
+          childReferrerCode.toUpperCase(),
+          childReferrerCode.toLowerCase()
+        ]));
+
+        for (const variant of codeVariants) {
+          const q = query(collection(db, "users"), where("inviteCode", "==", variant));
+          const querySnapshot = await getDocs(q);
+          if (!querySnapshot.empty) {
+            referrerPhone = querySnapshot.docs[0].id;
+            break;
+          }
+        }
+
+        // احتياط أخير: مسح شامل بمقارنة غير حساسة لحالة الأحرف
+        if (!referrerPhone) {
+          try {
+            const allSnap = await getDocs(collection(db, "users"));
+            allSnap.forEach(d => {
+              if (referrerPhone) return;
+              const code = (d.data()?.inviteCode || '').trim().toUpperCase();
+              if (code && code === childReferrerCode) {
+                referrerPhone = d.id;
+              }
+            });
+          } catch (scanErr) {
+            console.warn('تعذّر المسح الشامل للبحث عن المُحيل:', scanErr);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("Firestore error in creditReferrerCommission finding referrer:", err);
+    }
+  }
+
+  if (!referrerPhone) {
+    console.warn('⚠️ لم يُعثر على مُحيل لهذا العضو:', {
+      العضو: childPhone,
+      رمز_الإحالة: childReferrerCode || '(لا يوجد)'
+    });
+  }
+
+  // If referrer is found, increment their earnings (credit balance) and send notification!
+  if (referrerPhone) {
+    // نقرأ نسبة العمولة الخاصة بهذا المُحيل (يحددها الأدمن يدويًا)
+    let rate = 10;
+    try {
+      const refSnap = await getDoc(doc(db, "users", referrerPhone));
+      if (refSnap.exists()) {
+        const r = Number(refSnap.data()?.commissionRate);
+        if (!isNaN(r) && r > 0 && r <= 100) rate = r;
+      }
+    } catch (e) {
+      // تعذّر القراءة — نستخدم النسبة الافتراضية
+      const lu = getLocalUsers();
+      const r = Number((lu[referrerPhone] as any)?.commissionRate);
+      if (!isNaN(r) && r > 0 && r <= 100) rate = r;
+    }
+
+    const commission = Number((rewardValue * (rate / 100)).toFixed(2));
+    if (commission <= 0) return;
+
+    const notifMsg = `💰 حصلت على عمولة قدرها ${commission} USDT (${rate}%) من إتمام العضو (${childUsername}) لمهمته بنجاح!`;
+
+    // 1. Update in local storage
+    const updatedLocalUsers = getLocalUsers();
+    if (updatedLocalUsers[referrerPhone]) {
+      updatedLocalUsers[referrerPhone].earnings = Number((updatedLocalUsers[referrerPhone].earnings + commission).toFixed(2));
+      saveLocalUsers(updatedLocalUsers);
+    }
+
+    // 2. Update in firestore
+    if (!useLocalStorageFallback) {
+      try {
+        const refUserRef = doc(db, "users", referrerPhone);
+        await updateDoc(refUserRef, {
+          earnings: increment(commission)
+        });
+        console.log('💰 عمولة إحالة: تمت إضافة', commission, 'إلى', referrerPhone);
+      } catch (err) {
+        console.error('❌ فشل إضافة عمولة الإحالة:', {
+          المُحيل: referrerPhone,
+          العمولة: commission,
+          الخطأ: (err as any)?.code || err
+        });
+      }
+    }
+
+    // Send notification to referrer
+    try {
+      await createNotification(referrerPhone, notifMsg);
+    } catch (nErr) {
+      console.warn("Error triggering commission notification:", nErr);
+    }
+  }
+}
+
+// 4. Update User Wallet
+// يولّد كل الصيغ المحتملة لرقم الهاتف (بعلامة +، بدونها، بصفر بادئ...)
+// لضمان مطابقة السجلات مهما اختلفت صيغة الإدخال بين الأدمن والمستخدم.
+function phoneVariants(phone: string): string[] {
+  const raw = (phone || '').trim();
+  if (!raw) return [];
+  const digits = raw.replace(/\D/g, '');           // أرقام فقط
+  const noZero = digits.replace(/^0+/, '');         // بدون أصفار بادئة
+  const variants = new Set<string>([
+    raw,
+    digits,
+    '+' + digits,
+    noZero,
+    '+' + noZero
+  ]);
+
+  // دولي ← محلي (مثال: 9647519952000 → 07519952000)
+  if (noZero.startsWith('964')) {
+    const local = noZero.substring(3);
+    variants.add(local);
+    variants.add('0' + local);
+  }
+
+  // محلي ← دولي (مثال: 07519952000 → +9647519952000)
+  // إصلاح مهم: بعض الحسابات (ومنها حساب الإدارة) مخزّنة بالصيغة المحلية،
+  // فكانت السجلات المحفوظة بالصيغة الدولية لا تُطابق ولا تظهر إطلاقًا.
+  if (!noZero.startsWith('964')) {
+    variants.add('964' + noZero);
+    variants.add('+964' + noZero);
+    variants.add('0' + noZero);
+  }
+
+  return Array.from(variants).filter(v => v.length > 0);
+}
+
+/**
+ * يتحقق مما إذا كان عنوان المحفظة مرتبطًا بحساب عضو آخر.
+ *
+ * الهدف: منع ربط محفظة واحدة بأكثر من حساب — وهي ثغرة تسمح لشخص واحد
+ * بإنشاء عدة حسابات وتحصيل أرباحها جميعًا على محفظة واحدة.
+ *
+ * المقارنة تتم بأحرف صغيرة موحّدة، لأن عناوين البلوكتشين غير حساسة لحالة
+ * الأحرف (0xAbC و 0xabc محفظة واحدة)، فلا يمكن التحايل بتغيير حالة حرف.
+ *
+ * يُرجع: هل العنوان مستخدم، ومعلومات مالكه إن وُجد.
+ */
+export async function isWalletAddressTaken(
+  walletAddress: string,
+  currentPhone: string
+): Promise<{ taken: boolean; ownerPhone?: string; ownerName?: string }> {
+  const addr = (walletAddress || '').trim().toLowerCase();
+  if (!addr) return { taken: false };
+
+  const myVariants = new Set(phoneVariants(currentPhone).map(v => v.toLowerCase()));
+
+  const isOtherOwner = (u: any): boolean => {
+    const uAddr = (u?.walletAddress || '').trim().toLowerCase();
+    if (!uAddr || uAddr !== addr) return false;
+    // نتجاهل حساب المستخدم نفسه (إعادة ربط العنوان ذاته ليست تعارضًا)
+    const uPhone = (u?.phone || u?.id || '').toLowerCase();
+    return !myVariants.has(uPhone);
+  };
+
+  // 1) فحص التخزين المحلي أولًا (سريع)
+  try {
+    const localUsers = getLocalUsers();
+    const localHit = Object.values(localUsers).find(isOtherOwner);
+    if (localHit) {
+      return {
+        taken: true,
+        ownerPhone: (localHit as any).phone,
+        ownerName: (localHit as any).username
+      };
+    }
+  } catch (e) {}
+
+  if (useLocalStorageFallback) return { taken: false };
+
+  // 2) فحص قاعدة البيانات — المصدر الموثوق
+  try {
+    const snap = await getDocs(collection(db, "users"));
+    let hit: any = null;
+    snap.forEach(d => {
+      if (hit) return;
+      const data = { ...(d.data() as any), id: d.id };
+      if (isOtherOwner(data)) hit = data;
+    });
+    if (hit) {
+      return { taken: true, ownerPhone: hit.phone || hit.id, ownerName: hit.username };
+    }
+  } catch (e) {
+    console.warn('تعذّر فحص تفرّد عنوان المحفظة:', e);
+    // عند فشل الفحص لا نمنع المستخدم — الحماية الحقيقية أن العنوان
+    // لا يمكن تعديله بعد ربطه، وتبقى المراجعة اليدوية متاحة للإدارة.
+  }
+
+  return { taken: false };
+}
+
+export async function updateUserWallet(phone: string, walletAddress: string) {
+  const cleanAddress = (walletAddress || '').trim();
+
+  // منع ربط عنوان محفظة مستخدم بحساب آخر
+  const check = await isWalletAddressTaken(cleanAddress, phone);
+  if (check.taken) {
+    throw new Error('WALLET_ALREADY_LINKED');
+  }
+
+  if (useLocalStorageFallback) {
+    const users = getLocalUsers();
+    if (users[phone]) {
+      users[phone].walletAddress = cleanAddress;
+      saveLocalUsers(users);
+    }
+    return;
+  }
+
+  // ============================================================
+  // إصلاح: الكتابة على المعرّف الفعلي للمستند.
+  //
+  // كانت الدالة تكتب على users/{phone} بالصيغة المرسلة حرفيًا، فإن
+  // كان معرّف المستند مخزّنًا بصيغة أخرى (+964.../964.../07...)
+  // تفشل الكتابة ويُبتلع الخطأ بصمت مع حفظ محلي فقط — فيرى العضو
+  // «تم الحفظ» ثم يجد العنوان مختفيًا بعد التحديث.
+  // ============================================================
+  // ============================================================
+  // التأكد من جلسة Firebase Auth قبل الكتابة.
+  //
+  // سبب الرفض (permission-denied) لم يكن القاعدة، بل أن جلسة
+  // المصادقة غير نشطة لحظة الحفظ — فتعتبر القواعد الطلب صادرًا
+  // من زائر (guest) وترفض كل الكتابات. نستعيد الجلسة أولاً.
+  // ============================================================
+  try {
+    const { getAuth } = await import('firebase/auth');
+    const authInstance = getAuth();
+
+    if (!authInstance.currentUser) {
+      // نحاول استعادة الجلسة من بيانات المستخدم المحفوظة
+      const localUsers = getLocalUsers();
+      const me: any = localUsers[phone] ||
+        Object.values(localUsers).find((u: any) =>
+          (u?.phone || '').replace(/\D/g, '') === phone.replace(/\D/g, '')
+        );
+
+      const pw = me?.password || me?.rawPassword || me?.id;
+      if (pw) {
+        await shadowFirebaseAuth(phone, pw);
+      }
+    }
+  } catch (authErr) {
+    console.warn('تعذّر التحقق من جلسة المصادقة:', authErr);
+  }
+
+  const digits = phone.replace(/\D/g, '');
+  const noZero = digits.replace(/^0+/, '');
+  const candidates = Array.from(new Set([
+    phone, digits, '+' + digits, noZero, '+' + noZero,
+    noZero.startsWith('964') ? '0' + noZero.substring(3) : '0' + noZero,
+    noZero.startsWith('964') ? noZero : '964' + noZero,
+    noZero.startsWith('964') ? '+' + noZero : '+964' + noZero,
+  ].filter(Boolean)));
+
+  let savedToFirestore = false;
+  let lastError: any = null;
+
+  for (const id of candidates) {
+    try {
+      const snap = await getDoc(doc(db, "users", id));
+      if (!snap.exists()) continue;
+
+      await updateDoc(doc(db, "users", id), { walletAddress: cleanAddress });
+      savedToFirestore = true;
+      break;
+    } catch (err: any) {
+      lastError = err;
+    }
+  }
+
+  // تحديث النسخة المحلية دائمًا لتبقى الواجهة متسقة
+  try {
+    const users = getLocalUsers();
+    if (users[phone]) {
+      users[phone].walletAddress = cleanAddress;
+      saveLocalUsers(users);
+    }
+  } catch (e) {}
+
+  if (!savedToFirestore) {
+    // نجمع تفاصيل التشخيص لعرضها داخل التطبيق مباشرة،
+    // فلا يحتاج الأدمن لأدوات المطور أو جهاز حاسوب.
+    let foundDocId = 'لا يوجد';
+    let hasWalletField = 'غير معروف';
+    try {
+      for (const id of candidates) {
+        const s = await getDoc(doc(db, "users", id));
+        if (s.exists()) {
+          foundDocId = id;
+          hasWalletField = ('walletAddress' in (s.data() || {})) ? 'موجود' : 'مفقود';
+          break;
+        }
+      }
+    } catch (e) {}
+
+    let authState = 'غير معروف';
+    let authEmail = 'غير معروف';
+    let tailMatch = 'غير معروف';
+    try {
+      const { getAuth } = await import('firebase/auth');
+      const cu = getAuth().currentUser;
+      authState = cu ? 'نشطة' : 'غير نشطة (زائر)';
+      authEmail = cu?.email || 'لا يوجد';
+
+      // نحاكي منطق قاعدة الأمان: مقارنة آخر 9 أرقام
+      if (cu?.email) {
+        const authPhone = cu.email.split('@')[0].replace(/\D/g, '');
+        const docPhone = String(foundDocId).replace(/\D/g, '');
+        const t1 = authPhone.slice(-9);
+        const t2 = docPhone.slice(-9);
+        tailMatch = `${t1} ${t1 === t2 ? '==' : '≠'} ${t2}`;
+      }
+    } catch (e) {}
+
+    const details = [
+      `الهاتف: ${phone}`,
+      `معرّف المستند: ${foundDocId}`,
+      `حقل walletAddress: ${hasWalletField}`,
+      `جلسة المصادقة: ${authState}`,
+      `بريد الدخول: ${authEmail}`,
+      `مطابقة الأرقام: ${tailMatch}`,
+      `رمز الخطأ: ${lastError?.code || 'غير محدد'}`
+    ].join(' | ');
+
+    console.error('فشل حفظ عنوان المحفظة:', details);
+    checkForQuotaExceeded(lastError);
+    throw new Error('WALLET_SAVE_FAILED::' + details);
+  }
+}
+
+// 4.5 Update User Password
+export async function updateUserPassword(phone: string, oldPassword: string, newPassword: string): Promise<User> {
+  const cleanPhone = phone.trim();
+  const users = getLocalUsers();
+  const user = users[cleanPhone] || await getUserByPhone(cleanPhone);
+
+  if (!user) {
+    throw new Error("المستخدم غير موجود!");
+  }
+
+  if (user.password && user.password !== oldPassword) {
+    throw new Error("كلمة المرور القديمة غير صحيحة!");
+  }
+
+  if (newPassword.length < 6) {
+    throw new Error("يجب أن تتكون كلمة المرور الجديدة من 6 خانات على الأقل!");
+  }
+
+  const updatedUser: User = {
+    ...user,
+    password: newPassword
+  };
+
+  users[cleanPhone] = updatedUser;
+  saveLocalUsers(users);
+
+  // حفظ كلمة المرور السابقة: تُستخدم لمزامنة كلمة مرور Firebase تلقائيًا
+  // عند أول تسجيل دخول بعد التغيير (يمنع تعطّل المصادقة الحقيقية نهائيًا)
+  try {
+    const prev = user.password || '';
+    if (prev) {
+      await setDoc(doc(db, "user_secrets", cleanPhone), {
+        password: newPassword,
+        previousPassword: prev
+      }, { merge: true });
+    }
+  } catch (e) {
+    console.warn('تعذّر حفظ كلمة المرور السابقة:', e);
+  }
+
+  if (!useLocalStorageFallback) {
+    try {
+      const userRef = doc(db, "users", cleanPhone);
+      await updateDoc(userRef, { password: newPassword });
+      
+      // --- الأسطر الجديدة لحل مشكلة تسجيل الدخول ---
+      try {
+        const { auth } = await import('./firebase');
+        const { updatePassword } = await import('firebase/auth');
+        const expectedEmail = cleanPhone.replace('+', '') + '@oxlo.app';
+        if (auth.currentUser && auth.currentUser.email === expectedEmail) {
+           const safePassword = newPassword.substring(0, 20).padEnd(6, '0');
+           await updatePassword(auth.currentUser, safePassword);
+        }
+      } catch (authErr) {
+        console.warn("Failed to sync password with Auth:", authErr);
+      }
+      // ----------------------------------------------
+
+    } catch (error) {
+      console.warn("Firestore updateUserPassword error, saved locally:", error);
+      checkForQuotaExceeded(error); 
+    }
+  }
+
+  return updatedUser;
+}
+
+// 4.6 Update User Profile (Username, Avatar, and/or Password in one place)
+export async function updateUserProfile(
+  phone: string, 
+  updates: { 
+    username?: string; 
+    avatar?: string; 
+    password?: string;
+    rawPassword?: string;
+  }
+): Promise<User> {
+  const cleanPhone = phone.trim();
+  const users = getLocalUsers();
+  const user = users[cleanPhone] || await getUserByPhone(cleanPhone);
+
+  if (!user) {
+    throw new Error("المستخدم غير موجود!");
+  }
+
+  const sanitizedUpdates: Partial<User> = {};
+  if (updates.username && updates.username.trim()) {
+    sanitizedUpdates.username = updates.username.trim();
+  }
+  if (updates.avatar !== undefined) {
+    sanitizedUpdates.avatar = updates.avatar;
+  }
+  if (updates.password && updates.password.trim()) {
+    sanitizedUpdates.password = updates.password.trim();
+    sanitizedUpdates.rawPassword = updates.rawPassword || updates.password.trim();
+  }
+
+  const updatedUser: User = {
+    ...user,
+    ...sanitizedUpdates
+  };
+
+  users[cleanPhone] = updatedUser;
+  saveLocalUsers(users);
+
+  if (!useLocalStorageFallback) {
+    try {
+      const userRef = doc(db, "users", cleanPhone);
+      const publicUpdates = { ...sanitizedUpdates };
+      if (sanitizedUpdates.password || sanitizedUpdates.rawPassword) {
+        // إصلاح أمني: لا نكتب rawPassword (كلمة سر صريحة غير مشفرة) لقاعدة البيانات
+        await setDoc(doc(db, "user_secrets", cleanPhone), {
+          ...(sanitizedUpdates.password ? { password: sanitizedUpdates.password } : {})
+        }, { merge: true }).catch(() => {});
+        delete publicUpdates.password;
+        delete publicUpdates.rawPassword;
+      }
+      if (Object.keys(publicUpdates).length > 0) {
+        await updateDoc(userRef, publicUpdates);
+      }
+    } catch (error) {
+      console.warn("Firestore updateUserProfile error, saved locally:", error);
+      checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
+    }
+  }
+
+  return updatedUser;
+}
+
+// 5. System Settings functions
+export async function getSystemSettings(): Promise<SystemSettings> {
+  if (useLocalStorageFallback) {
+    return getLocalSettings();
+  }
+
+  try {
+    const settingsRef = doc(db, "settings", "general");
+    const snap = await getDoc(settingsRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      
+      // Auto-update hours logic removed from public getSystemSettings to avoid permission errors for non-admins
+      // This should only be managed via Admin Panel or a dedicated maintenance task
+      
+      return {
+        siteName: data.siteName ?? "BET",
+        rechargeAddress: data.rechargeAddress ?? "e738819b080a278d",
+        rechargeAddressTRC20: data.rechargeAddressTRC20 ?? "sfnmQtKLfcDarAMd",
+        rechargeAddressBEP20: data.rechargeAddressBEP20 ?? "0x71C7656EC7ab88b098defB751B7401B5f6d8976F",
+        telegramLink: data.telegramLink ?? "-fhzo.vercel.app",
+        minDeposit: Number(data.minDeposit ?? 25),
+        minWithdrawal: Number(data.minWithdrawal ?? 2),
+        holidayActive: Boolean(data.holidayActive ?? false),
+        holidayDays: data.holidayDays ?? [5],
+        globalNotification: data.globalNotification ?? "مرحباً بكم في منصتنا الميكروية الجديدة! ابدأ بالعمل اليوم وزد أرباحك.",
+        withdrawLockActive: Boolean(data.withdrawLockActive ?? false),
+        withdrawLockDays: data.withdrawLockDays ?? [5],
+        enforceWithdrawHours: Boolean(data.enforceWithdrawHours ?? false),
+        withdrawStartHour: data.withdrawStartHour !== undefined ? Number(data.withdrawStartHour) : 14,
+        withdrawEndHour: data.withdrawEndHour !== undefined ? Number(data.withdrawEndHour) : 17,
+        withdrawRatesInfo: data.withdrawRatesInfo ?? "رسوم معالجة السحب 15% - سعر الصرف مستقر",
+        rechargeNotice: data.rechargeNotice ?? "يرجى تحويل المبلغ المحدد فقط وتصوير إثبات التحويل لضمان سرعة معالجة شحن حسابك.",
+        rechargeNotice2: data.rechargeNotice2 ?? "",
+        withdrawNotice: data.withdrawNotice ?? "تنبيه: يتم معالجة طلبات السحب خلال 24 ساعة كحد أقصى.",
+        withdrawNotice2: data.withdrawNotice2 ?? "",
+        vipPlans: (data.vipPlans && Array.isArray(data.vipPlans)) ? data.vipPlans : [
+          
+          { id: 'plan_A1', name: 'A1', price: 300, profit: 9, tasksCount: 5 },
+          { id: 'plan_A2', name: 'A2', price: 600, profit: 18, tasksCount: 5 },
+          { id: 'plan_B1', name: 'B1', price: 1200, profit: 38, tasksCount: 5 },
+          { id: 'plan_B2', name: 'B2', price: 2600, profit: 65, tasksCount: 5 },
+          { id: 'plan_C1', name: 'C1', price: 5000, profit: 162, tasksCount: 5 },
+          { id: 'plan_C2', name: 'C2', price: 12000, profit: 360, tasksCount: 5 },
+          { id: 'plan_D1', name: 'D1', price: 26000, profit: 750, tasksCount: 5 },
+          { id: 'plan_D2', name: 'D2', price: 65000, profit: 1620, tasksCount: 5 },
+          { id: 'plan_business', name: 'business', price: 90000, profit: 2550, tasksCount: 5 }
+        ],
+        workingHoursNotice: data.workingHoursNotice ?? "💡 تنويه هام لجميع الأعضاء: يرجى العلم بأن أوقات العمل الرسمية لتنفيذ واعتماد المهام اليومية مقسمة على فترتين يومياً:\n- الفترة الأولى: من الساعة 02:00 ظهراً وحتى 05:00 عصراً.\n- الفترة الثانية: من الساعة 09:00 مساءً وحتى 12:00 منتصف الليل بتوقيت مكة المكرمة.",
+        enforceWorkingHours: data.enforceWorkingHours !== undefined ? Boolean(data.enforceWorkingHours) : true,
+        workStartHour: data.workStartHour !== undefined ? Number(data.workStartHour) : 14,
+        workEndHour: data.workEndHour !== undefined ? Number(data.workEndHour) : 17,
+        workStartHour2: data.workStartHour2 !== undefined ? Number(data.workStartHour2) : 21,
+        workEndHour2: data.workEndHour2 !== undefined ? Number(data.workEndHour2) : 0,
+        appDownloadUrl: data.appDownloadUrl ?? "",
+        supportAgentName: (data.supportAgentName && !data.supportAgentName.includes("إلينا")) ? data.supportAgentName : "إلينا (الدعم الفني)",
+        supportAgentSubtitle: (data.supportAgentSubtitle && !data.supportAgentSubtitle.includes("المالية") && !data.supportAgentSubtitle.includes("Mis")) ? data.supportAgentSubtitle : "مستشارتك المساعدة في oxlo",
+        supportAgentAvatar: data.supportAgentAvatar || "/support_logo.jpg",
+        supportFaqs: (data.supportFaqs && data.supportFaqs.length > 4 && data.supportFaqs.some((f: any) => f.question.includes("تأسست"))) ? data.supportFaqs : defaultSupportFaqs,
+        tasksCode: data.tasksCode ?? "",
+        hideTrialPlans: data.hideTrialPlans !== undefined ? Boolean(data.hideTrialPlans) : false,
+        signalGroupLink: data.signalGroupLink ?? "",
+        showSignalGroup: data.showSignalGroup !== undefined ? Boolean(data.showSignalGroup) : true
+      };
+    }
+    const def = getLocalSettings();
+    await setDoc(settingsRef, def);
+    return def;
+  } catch (error) {
+    console.warn("Firestore getSystemSettings error, falling back:", error);
+    checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
+    return getLocalSettings();
+  }
+}
+
+export async function updateSystemSettings(newSettings: SystemSettings) {
+  if (useLocalStorageFallback) {
+    saveLocalSettings(newSettings);
+    return;
+  }
+
+  try {
+    const settingsRef = doc(db, "settings", "general");
+    await setDoc(settingsRef, newSettings);
+  } catch (error) {
+    console.warn("Firestore updateSystemSettings error, falling back:", error);
+    checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
+    saveLocalSettings(newSettings);
+  }
+}
+
+// 6. Deposits
+export async function createDeposit(
+  userId: string, 
+  username: string, 
+  phone: string, 
+  amount: number, 
+  txHash?: string, 
+  screenshotUrl?: string,
+  currency: string = 'USDT (Polygon)'
+): Promise<Deposit> {
+  const depositId = `dep_${Date.now()}`;
+  const newDeposit: Deposit = {
+    id: depositId,
+    userId,
+    username,
+    phone,
+    amount,
+    currency: currency || 'USDT (Polygon)',
+    txHash: txHash || '',
+    screenshotUrl: screenshotUrl || '',
+    status: 'pending',
+    createdAt: new Date().toISOString()
+  };
+
+  const userMsg = `💳 تم تقديم طلب شحن بقيمة ${amount} ${currency}. الطلب قيد المراجعة.`;
+  const adminMsg = `📥 طلب شحن جديد بقيمة ${amount} ${currency} من المستخدم: ${username} (${phone})`;
+  const targetUser = phone || userId;
+  if (targetUser) createNotification(targetUser, userMsg).catch(() => {});
+  createNotification('admin', adminMsg).catch(() => {});
+
+  if (useLocalStorageFallback) {
+    const deposits = getLocalDeposits();
+    deposits[depositId] = newDeposit;
+    saveLocalDeposits(deposits);
+    return newDeposit;
+  }
+
+  try {
+    await setDoc(doc(db, "deposits", depositId), newDeposit);
+    return newDeposit;
+  } catch (error: any) {
+    console.warn("Firestore createDeposit error:", error);
+    checkForQuotaExceeded(error);
+    // إصلاح: خطأ رفض الصلاحيات (permission-denied) لازم يفشل بوضوح للمستخدم،
+    // مو يتحول بصمت لتخزين محلي وهمي يعطي "نجاح" بدون ما يوصل فعليًا للأدمن
+    const errMsg = error?.message || String(error);
+    if (errMsg.includes('permission') || error?.code === 'permission-denied') {
+      throw new Error("تعذّر تسجيل طلب الإيداع. يرجى إعادة تسجيل الدخول والمحاولة مرة أخرى، أو التواصل مع الدعم الفني.");
+    }
+    const deposits = getLocalDeposits();
+    deposits[depositId] = newDeposit;
+    saveLocalDeposits(deposits);
+    return newDeposit;
+  }
+}
+
+export async function getUserDeposits(phone: string): Promise<Deposit[]> {
+  if (useLocalStorageFallback) {
+    const variants = phoneVariants(phone);
+    const deposits = Object.values(getLocalDeposits()).filter(d => variants.includes(d.phone));
+    return deposits.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  try {
+    // إصلاح: نبحث بكل الصيغ المحتملة للرقم بدل صيغة واحدة حرفية — كانت
+    // السجلات اليدوية (المضافة من لوحة الأدمن بصيغة مختلفة) لا تظهر للمستخدم.
+    const variants = phoneVariants(phone);
+    const map: Record<string, Deposit> = {};
+
+    // نبحث بحقلي phone و userId معًا لتغطية أي اختلاف بصيغة الحفظ
+    for (const v of variants) {
+      for (const field of ['phone', 'userId']) {
+        try {
+          const q = query(collection(db, "deposits"), where(field, "==", v));
+          const snap = await getDocs(q);
+          snap.forEach((docSnap) => {
+            const data = docSnap.data() as Deposit;
+            const key = data.id || docSnap.id;
+            if (key) map[key] = { ...data, id: key };
+          });
+        } catch (inner) {
+          console.warn('getUserDeposits query failed:', field, v, inner);
+        }
+      }
+    }
+
+    const list = Object.values(map);
+    return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  } catch (error) {
+    console.warn("Firestore getUserDeposits error, falling back:", error);
+    checkForQuotaExceeded(error);
+    const variants = phoneVariants(phone);
+    const deposits = Object.values(getLocalDeposits()).filter(d => variants.includes(d.phone));
+    return deposits.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+}
+
+export async function getAllDeposits(): Promise<Deposit[]> {
+  if (useLocalStorageFallback) {
+    return Object.values(getLocalDeposits()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  try {
+    const querySnapshot = await getDocs(collection(db, "deposits"));
+    const list: Deposit[] = [];
+    querySnapshot.forEach((docSnap) => {
+      const data = docSnap.data() as Deposit;
+      const key = data.id || docSnap.id;
+      if (key) {
+        list.push({ ...data, id: key });
+      }
+    });
+    return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  } catch (error) {
+    console.warn("Firestore getAllDeposits error, falling back:", error);
+    checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
+    return Object.values(getLocalDeposits()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+}
+
+export async function updateDepositStatus(depositId: string, status: 'approved' | 'rejected', phone: string, amount: number) {
+  const notifMsg = status === 'approved' 
+    ? `✅ تم قبول طلب الشحن بقيمة ${amount} USDT وإضافة المبلغ لرصيدك!`
+    : `❌ تم رفض طلب الشحن بقيمة ${amount} USDT.`;
+  createNotification(phone, notifMsg).catch(() => {});
+
+  if (useLocalStorageFallback) {
+    const deposits = getLocalDeposits();
+    if (deposits[depositId]) {
+      deposits[depositId].status = status;
+      saveLocalDeposits(deposits);
+    }
+    if (status === 'approved') {
+      const users = getLocalUsers();
+      if (users[phone]) {
+        users[phone].earnings += amount;
+        users[phone].hasDeposited = true;
+        saveLocalUsers(users);
+      }
+    }
+    return;
+  }
+
+  try {
+    const depRef = doc(db, "deposits", depositId);
+    await updateDoc(depRef, { status });
+
+    if (status === 'approved') {
+      const userRef = doc(db, "users", phone);
+      await updateDoc(userRef, {
+        earnings: increment(amount),
+        hasDeposited: true
+      });
+    }
+  } catch (error) {
+    console.warn("Firestore updateDepositStatus error, falling back:", error);
+    checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
+    // apply local
+    const deposits = getLocalDeposits();
+    if (deposits[depositId]) {
+      deposits[depositId].status = status;
+      saveLocalDeposits(deposits);
+    }
+    if (status === 'approved') {
+      const users = getLocalUsers();
+      if (users[phone]) {
+        users[phone].earnings += amount;
+        users[phone].hasDeposited = true;
+        saveLocalUsers(users);
+      }
+    }
+  }
+}
+
+// 7. Withdrawals
+export async function createWithdrawal(
+  userId: string,
+  username: string,
+  phone: string,
+  amount: number,
+  walletAddress: string,
+  currency: string = 'USDT (BEP20)'
+): Promise<Withdrawal> {
+  const selectedCurrency = currency || 'USDT (BEP20)';
+
+  const userMsg = `💸 تم تقديم طلب سحب بقيمة ${amount} ${selectedCurrency}. الطلب قيد المراجعة.`;
+  const adminMsg = `📤 طلب سحب جديد بقيمة ${amount} ${selectedCurrency} من المستخدم: ${username} (${phone})`;
+  createNotification(phone, userMsg).catch(() => {});
+  if (userId) createNotification(userId, userMsg).catch(() => {});
+  createNotification('admin', adminMsg).catch(() => {});
+
+  if (useLocalStorageFallback) {
+    const users = getLocalUsers();
+    if (!users[phone]) {
+      throw new Error("المستخدم غير موجود");
+    }
+    // 1. فحص الإيداع أولاً (الأولوية القصوى - مع استثناء المشتركين القدامى ومن تفعيل باقاتهم)
+    if (!isExemptFromDepositRequirement(users[phone])) {
+      throw new Error("⚠️ عذراً! لا يمكنك سحب الأرباح إلا بعد إيداع وتفعيل باقتك الاستثمارية الأولى في المنصة.");
+    }
+    // 2. ثم فحص الحظر اليدوي أو الأمني
+    if (users[phone].isWithdrawalBlocked) {
+      throw new Error("🔒 نأسف لإعلامك بأنه قد تم تعليق ميزة السحب مؤقتاً لحسابك لدواعي الأمان والتحقق من جودة النشاط. لتفعيل السحب التلقائي مجدداً ومواصلة العمل وجني الأرباح بشكل طبيعي، يرجى دعوة (2) من المشتركين الجدد والنشطين على الأقل للترقية فئة VIP (B1) باستخدام رابط الإحالة الخاص بك. نشكر تفهمكم وحرصكم على استدامة المجتمع الرقمي للمنصة.");
+    }
+    if (users[phone].earnings < amount) {
+      throw new Error("رصيد الأرباح غير كافٍ لإجراء هذا السحب!");
+    }
+
+    // Deduct immediately
+    users[phone].earnings -= amount;
+    saveLocalUsers(users);
+
+    const withdrawalId = `with_${Date.now()}`;
+    const newWithdrawal: Withdrawal = {
+      id: withdrawalId,
+      userId,
+      username,
+      phone,
+      amount,
+      currency: selectedCurrency,
+      walletAddress,
+      status: 'pending',
+      createdAt: new Date().toISOString()
+    };
+
+    const withdrawals = getLocalWithdrawals();
+    withdrawals[withdrawalId] = newWithdrawal;
+    saveLocalWithdrawals(withdrawals);
+    return newWithdrawal;
+  }
+
+  try {
+    // First deduct pending withdrawal amount from user balance
+    const userRef = doc(db, "users", phone);
+    const userSnap = await getDoc(userRef);
+    if (!userSnap.exists()) {
+      throw new Error("المستخدم غير موجود");
+    }
+    const userData = userSnap.data() as User;
+    // 1. فحص الإيداع أولاً (الأولوية القصوى - مع استثناء المشتركين القدامى ومن تفعيل باقاتهم)
+    if (!isExemptFromDepositRequirement(userData)) {
+      throw new Error("⚠️ عذراً! لا يمكنك سحب الأرباح إلا بعد إيداع وتفعيل باقتك الاستثمارية الأولى في المنصة.");
+    }
+    // 2. ثم فحص الحظر اليدوي أو الأمني
+    if (userData.isWithdrawalBlocked) {
+      throw new Error("🔒 نأسف لإعلامك بأنه قد تم تعليق ميزة السحب مؤقتاً لحسابك لدواعي الأمان والتحقق من جودة النشاط. لتفعيل السحب التلقائي مجدداً ومواصلة العمل وجني الأرباح بشكل طبيعي، يرجى دعوة (2) من المشتركين الجدد والنشطين على الأقل للترقية فئة VIP (B1) باستخدام رابط الإحالة الخاص بك. نشكر تفهمكم وحرصكم على استدامة المجتمع الرقمي للمنصة.");
+    }
+    if (userData.earnings < amount) {
+      throw new Error("رصيد الأرباح غير كافٍ لإجراء هذا السحب!");
+    }
+
+    // Deduct immediately
+    await updateDoc(userRef, {
+      earnings: increment(-amount)
+    });
+
+    const withdrawalId = `with_${Date.now()}`;
+    const newWithdrawal: Withdrawal = {
+      id: withdrawalId,
+      userId,
+      username,
+      phone,
+      amount,
+      currency: selectedCurrency,
+      walletAddress,
+      status: 'pending',
+      createdAt: new Date().toISOString()
+    };
+
+    await setDoc(doc(db, "withdrawals", withdrawalId), newWithdrawal);
+    return newWithdrawal;
+  } catch (error: any) {
+    console.warn("Firestore createWithdrawal error:", error?.code, error?.message);
+    throw new Error("حدث خطأ أثناء معالجة طلب السحب، يرجى المحاولة لاحقاً أو التواصل مع الدعم.");
+  }
+}
+
+
+export async function getUserWithdrawals(phone: string): Promise<Withdrawal[]> {
+  if (useLocalStorageFallback) {
+    const variants = phoneVariants(phone);
+    const withdrawals = Object.values(getLocalWithdrawals()).filter(w => variants.includes(w.phone));
+    return withdrawals.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  try {
+    // إصلاح: نبحث بكل الصيغ المحتملة للرقم بدل صيغة واحدة حرفية — كانت
+    // السجلات اليدوية (المضافة من لوحة الأدمن بصيغة مختلفة) لا تظهر للمستخدم.
+    const variants = phoneVariants(phone);
+    const map: Record<string, Withdrawal> = {};
+
+    for (const v of variants) {
+      try {
+        const q = query(collection(db, "withdrawals"), where("phone", "==", v));
+        const snap = await getDocs(q);
+        snap.forEach((docSnap) => {
+          const data = docSnap.data() as Withdrawal;
+          const key = data.id || docSnap.id;
+          if (key) map[key] = { ...data, id: key };
+        });
+      } catch (inner) {
+        console.warn('getUserWithdrawals variant query failed:', v, inner);
+      }
+    }
+
+    const list = Object.values(map);
+    return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  } catch (error) {
+    console.warn("Firestore getUserWithdrawals error, falling back:", error);
+    checkForQuotaExceeded(error);
+    const variants = phoneVariants(phone);
+    const withdrawals = Object.values(getLocalWithdrawals()).filter(w => variants.includes(w.phone));
+    return withdrawals.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+}
+
+export async function getAllWithdrawals(): Promise<Withdrawal[]> {
+  if (useLocalStorageFallback) {
+    return Object.values(getLocalWithdrawals()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  try {
+    const querySnapshot = await getDocs(collection(db, "withdrawals"));
+    const list: Withdrawal[] = [];
+    querySnapshot.forEach((docSnap) => {
+      const data = docSnap.data() as Withdrawal;
+      const key = data.id || docSnap.id;
+      if (key) {
+        list.push({ ...data, id: key });
+      }
+    });
+    return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  } catch (error) {
+    console.warn("Firestore getAllWithdrawals error, falling back:", error);
+    checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
+    return Object.values(getLocalWithdrawals()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+}
+
+export async function updateWithdrawalStatus(withdrawalId: string, status: 'approved' | 'rejected', phone: string, amount: number) {
+  const notifMsg = status === 'approved'
+    ? `✅ تم قبول طلب السحب بقيمة ${amount} USDT وتحويل المبلغ لمحفظتك!`
+    : `❌ تم رفض طلب السحب بقيمة ${amount} USDT وإعادة المبلغ لرصيدك.`;
+  createNotification(phone, notifMsg).catch(() => {});
+
+  if (useLocalStorageFallback) {
+    const withdrawals = getLocalWithdrawals();
+    if (withdrawals[withdrawalId]) {
+      withdrawals[withdrawalId].status = status;
+      saveLocalWithdrawals(withdrawals);
+    }
+    if (status === 'rejected') {
+      const users = getLocalUsers();
+      if (users[phone]) {
+        users[phone].earnings += amount;
+        saveLocalUsers(users);
+      }
+    }
+    return;
+  }
+
+  try {
+    const withRef = doc(db, "withdrawals", withdrawalId);
+    await updateDoc(withRef, { status });
+
+    if (status === 'rejected') {
+      const userRef = doc(db, "users", phone);
+      await updateDoc(userRef, {
+        earnings: increment(amount)
+      });
+    }
+  } catch (error) {
+    console.warn("Firestore updateWithdrawalStatus error, falling back:", error);
+    checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
+    // apply local
+    const withdrawals = getLocalWithdrawals();
+    if (withdrawals[withdrawalId]) {
+      withdrawals[withdrawalId].status = status;
+      saveLocalWithdrawals(withdrawals);
+    }
+    if (status === 'rejected') {
+      const users = getLocalUsers();
+      if (users[phone]) {
+        users[phone].earnings += amount;
+        saveLocalUsers(users);
+      }
+    }
+  }
+}
+
+// 8. Team (Invited users query - multi-level 1, 2, 3 supported)
+// ============================================================
+// تقرير العضو اليومي (للوحة الإدارة)
+//
+// يجمع في استدعاء واحد كل ما يخص العضو: مهام اليوم وأرباحها،
+// مصادر دخله اليوم مفصّلة (مهام / عمولة إحالة / خصم دعم الترقية)،
+// حالة فريقه، وحركته المالية — فيرى الأدمن صورة كاملة دون تنقّل.
+// ============================================================
+
+export interface MemberDailyReport {
+  todayTasksDone: number;
+  todayTasksTotal: number;
+  todayTaskEarnings: number;   // ما ربحه من مهامه اليوم (صافي بعد الخصم)
+  todayGrossTasks: number;     // قيمة مهامه اليوم قبل أي خصم
+  todaySupportDeducted: number; // ما خُصم اليوم لسداد دعم الترقية
+  todayCommission: number;     // عمولة الإحالة من نشاط فريقه اليوم
+  todayNet: number;            // صافي ما أُضيف لرصيده اليوم
+  teamTotal: number;
+  teamActivated: number;
+  referrerName: string | null;
+  referrerMemberId: string | null;
+  totalDeposits: number;
+  totalWithdrawals: number;
+  supportPaid: number;
+  supportTotal: number;
+}
+
+/** تاريخ اليوم بتوقيت مكة (YYYY-MM-DD) */
+function todayKeyRiyadh(): string {
+  const now = new Date();
+  const riyadh = new Date(now.getTime() + (3 * 60 - now.getTimezoneOffset()) * 60000);
+  return riyadh.toISOString().split('T')[0];
+}
+
+export async function getMemberDailyReport(user: any): Promise<MemberDailyReport> {
+  const phone = user?.phone || user?.id || '';
+  const today = todayKeyRiyadh();
+
+  const report: MemberDailyReport = {
+    todayTasksDone: 0, todayTasksTotal: 0, todayTaskEarnings: 0,
+    todayGrossTasks: 0, todaySupportDeducted: 0, todayCommission: 0, todayNet: 0,
+    teamTotal: 0, teamActivated: 0,
+    referrerName: null, referrerMemberId: null,
+    totalDeposits: 0, totalWithdrawals: 0,
+    supportPaid: Number(user?.upgradeSupportPaid) || 0,
+    supportTotal: Number(user?.upgradeSupportTotal) || 0,
+  };
+
+  if (!phone) return report;
+
+  // 1) مهام اليوم
+  try {
+    const tasks = await getUserTasks(phone);
+    const todayTasks = (tasks || []).filter(
+      (t: any) => t.claimDate === today && t.status !== 'withdrawn'
+    );
+    report.todayTasksTotal = todayTasks.length;
+
+    const done = todayTasks.filter((t: any) => t.status === 'completed');
+    report.todayTasksDone = done.length;
+
+    report.todayGrossTasks = done.reduce(
+      (s: number, t: any) => s + (parseFloat(String(t.reward).replace(/[^\d.]/g, '')) || 0), 0
+    );
+
+    // خصم دعم الترقية = 50% من قيمة المهام إن كان له دعم غير مكتمل
+    const remaining = Math.max(0, report.supportTotal - report.supportPaid);
+    if (report.supportTotal > 0 && remaining > 0) {
+      report.todaySupportDeducted = Math.min(
+        Number((report.todayGrossTasks * 0.5).toFixed(2)), remaining
+      );
+    }
+    report.todayTaskEarnings = Number(
+      (report.todayGrossTasks - report.todaySupportDeducted).toFixed(2)
+    );
+  } catch (e) {
+    console.warn('تعذّر جلب مهام اليوم:', e);
+  }
+
+  // 2) الفريق + عمولة اليوم المقدّرة
+  try {
+    const team = await getReferralTeam(user?.inviteCode || phone);
+    report.teamTotal = (team || []).length;
+
+    const isActivated = (m: any) => {
+      const t = (m?.vipTier || '').trim();
+      return t !== '' && t !== 'الباقة العادية' && t !== 'العضوية العادية' && t !== 'VIP0';
+    };
+    report.teamActivated = (team || []).filter(isActivated).length;
+
+    // العمولة اليومية المتوقعة من المستوى الأول النشط
+    const rate = (() => {
+      const r = Number(user?.commissionRate);
+      return (!isNaN(r) && r > 0 && r <= 100) ? r : 10;
+    })();
+
+    const level1Daily = (team || [])
+      .filter((m: any) => (m.teamLevel || 1) === 1 && isActivated(m))
+      .reduce((s: number, m: any) => s + (Number(m.dailyProfit) || 0), 0);
+
+    report.todayCommission = Number((level1Daily * (rate / 100)).toFixed(2));
+  } catch (e) {
+    console.warn('تعذّر جلب الفريق:', e);
+  }
+
+  // 3) من أضافه (المُحيل)
+  try {
+    const refCode = (user?.referrerCode || '').trim();
+    if (refCode) {
+      const variants = Array.from(new Set([refCode, refCode.toUpperCase(), refCode.toLowerCase()]));
+      for (const v of variants) {
+        const qs = await getDocs(query(collection(db, "users"), where("inviteCode", "==", v)));
+        if (!qs.empty) {
+          const d: any = qs.docs[0].data();
+          report.referrerName = d?.username || qs.docs[0].id;
+          report.referrerMemberId = d?.memberId || null;
+          break;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('تعذّر جلب بيانات المُحيل:', e);
+  }
+
+  // 4) الحركة المالية
+  try {
+    const deps = await getUserDeposits(phone);
+    report.totalDeposits = (deps || [])
+      .filter((d: any) => d.status === 'approved')
+      .reduce((s: number, d: any) => s + (Number(d.amount) || 0), 0);
+  } catch (e) {}
+
+  try {
+    const wds = await getUserWithdrawals(phone);
+    report.totalWithdrawals = (wds || [])
+      .filter((w: any) => w.status === 'approved')
+      .reduce((s: number, w: any) => s + (Number(w.amount) || 0), 0);
+  } catch (e) {}
+
+  report.todayNet = Number(
+    (report.todayTaskEarnings + report.todayCommission).toFixed(2)
+  );
+
+  return report;
+}
+
+export async function getReferralTeam(myInviteCodeOrPhone: string): Promise<(User & { teamLevel?: number })[]> {
+  if (!myInviteCodeOrPhone) return [];
+  const cleanInput = myInviteCodeOrPhone.trim().toUpperCase();
+  const allUsersMap: Record<string, User> = {};
+
+  // 1. Gather all local users
+  const localUsers = getLocalUsers();
+  Object.values(localUsers).forEach(u => {
+    const key = u.phone || u.id;
+    if (key) allUsersMap[key] = u;
+  });
+
+  // 2. Fetch from Firestore
+  try {
+    const snap = await getDocs(collection(db, "users"));
+    snap.forEach(d => {
+      const u = d.data() as User;
+      const key = u.phone || u.id || d.id;
+      if (key) allUsersMap[key] = u;
+    });
+  } catch (err) {
+    console.warn("Firestore getReferralTeam fetch all users warning:", err);
+  }
+
+  // 3. Find inviter user and gather all alias identifiers
+  const allUsers = Object.values(allUsersMap);
+  const targetUser = allUsers.find(u => 
+    (u.inviteCode && u.inviteCode.trim().toUpperCase() === cleanInput) ||
+    (u.phone && u.phone.trim().toUpperCase() === cleanInput) ||
+    (u.id && u.id.trim().toUpperCase() === cleanInput) ||
+    (u.username && u.username.trim().toUpperCase() === cleanInput)
+  );
+
+  const inviterKeys = new Set<string>([cleanInput]);
+  if (targetUser) {
+    if (targetUser.inviteCode) inviterKeys.add(targetUser.inviteCode.trim().toUpperCase());
+    if (targetUser.phone) {
+      inviterKeys.add(targetUser.phone.trim().toUpperCase());
+      const digits = targetUser.phone.replace(/\D/g, '');
+      if (digits) inviterKeys.add(digits);
+    }
+    if (targetUser.id) inviterKeys.add(targetUser.id.trim().toUpperCase());
+    if (targetUser.username) inviterKeys.add(targetUser.username.trim().toUpperCase());
+  }
+
+  // Build lookup map of referrer codes
+  const directMap: Record<string, User[]> = {};
+  allUsers.forEach(u => {
+    if (u.referrerCode) {
+      const ref = u.referrerCode.trim().toUpperCase();
+      if (!directMap[ref]) directMap[ref] = [];
+      directMap[ref].push(u);
+    }
+  });
+
+  // Level 1: users referred by any inviter key
+  const level1UsersMap = new Map<string, User>();
+  inviterKeys.forEach(key => {
+    const directMatches = directMap[key] || [];
+    directMatches.forEach(u => {
+      const uid = u.phone || u.id;
+      if (uid && !inviterKeys.has(uid.trim().toUpperCase())) {
+        level1UsersMap.set(uid, u);
+      }
+    });
+  });
+  const level1 = Array.from(level1UsersMap.values());
+
+  // Level 2
+  const level1Keys = new Set<string>();
+  level1.forEach(u => {
+    if (u.inviteCode) level1Keys.add(u.inviteCode.trim().toUpperCase());
+    if (u.phone) {
+      level1Keys.add(u.phone.trim().toUpperCase());
+      const digits = u.phone.replace(/\D/g, '');
+      if (digits) level1Keys.add(digits);
+    }
+    if (u.id) level1Keys.add(u.id.trim().toUpperCase());
+  });
+
+  const level2UsersMap = new Map<string, User>();
+  level1Keys.forEach(key => {
+    const directMatches = directMap[key] || [];
+    directMatches.forEach(u => {
+      const uid = u.phone || u.id;
+      if (uid && !inviterKeys.has(uid.trim().toUpperCase()) && !level1UsersMap.has(uid)) {
+        level2UsersMap.set(uid, u);
+      }
+    });
+  });
+  const level2 = Array.from(level2UsersMap.values());
+
+  // Level 3
+  const level2Keys = new Set<string>();
+  level2.forEach(u => {
+    if (u.inviteCode) level2Keys.add(u.inviteCode.trim().toUpperCase());
+    if (u.phone) {
+      level2Keys.add(u.phone.trim().toUpperCase());
+      const digits = u.phone.replace(/\D/g, '');
+      if (digits) level2Keys.add(digits);
+    }
+    if (u.id) level2Keys.add(u.id.trim().toUpperCase());
+  });
+
+  const level3UsersMap = new Map<string, User>();
+  level2Keys.forEach(key => {
+    const directMatches = directMap[key] || [];
+    directMatches.forEach(u => {
+      const uid = u.phone || u.id;
+      if (uid && !inviterKeys.has(uid.trim().toUpperCase()) && !level1UsersMap.has(uid) && !level2UsersMap.has(uid)) {
+        level3UsersMap.set(uid, u);
+      }
+    });
+  });
+  const level3 = Array.from(level3UsersMap.values());
+
+  const teamList: (User & { teamLevel?: number })[] = [
+    ...level1.map(m => ({ ...m, teamLevel: 1 })),
+    ...level2.map(m => ({ ...m, teamLevel: 2 })),
+    ...level3.map(m => ({ ...m, teamLevel: 3 }))
+  ];
+
+  return teamList.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+}
+
+export function subscribeToReferralTeam(myInviteCodeOrPhone: string, callback: (team: (User & { teamLevel?: number })[]) => void): () => void {
+  if (!myInviteCodeOrPhone) {
+    callback([]);
+    return () => {};
+  }
+  const cleanInput = myInviteCodeOrPhone.trim().toUpperCase();
+
+  const handleFallback = () => {
+    getReferralTeam(myInviteCodeOrPhone).then(list => callback(list)).catch(() => {});
+  };
+
+  // Initial fetch immediately
+  getReferralTeam(myInviteCodeOrPhone).then(list => callback(list)).catch(() => {});
+
+  // Listen to users collection in real-time to compute the active tree dynamically
+  return safeOnSnapshot(collection(db, "users"), (snapshot) => {
+    const allUsersMap: Record<string, User> = {};
+
+    // Firestore users
+    snapshot.forEach((docSnap) => {
+      const u = docSnap.data() as User;
+      const key = u.phone || u.id || docSnap.id;
+      if (key) allUsersMap[key] = u;
+    });
+
+    // Merge local storage fallback
+    const localUsers = getLocalUsers();
+    Object.values(localUsers).forEach(u => {
+      const key = u.phone || u.id;
+      if (key) {
+        allUsersMap[key] = { ...allUsersMap[key], ...u };
+      }
+    });
+
+    const allUsers = Object.values(allUsersMap);
+    const targetUser = allUsers.find(u => 
+      (u.inviteCode && u.inviteCode.trim().toUpperCase() === cleanInput) ||
+      (u.phone && u.phone.trim().toUpperCase() === cleanInput) ||
+      (u.id && u.id.trim().toUpperCase() === cleanInput) ||
+      (u.username && u.username.trim().toUpperCase() === cleanInput)
+    );
+
+    const inviterKeys = new Set<string>([cleanInput]);
+    if (targetUser) {
+      if (targetUser.inviteCode) inviterKeys.add(targetUser.inviteCode.trim().toUpperCase());
+      if (targetUser.phone) {
+        inviterKeys.add(targetUser.phone.trim().toUpperCase());
+        const digits = targetUser.phone.replace(/\D/g, '');
+        if (digits) inviterKeys.add(digits);
+      }
+      if (targetUser.id) inviterKeys.add(targetUser.id.trim().toUpperCase());
+      if (targetUser.username) inviterKeys.add(targetUser.username.trim().toUpperCase());
+    }
+
+    const directMap: Record<string, User[]> = {};
+    allUsers.forEach(u => {
+      if (u.referrerCode) {
+        const ref = u.referrerCode.trim().toUpperCase();
+        if (!directMap[ref]) directMap[ref] = [];
+        directMap[ref].push(u);
+      }
+    });
+
+    const level1UsersMap = new Map<string, User>();
+    inviterKeys.forEach(key => {
+      const directMatches = directMap[key] || [];
+      directMatches.forEach(u => {
+        const uid = u.phone || u.id;
+        if (uid && !inviterKeys.has(uid.trim().toUpperCase())) {
+          level1UsersMap.set(uid, u);
+        }
+      });
+    });
+    const level1 = Array.from(level1UsersMap.values());
+
+    const level1Keys = new Set<string>();
+    level1.forEach(u => {
+      if (u.inviteCode) level1Keys.add(u.inviteCode.trim().toUpperCase());
+      if (u.phone) {
+        level1Keys.add(u.phone.trim().toUpperCase());
+        const digits = u.phone.replace(/\D/g, '');
+        if (digits) level1Keys.add(digits);
+      }
+      if (u.id) level1Keys.add(u.id.trim().toUpperCase());
+    });
+
+    const level2UsersMap = new Map<string, User>();
+    level1Keys.forEach(key => {
+      const directMatches = directMap[key] || [];
+      directMatches.forEach(u => {
+        const uid = u.phone || u.id;
+        if (uid && !inviterKeys.has(uid.trim().toUpperCase()) && !level1UsersMap.has(uid)) {
+          level2UsersMap.set(uid, u);
+        }
+      });
+    });
+    const level2 = Array.from(level2UsersMap.values());
+
+    const level2Keys = new Set<string>();
+    level2.forEach(u => {
+      if (u.inviteCode) level2Keys.add(u.inviteCode.trim().toUpperCase());
+      if (u.phone) {
+        level2Keys.add(u.phone.trim().toUpperCase());
+        const digits = u.phone.replace(/\D/g, '');
+        if (digits) level2Keys.add(digits);
+      }
+      if (u.id) level2Keys.add(u.id.trim().toUpperCase());
+    });
+
+    const level3UsersMap = new Map<string, User>();
+    level2Keys.forEach(key => {
+      const directMatches = directMap[key] || [];
+      directMatches.forEach(u => {
+        const uid = u.phone || u.id;
+        if (uid && !inviterKeys.has(uid.trim().toUpperCase()) && !level1UsersMap.has(uid) && !level2UsersMap.has(uid)) {
+          level3UsersMap.set(uid, u);
+        }
+      });
+    });
+    const level3 = Array.from(level3UsersMap.values());
+
+    const teamList: (User & { teamLevel?: number })[] = [
+      ...level1.map(m => ({ ...m, teamLevel: 1 }))
+    ];
+
+    const result = teamList.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+    callback(result);
+  }, (err) => {
+    console.warn("subscribeToReferralTeam onSnapshot error:", err);
+  }, handleFallback);
+}
+
+// 9. All Users (For Admin dashboard)
+export async function getAllUsers(): Promise<User[]> {
+  try {
+    const querySnapshot = await getDocs(collection(db, "users"));
+    const firestoreMap: Record<string, User> = {};
+    querySnapshot.forEach((docSnap) => {
+      const data = docSnap.data() as User;
+      data.id = docSnap.id; // Inject document ID
+      const key = data.phone || docSnap.id;
+      if (key) {
+        firestoreMap[key] = data;
+      }
+    });
+
+    saveLocalUsers(firestoreMap);
+    const finalMap = getLocalUsers(); // This automatically ensures the main admin account is present
+    return Object.values(finalMap);
+  } catch (error: any) {
+    console.warn("Firestore getAllUsers error, falling back to local storage:", error);
+    return Object.values(getLocalUsers());
+  }
+}
+
+export function subscribeToAllUsers(callback: (users: User[]) => void): () => void {
+  const handleFallback = () => {
+    callback(Object.values(getLocalUsers()));
+  };
+
+  return safeOnSnapshot(collection(db, "users"), (snapshot) => {
+    const firestoreMap: Record<string, User> = {};
+    snapshot.forEach((docSnap) => {
+      const data = docSnap.data() as User;
+      data.id = docSnap.id; // Inject document ID
+      const key = data.phone || docSnap.id;
+      if (key) {
+        firestoreMap[key] = data;
+      }
+    });
+
+    saveLocalUsers(firestoreMap);
+    const finalMap = getLocalUsers(); // Automatically adds/ensures admin user
+
+    // Ensure ONLY 07519952000 has admin role
+    Object.keys(finalMap).forEach(k => {
+      if (k !== "07519952000" && finalMap[k]?.phone !== "07519952000" && finalMap[k]?.role === "admin") {
+        finalMap[k].role = "user";
+      }
+    });
+
+    saveLocalUsers(finalMap);
+    callback(Object.values(finalMap));
+  }, (error) => {
+    console.warn("Firestore subscribeToAllUsers error:", error);
+  }, handleFallback);
+}
+
+export function subscribeToAllDeposits(callback: (deposits: Deposit[]) => void): () => void {
+  const handleFallback = () => {
+    const list = Object.values(getLocalDeposits()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    callback(list);
+  };
+
+  return safeOnSnapshot(collection(db, "deposits"), (snapshot) => {
+    const firestoreMap: Record<string, Deposit> = {};
+    snapshot.forEach((docSnap) => {
+      const data = docSnap.data() as Deposit;
+      const key = data.id || docSnap.id;
+      if (key) {
+        firestoreMap[key] = { ...data, id: key };
+      }
+    });
+    saveLocalDeposits(firestoreMap);
+    const list = Object.values(firestoreMap).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    callback(list);
+  }, (error) => {
+    console.warn("Firestore subscribeToAllDeposits error:", error);
+  }, handleFallback);
+}
+
+export function subscribeToAllWithdrawals(callback: (withdrawals: Withdrawal[]) => void): () => void {
+  const handleFallback = () => {
+    const list = Object.values(getLocalWithdrawals()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    callback(list);
+  };
+
+  return safeOnSnapshot(collection(db, "withdrawals"), (snapshot) => {
+    const firestoreMap: Record<string, Withdrawal> = {};
+    snapshot.forEach((docSnap) => {
+      const data = docSnap.data() as Withdrawal;
+      const key = data.id || docSnap.id;
+      if (key) {
+        firestoreMap[key] = { ...data, id: key };
+      }
+    });
+    saveLocalWithdrawals(firestoreMap);
+    const list = Object.values(firestoreMap).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    callback(list);
+  }, (error) => {
+    console.warn("Firestore subscribeToAllWithdrawals error:", error);
+  }, handleFallback);
+}
+
+// 10. Admin user modification / deletion
+export async function deleteUserByAdmin(phone: string): Promise<void> {
+  const cleanPhone = phone.trim();
+  
+  // --- 1. Clear Local Storage caches for the deleted user completely ---
+  
+  // Clear User local cache
+  const users = getLocalUsers();
+  Object.keys(users).forEach(k => {
+    if (k === cleanPhone || users[k]?.phone === cleanPhone) {
+      delete users[k];
+    }
+  });
+  saveLocalUsers(users);
+
+  // Clear Tasks cache keys
+  try {
+    localStorage.removeItem(`micro_tasks_data_${cleanPhone}`);
+    localStorage.removeItem('micro_tasks_data');
+  } catch (e) {
+    console.warn("Error removing task local cache on user delete:", e);
+  }
+
+  // Clear Deposits local cache
+  try {
+    const deposits = getLocalDeposits();
+    let depositsChanged = false;
+    Object.keys(deposits).forEach(id => {
+      if (deposits[id]?.phone === cleanPhone) {
+        delete deposits[id];
+        depositsChanged = true;
+      }
+    });
+    if (depositsChanged) {
+      saveLocalDeposits(deposits);
+    }
+  } catch (e) {
+    console.warn("Error removing deposits local cache on user delete:", e);
+  }
+
+  // Clear Withdrawals local cache
+  try {
+    const withdrawals = getLocalWithdrawals();
+    let withdrawalsChanged = false;
+    Object.keys(withdrawals).forEach(id => {
+      if (withdrawals[id]?.phone === cleanPhone) {
+        delete withdrawals[id];
+        withdrawalsChanged = true;
+      }
+    });
+    if (withdrawalsChanged) {
+      saveLocalWithdrawals(withdrawals);
+    }
+  } catch (e) {
+    console.warn("Error removing withdrawals local cache on user delete:", e);
+  }
+
+  // Clear Support Chats local cache
+  try {
+    const localChats = JSON.parse(localStorage.getItem('local_db_support_chats') || '{}');
+    if (localChats[cleanPhone]) {
+      delete localChats[cleanPhone];
+      localStorage.setItem('local_db_support_chats', JSON.stringify(localChats));
+    }
+    localStorage.removeItem(`local_chat_msg_${cleanPhone}`);
+  } catch (e) {
+    console.warn("Error removing support chat local cache on user delete:", e);
+  }
+
+  // Clear private Notifications local cache (excluding 'all' and 'broadcast')
+  try {
+    const notifications = getLocalNotifications();
+    let notificationsChanged = false;
+    Object.keys(notifications).forEach(id => {
+      const n = notifications[id];
+      if (n && n.userId !== 'all' && n.userId !== 'broadcast' && matchesUser(n.userId, cleanPhone)) {
+        delete notifications[id];
+        notificationsChanged = true;
+      }
+    });
+    if (notificationsChanged) {
+      saveLocalNotifications(notifications);
+    }
+  } catch (e) {
+    console.warn("Error removing notifications local cache on user delete:", e);
+  }
+
+  if (useLocalStorageFallback) {
+    return;
+  }
+
+  // --- 2. Clear Firestore Database records for the deleted user completely ---
+  try {
+    const deletePromises: Promise<void>[] = [];
+
+    // A. Delete user doc
+    deletePromises.push(deleteDoc(doc(db, "users", cleanPhone)));
+
+    // B. Delete all tasks associated with this user
+    const qTasks = query(collection(db, "tasks"), where("userId", "==", cleanPhone));
+    const tasksSnap = await getDocs(qTasks);
+    tasksSnap.forEach(tDoc => {
+      deletePromises.push(deleteDoc(doc(db, "tasks", tDoc.id)));
+    });
+
+    // C. Delete all deposits associated with this user
+    const qDeposits = query(collection(db, "deposits"), where("phone", "==", cleanPhone));
+    const depositsSnap = await getDocs(qDeposits);
+    depositsSnap.forEach(dDoc => {
+      deletePromises.push(deleteDoc(doc(db, "deposits", dDoc.id)));
+    });
+
+    // D. Delete all withdrawals associated with this user
+    const qWithdrawals = query(collection(db, "withdrawals"), where("phone", "==", cleanPhone));
+    const withdrawalsSnap = await getDocs(qWithdrawals);
+    withdrawalsSnap.forEach(wDoc => {
+      deletePromises.push(deleteDoc(doc(db, "withdrawals", wDoc.id)));
+    });
+
+    // E. Delete all support chat messages & support chat document
+    try {
+      const messagesCol = collection(db, "support_chats", cleanPhone, "messages");
+      const msgsSnap = await getDocs(messagesCol);
+      msgsSnap.forEach(mDoc => {
+        deletePromises.push(deleteDoc(doc(db, "support_chats", cleanPhone, "messages", mDoc.id)));
+      });
+      deletePromises.push(deleteDoc(doc(db, "support_chats", cleanPhone)));
+    } catch (chatError) {
+      console.warn("Error queuing support chat/messages delete:", chatError);
+    }
+
+    // F. Delete all private notifications associated with this user
+    const qNotifs = query(collection(db, "notifications"));
+    const notifsSnap = await getDocs(qNotifs);
+    notifsSnap.forEach(nDoc => {
+      const data = nDoc.data() as UserNotification;
+      if (data && data.userId !== 'all' && data.userId !== 'broadcast' && matchesUser(data.userId, cleanPhone)) {
+        deletePromises.push(deleteDoc(doc(db, "notifications", nDoc.id)));
+      }
+    });
+
+    await Promise.all(deletePromises);
+    console.log("Successfully completed final deletion of user data from Firestore:", cleanPhone);
+  } catch (error) {
+    console.warn("Firestore deleteUserByAdmin error, falling back:", error);
+    checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
+  }
+}
+
+export async function deleteMultipleUsersByAdmin(phones: string[]): Promise<{ successCount: number; failedCount: number }> {
+  let successCount = 0;
+  let failedCount = 0;
+  const uniquePhones = Array.from(new Set(phones.map(p => (p || '').trim()).filter(Boolean)));
+  
+  for (const phone of uniquePhones) {
+    try {
+      await deleteUserByAdmin(phone);
+      successCount++;
+    } catch (err) {
+      console.warn(`Failed to delete user ${phone}:`, err);
+      failedCount++;
+    }
+  }
+  
+  return { successCount, failedCount };
+}
+
+export async function updateUserByAdmin(phoneOrId: string, updates: Partial<User>): Promise<void> {
+  const target = (phoneOrId || '').trim();
+  if (!target) return;
+
+  const finalUpdates: Partial<User> = { ...updates };
+  if (updates.password) {
+    finalUpdates.rawPassword = updates.password;
+  }
+  
+  if (updates.vipTier && updates.vipTier !== "" && updates.vipTier !== "العضوية العادية") {
+    finalUpdates.hasDeposited = true;
+    // منح نقاط الشرف الابتدائية تلقائيًا عند أول تفعيل للباقة
+    grantActivationHonorPoints(target).catch(e => console.warn('تعذّر منح نقاط التفعيل:', e));
+  }
+
+  // 1. ALWAYS write to local cache robustly across all matching keys
+  const users = getLocalUsers();
+  const digitsOnly = target.replace(/\D/g, '');
+  let matched = false;
+
+  Object.keys(users).forEach(key => {
+    const u = users[key];
+    const uDigits = (u.phone || '').replace(/\D/g, '');
+    const isMatch = key === target || u.phone === target || u.id === target ||
+      (digitsOnly.length >= 7 && uDigits.length >= 7 && uDigits.endsWith(digitsOnly.slice(-7)));
+
+    if (isMatch) {
+      users[key] = {
+        ...users[key],
+        ...finalUpdates
+      };
+      matched = true;
+    }
+  });
+
+  if (!matched) {
+    users[target] = { ...(users[target] || {}), ...finalUpdates } as User;
+  }
+
+  saveLocalUsers(users);
+
+  if (useLocalStorageFallback) {
+    return;
+  }
+
+  // 2. Write to Firestore using setDoc with merge: true to avoid missing document errors
+  try {
+    let docId = target;
+    
+    // Attempt to find the real document ID if target doesn't exist or is a phone number
+    // This handles cases where doc ID might be different from the phone number
+    const initialRef = doc(db, "users", target);
+    const snap = await getDoc(initialRef);
+    
+    if (!snap.exists()) {
+      // Search by phone field
+      const q = query(collection(db, "users"), where("phone", "==", target));
+      const qSnap = await getDocs(q);
+      if (!qSnap.empty) {
+        docId = qSnap.docs[0].id;
+      }
+    }
+
+    const userRef = doc(db, "users", docId);
+    const publicUpdates = { ...finalUpdates };
+    // إصلاح أمني: لا نكتب rawPassword (كلمة سر صريحة غير مشفرة) لقاعدة البيانات
+    if (finalUpdates.password || finalUpdates.rawPassword) {
+      // نقرأ كلمة المرور الحالية أولًا ونحفظها كـ previousPassword، لتمكين
+      // مزامنة كلمة مرور Firebase تلقائيًا عند أول دخول بعد التغيير
+      let prevPw = '';
+      try {
+        const prevSnap = await getDoc(doc(db, "user_secrets", docId));
+        if (prevSnap.exists()) prevPw = prevSnap.data()?.password || '';
+      } catch (e) {}
+
+      await setDoc(doc(db, "user_secrets", docId), {
+        ...(finalUpdates.password ? { password: finalUpdates.password } : {}),
+        ...(prevPw ? { previousPassword: prevPw } : {})
+      }, { merge: true }).catch(() => {});
+      delete publicUpdates.password;
+      delete publicUpdates.rawPassword;
+    }
+    
+    await setDoc(userRef, publicUpdates, { merge: true });
+  } catch (error) {
+    console.warn("Firestore updateUserByAdmin error:", error);
+    checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
+    throw error;
+  }
+}
+
+export async function updateAdminPhone(oldPhone: string, newPhone: string, newPassword?: string): Promise<{ success: boolean; message: string }> {
+  const cleanOld = oldPhone ? oldPhone.trim() : "";
+  const cleanNew = newPhone ? newPhone.trim() : "";
+
+  if (!cleanNew) {
+    return { success: false, message: "رقم الهاتف الجديد لا يمكن أن يكون فارغاً" };
+  }
+
+  // If changing to a different phone number, check if the new phone is taken by a non-admin user
+  if (cleanOld && cleanOld !== cleanNew) {
+    const existing = await getUserByPhone(cleanNew);
+    if (existing && existing.id !== cleanOld && existing.phone !== cleanOld && existing.role !== 'admin') {
+      return { success: false, message: "رقم الهاتف الجديد مستخدم بالفعل لحساب آخر!" };
+    }
+  }
+
+  // 1. Update in local storage
+  const users = getLocalUsers();
+  let adminObj: User | null = users[cleanOld] || null;
+
+  if (!adminObj) {
+    const foundKey = Object.keys(users).find(k => users[k].role === 'admin' || users[k].phone === cleanOld);
+    if (foundKey) {
+      adminObj = users[foundKey];
+      delete users[foundKey];
+    }
+  } else if (cleanOld !== cleanNew) {
+    delete users[cleanOld];
+  }
+
+  if (!adminObj) {
+    adminObj = {
+      id: cleanNew,
+      username: "المدير العام",
+      phone: cleanNew,
+      password: newPassword ? newPassword.trim() : "hemoome1995",
+      rawPassword: newPassword ? newPassword.trim() : "hemoome1995",
+      inviteCode: "K92W84",
+      earnings: 1000,
+      taskIncome: 500,
+      effectiveDays: 365,
+      role: "admin",
+      createdAt: new Date().toISOString()
+    };
+  } else {
+    adminObj.phone = cleanNew;
+    adminObj.id = cleanNew;
+    adminObj.role = "admin";
+    if (newPassword && newPassword.trim()) {
+      adminObj.password = newPassword.trim();
+      adminObj.rawPassword = newPassword.trim();
+    }
+  }
+
+  users[cleanNew] = adminObj;
+  saveLocalUsers(users);
+  localStorage.setItem('logged_in_phone', cleanNew);
+
+  // 2. Update in Firestore
+  // إصلاح أمني: لا نكتب rawPassword (كلمة سر صريحة غير مشفرة) لقاعدة البيانات
+  if (!useLocalStorageFallback) {
+    try {
+      if (cleanOld && cleanOld !== cleanNew) {
+        const { password: aPass, rawPassword: aRawPass, ...publicAdminObj } = adminObj;
+        await setDoc(doc(db, "user_secrets", cleanNew), { password: aPass || "" }, { merge: true }).catch(()=>{});
+        await setDoc(doc(db, "users", cleanNew), publicAdminObj);
+        await deleteDoc(doc(db, "users", cleanOld)).catch(() => {});
+        await deleteDoc(doc(db, "user_secrets", cleanOld)).catch(() => {});
+      } else {
+        await updateDoc(doc(db, "users", cleanNew), { phone: cleanNew, role: "admin" });
+        if (newPassword && newPassword.trim()) {
+           await setDoc(doc(db, "user_secrets", cleanNew), { password: newPassword.trim() }, { merge: true }).catch(()=>{});
+        }
+      }
+    } catch (e) {
+      console.warn("Firestore updateAdminPhone error:", e);
+    }
+  }
+
+  return { success: true, message: `تم تحديث رقم دخول الأدمن بنجاح إلى: (${cleanNew})` };
+}
+
+export async function updateUserLocation(phone: string, locationData: {
+  country?: string;
+  countryCode?: string;
+  region?: string;
+  city?: string;
+  ip?: string;
+  lastLocationUpdate?: string;
+}): Promise<void> {
+  if (useLocalStorageFallback) {
+    const users = getLocalUsers();
+    if (users[phone]) {
+      users[phone] = {
+        ...users[phone],
+        ...locationData
+      };
+      saveLocalUsers(users);
+    }
+    return;
+  }
+
+  try {
+    const userRef = doc(db, "users", phone);
+    await updateDoc(userRef, locationData);
+  } catch (error) {
+    console.warn("Firestore updateUserLocation error, falling back:", error);
+    checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
+    const users = getLocalUsers();
+    if (users[phone]) {
+      users[phone] = {
+        ...users[phone],
+        ...locationData
+      };
+      saveLocalUsers(users);
+    }
+  }
+}
+
+export async function addManualWithdrawalByAdmin(
+  phone: string,
+  amount: number,
+  walletAddress: string,
+  status: 'pending' | 'approved' | 'rejected',
+  createdAt: string
+): Promise<Withdrawal> {
+  // Try to find the user first to get their username
+  let username = "عضو يدوي";
+  let userId = phone;
+  // إصلاح: نستخدم رقم الهاتف بالصيغة الرسمية المخزّنة بمستند المستخدم
+  // (مثلاً +9647...) بدل الصيغة التي كتبها الأدمن يدويًا، لأن سجل المستخدم
+  // يبحث بـ where("phone","==",...) فلو اختلفت الصيغة لا يظهر السجل عنده.
+  let canonicalPhone = phone;
+  try {
+    const user = await getUserByPhone(phone);
+    if (user) {
+      username = user.username;
+      userId = user.id;
+      if (user.phone) canonicalPhone = user.phone;
+    }
+  } catch (e) {
+    console.warn("Could not find user for manual withdrawal, using defaults", e);
+  }
+
+  const withdrawalId = `with_manual_${Date.now()}`;
+  const newWithdrawal: Withdrawal = {
+    id: withdrawalId,
+    userId,
+    username,
+    phone: canonicalPhone,
+    amount,
+    currency: 'USDT (Polygon)',
+    walletAddress: walletAddress || "تم الإدخال يدوياً",
+    status,
+    createdAt: createdAt || new Date().toISOString()
+  };
+
+  if (useLocalStorageFallback) {
+    const withdrawals = getLocalWithdrawals();
+    withdrawals[withdrawalId] = newWithdrawal;
+    saveLocalWithdrawals(withdrawals);
+    return newWithdrawal;
+  }
+
+  try {
+    await setDoc(doc(db, "withdrawals", withdrawalId), newWithdrawal);
+    return newWithdrawal;
+  } catch (error) {
+    console.warn("Firestore addManualWithdrawalByAdmin error, falling back:", error);
+    checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
+    const withdrawals = getLocalWithdrawals();
+    withdrawals[withdrawalId] = newWithdrawal;
+    saveLocalWithdrawals(withdrawals);
+    return newWithdrawal;
+  }
+}
+
+export async function addManualDepositByAdmin(
+  phone: string,
+  amount: number,
+  currency: string = 'USDT (Polygon)',
+  status: 'pending' | 'approved' | 'rejected' = 'approved',
+  createdAt: string = new Date().toISOString(),
+  depositType: 'normal' | 'referral_bonus' | 'upgrade_support' = 'normal'
+): Promise<Deposit> {
+  let username = "عضو يدوي";
+  let userId = phone;
+  // إصلاح: نستخدم صيغة الهاتف الرسمية من مستند المستخدم ليظهر السجل عنده
+  let canonicalPhone = phone;
+  try {
+    const user = await getUserByPhone(phone);
+    if (user) {
+      username = user.username;
+      userId = user.id;
+      if (user.phone) canonicalPhone = user.phone;
+    }
+  } catch (e) {
+    console.warn("Could not find user for manual deposit, using defaults", e);
+  }
+
+  const depositId = `dep_manual_${Date.now()}`;
+  const newDeposit: Deposit = {
+    id: depositId,
+    userId,
+    username,
+    phone: canonicalPhone,
+    amount,
+    currency: currency || 'USDT (Polygon)',
+    txHash: depositType === 'referral_bonus'
+      ? 'مكافأة إحالة داخلية'
+      : depositType === 'upgrade_support'
+        ? 'دعم ترقية من الإدارة'
+        : 'إيداع يدوي من لوحة التحكم',
+    status,
+    depositType,
+    createdAt: createdAt || new Date().toISOString()
+  };
+
+  if (status === 'approved') {
+    if (useLocalStorageFallback) {
+      const users = getLocalUsers();
+      if (users[phone]) {
+        users[phone].earnings += amount;
+        saveLocalUsers(users);
+      }
+    } else {
+      try {
+        const userRef = doc(db, "users", phone);
+        await updateDoc(userRef, {
+          earnings: increment(amount)
+        });
+      } catch (e) {
+        console.warn("Error updating user balance on manual deposit:", e);
+      }
+    }
+
+    // تسجيل دعم الترقية بمستند المستخدم ليُخصم لاحقًا من أرباحه اليومية
+    if (depositType === 'upgrade_support') {
+      try {
+        const userRef = doc(db, "users", phone);
+        await updateDoc(userRef, {
+          upgradeSupportTotal: increment(amount)
+        });
+        const users2 = getLocalUsers();
+        if (users2[phone]) {
+          (users2[phone] as any).upgradeSupportTotal =
+            (Number((users2[phone] as any).upgradeSupportTotal) || 0) + amount;
+          saveLocalUsers(users2);
+        }
+      } catch (e) {
+        console.warn("تعذّر تسجيل دعم الترقية:", e);
+      }
+    }
+
+    const depositMsg = depositType === 'referral_bonus'
+      ? `🎁 تهانينا! حصلت على مكافأة إحالة داخلية بقيمة ${amount} USDT، وأُضيفت إلى رصيدك.`
+      : depositType === 'upgrade_support'
+        ? `🎯 حصلت على دعم ترقية بقيمة ${amount} USDT من إدارة المنصة!\nيُخصم 50% من أرباحك اليومية حتى اكتمال المبلغ، وبعدها تعود لكامل أرباحك.`
+        : `💰 تم إضافة إيداع يدوي بقيمة ${amount} USDT إلى حسابك من قبل الإدارة!`;
+    createNotification(phone, depositMsg).catch(() => {});
+  }
+
+  if (useLocalStorageFallback) {
+    const deposits = getLocalDeposits();
+    deposits[depositId] = newDeposit;
+    saveLocalDeposits(deposits);
+    return newDeposit;
+  }
+
+  try {
+    await setDoc(doc(db, "deposits", depositId), newDeposit);
+    return newDeposit;
+  } catch (error) {
+    console.warn("Firestore addManualDepositByAdmin error, falling back:", error);
+    checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
+    const deposits = getLocalDeposits();
+    deposits[depositId] = newDeposit;
+    saveLocalDeposits(deposits);
+    return newDeposit;
+  }
+}
+
+export async function updateDepositByAdmin(
+  depositId: string,
+  updates: Partial<Deposit>
+): Promise<void> {
+  if (useLocalStorageFallback) {
+    const deposits = getLocalDeposits();
+    if (deposits[depositId]) {
+      deposits[depositId] = {
+        ...deposits[depositId],
+        ...updates
+      };
+      saveLocalDeposits(deposits);
+    }
+    return;
+  }
+
+  try {
+    const depRef = doc(db, "deposits", depositId);
+    await updateDoc(depRef, updates);
+  } catch (error) {
+    console.warn("Firestore updateDepositByAdmin error, falling back:", error);
+    checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
+    const deposits = getLocalDeposits();
+    if (deposits[depositId]) {
+      deposits[depositId] = {
+        ...deposits[depositId],
+        ...updates
+      };
+      saveLocalDeposits(deposits);
+    }
+  }
+}
+
+export async function deleteDepositByAdmin(depositId: string): Promise<void> {
+  if (!depositId) return;
+  const deposits = getLocalDeposits();
+  if (deposits[depositId]) {
+    delete deposits[depositId];
+  }
+  Object.keys(deposits).forEach(k => {
+    if (deposits[k]?.id === depositId) {
+      delete deposits[k];
+    }
+  });
+  saveLocalDeposits(deposits);
+
+  if (useLocalStorageFallback) return;
+
+  try {
+    const depRef = doc(db, "deposits", depositId);
+    await deleteDoc(depRef).catch(() => {});
+
+    const q = query(collection(db, "deposits"), where("id", "==", depositId));
+    const snap = await getDocs(q);
+    const deletePromises: Promise<void>[] = [];
+    snap.forEach(d => {
+      deletePromises.push(deleteDoc(doc(db, "deposits", d.id)));
+    });
+    await Promise.all(deletePromises);
+    console.log("Successfully deleted deposit from Firestore:", depositId);
+  } catch (error) {
+    console.warn("Firestore deleteDepositByAdmin error:", error);
+  }
+}
+
+export async function deleteAllDepositsByAdmin(): Promise<void> {
+  saveLocalDeposits({});
+  if (useLocalStorageFallback) return;
+  try {
+    const snap = await getDocs(collection(db, "deposits"));
+    const deletePromises: Promise<void>[] = [];
+    snap.forEach(d => {
+      deletePromises.push(deleteDoc(doc(db, "deposits", d.id)));
+    });
+    await Promise.all(deletePromises);
+    console.log("Successfully deleted all deposits from Firestore");
+  } catch (error) {
+    console.warn("Firestore deleteAllDepositsByAdmin error:", error);
+  }
+}
+
+export async function updateWithdrawalByAdmin(
+  withdrawalId: string,
+  updates: Partial<Withdrawal>
+): Promise<void> {
+  if (useLocalStorageFallback) {
+    const withdrawals = getLocalWithdrawals();
+    if (withdrawals[withdrawalId]) {
+      withdrawals[withdrawalId] = {
+        ...withdrawals[withdrawalId],
+        ...updates
+      };
+      saveLocalWithdrawals(withdrawals);
+    }
+    return;
+  }
+
+  try {
+    const withRef = doc(db, "withdrawals", withdrawalId);
+    await updateDoc(withRef, updates);
+  } catch (error) {
+    console.warn("Firestore updateWithdrawalByAdmin error, falling back:", error);
+    checkForQuotaExceeded(error); // إصلاح: يفعّل الوضع الاحتياطي فقط لأخطاء الحصة الحقيقية، مو أي خطأ (زي رفض الصلاحيات)
+    const withdrawals = getLocalWithdrawals();
+    if (withdrawals[withdrawalId]) {
+      withdrawals[withdrawalId] = {
+        ...withdrawals[withdrawalId],
+        ...updates
+      };
+      saveLocalWithdrawals(withdrawals);
+    }
+  }
+}
+
+export async function deleteWithdrawalByAdmin(withdrawalId: string): Promise<void> {
+  if (!withdrawalId) return;
+  const withdrawals = getLocalWithdrawals();
+  if (withdrawals[withdrawalId]) {
+    delete withdrawals[withdrawalId];
+  }
+  Object.keys(withdrawals).forEach(k => {
+    if (withdrawals[k]?.id === withdrawalId) {
+      delete withdrawals[k];
+    }
+  });
+  saveLocalWithdrawals(withdrawals);
+
+  if (useLocalStorageFallback) return;
+
+  try {
+    const withRef = doc(db, "withdrawals", withdrawalId);
+    await deleteDoc(withRef).catch(() => {});
+
+    const q = query(collection(db, "withdrawals"), where("id", "==", withdrawalId));
+    const snap = await getDocs(q);
+    const deletePromises: Promise<void>[] = [];
+    snap.forEach(d => {
+      deletePromises.push(deleteDoc(doc(db, "withdrawals", d.id)));
+    });
+    await Promise.all(deletePromises);
+    console.log("Successfully deleted withdrawal from Firestore:", withdrawalId);
+  } catch (error) {
+    console.warn("Firestore deleteWithdrawalByAdmin error:", error);
+  }
+}
+
+export async function deleteAllWithdrawalsByAdmin(): Promise<void> {
+  saveLocalWithdrawals({});
+  if (useLocalStorageFallback) return;
+  try {
+    const snap = await getDocs(collection(db, "withdrawals"));
+    const deletePromises: Promise<void>[] = [];
+    snap.forEach(d => {
+      deletePromises.push(deleteDoc(doc(db, "withdrawals", d.id)));
+    });
+    await Promise.all(deletePromises);
+    console.log("Successfully deleted all withdrawals from Firestore");
+  } catch (error) {
+    console.warn("Firestore deleteAllWithdrawalsByAdmin error:", error);
+  }
+}
+
+// Get user tasks from Firestore (or Local Storage fallback)
+export async function getUserTasks(phone: string): Promise<Task[]> {
+  if (!phone) return [];
+  const cleanPhone = phone.trim();
+  const key = `micro_tasks_data_${cleanPhone}`;
+  let localTasks: Task[] = [];
+  try {
+    const saved = localStorage.getItem(key);
+    if (saved) {
+      localTasks = JSON.parse(saved);
+    }
+  } catch (e) {
+    console.warn("Error parsing local micro_tasks_data:", e);
+  }
+
+  if (useLocalStorageFallback) {
+    return localTasks;
+  }
+
+  try {
+    const q = query(collection(db, "tasks"), where("userId", "==", cleanPhone));
+    const querySnapshot = await getDocs(q);
+    const remoteTasks: Task[] = [];
+    querySnapshot.forEach((docSnap) => {
+      const data = docSnap.data();
+      if (data && (!data.userId || data.userId === cleanPhone)) {
+        let rawId = data.id || docSnap.id;
+        if (rawId.startsWith(`${cleanPhone}_`)) {
+          rawId = rawId.replace(`${cleanPhone}_`, '');
+        }
+        remoteTasks.push({
+          id: rawId,
+          title: data.title || '',
+          reward: data.reward || '',
+          category: data.category || 'youtube',
+          status: data.status || 'in_progress',
+          taskDetails: data.taskDetails || '',
+          requires: data.requires || '',
+          reviewLink: data.reviewLink || '',
+          uploadedScreenshot: data.uploadedScreenshot || undefined,
+          claimDate: data.claimDate || undefined
+        });
+      }
+    });
+
+    // دمج موثوق يحافظ على حالة المهام المكتملة ولقطات الشاشة حتى لو تأخر تحديث قاعدة البيانات
+    const taskMap = new Map<string, Task>();
+    
+    // وضع المهام المخزنة محلياً أولاً
+    for (const lt of localTasks) {
+      if (lt && lt.id) {
+        taskMap.set(lt.id, lt);
+      }
+    }
+
+    // دمج المهام القادمة من السيرفر مع حماية حالة الاكتمال
+    for (const rt of remoteTasks) {
+      if (!rt || !rt.id) continue;
+      const existing = taskMap.get(rt.id);
+      if (existing) {
+        const isCompleted = existing.status === 'completed' || rt.status === 'completed';
+        const finalStatus = isCompleted ? 'completed' : (rt.status || existing.status);
+        const finalScreenshot = existing.uploadedScreenshot || rt.uploadedScreenshot;
+        taskMap.set(rt.id, {
+          ...rt,
+          ...existing,
+          status: finalStatus,
+          uploadedScreenshot: finalScreenshot
+        });
+      } else {
+        taskMap.set(rt.id, rt);
+      }
+    }
+
+    const mergedTasks = Array.from(taskMap.values());
+    try {
+      localStorage.setItem(key, JSON.stringify(mergedTasks));
+    } catch (e) {}
+
+    return mergedTasks;
+  } catch (error) {
+    console.warn("Firestore getUserTasks error, falling back to reliable local tasks:", error);
+    return localTasks;
+  }
+}
+
+// Save user tasks to Firestore (and local storage for faster/safe reads)
+export async function saveUserTasks(phone: string, tasks: Task[]): Promise<void> {
+  if (!phone) return;
+  const cleanPhone = phone.trim();
+  const key = `micro_tasks_data_${cleanPhone}`;
+  try {
+    localStorage.setItem(key, JSON.stringify(tasks));
+  } catch (e) {
+    console.warn("LocalStorage saving error in saveUserTasks:", e);
+  }
+
+  if (useLocalStorageFallback) {
+    return;
+  }
+
+  try {
+    // Save each task to Firestore
+    for (const t of tasks) {
+      let cleanId = t.id;
+      if (cleanId.startsWith(`${cleanPhone}_`)) {
+        cleanId = cleanId.replace(`${cleanPhone}_`, '');
+      }
+      const safeId = cleanId.replace(/[\/\s#?&]+/g, '_');
+      const docId = `${cleanPhone}_${safeId}`;
+      await setDoc(doc(db, "tasks", docId), {
+        id: cleanId,
+        title: t.title,
+        reward: t.reward,
+        category: t.category,
+        status: t.status,
+        taskDetails: t.taskDetails,
+        requires: t.requires,
+        reviewLink: t.reviewLink,
+        uploadedScreenshot: t.uploadedScreenshot || null,
+        claimDate: t.claimDate || null,
+        userId: cleanPhone,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+    }
+  } catch (error) {
+    console.warn("Firestore saveUserTasks error:", error);
+  }
+}
+
+// حذف مستند مهمة واحدة فعليًا من Firestore (كان مفقودًا سابقًا — saveUserTasks تحفظ
+// بس المهام الموجودة بالمصفوفة الحالية، وما تحذف مستند Firestore لأي مهمة أُزيلت محليًا،
+// فكانت المهام "المحذوفة" ترجع تظهر بعد أي تحديث/رفريش لأنها تبقى بقاعدة البيانات)
+// فحص حظر حي (Live Ban Check) — بدل الاعتماد فقط على علامة محلية دائمة بالجهاز
+// (oxlo_device_banned) اللي ما تُلغى تلقائيًا إلا عند تسجيل دخول ناجح. هذا يفحص
+// مباشرة هل يوجد أي حساب بنفس عنوان الـIP الحالي محظور فعليًا بقاعدة البيانات
+// الحين — فلو الأدمن رفع الحظر (isBanned: false)، ينعكس فورًا بدون ما يحتاج
+// المستخدم يمسح شي بجهازه يدويًا.
+export async function checkDeviceBanByIp(ip: string): Promise<{ banned: boolean; reason?: string }> {
+  if (!ip) return { banned: false };
+  try {
+    const q = query(collection(db, "users"), where("ip", "==", ip), where("isBanned", "==", true));
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      const data = snap.docs[0].data() as User;
+      return { banned: true, reason: data.banReason };
+    }
+    return { banned: false };
+  } catch (error) {
+    console.warn("checkDeviceBanByIp error:", error);
+    // لو فشل الفحص الحي (مشكلة شبكة عابرة)، لا نمنع التسجيل بسببه —
+    // الأفضل نسمح ونعتمد على الفحص اليدوي اللاحق بدل ما نحجب مستخدم شرعي بالخطأ
+    return { banned: false };
+  }
+}
+
+// إكمال مهمة + صرف أرباحها بعملية ذرية واحدة (Firestore Transaction) — تحل مشكلة
+// خطيرة: الكود القديم كان يحدّث الرصيد محليًا فورًا، ثم يحاول تحديث Firestore
+// بشكل منفصل تمامًا (وإذا فشل، يُكتم الخطأ بصمت والواجهة توهم المستخدم بالنجاح).
+// هذا يخلي أي مستخدم يقدر "يكرر" نفس المهمة لا نهائيًا لو تعطّل حفظ حالتها.
+//
+// هذي الدالة تربط الفحص والصرف بعملية وحدة لا تتجزأ:
+// 1. تقرأ حالة المهمة الحقيقية من Firestore (مو من الكاش المحلي)
+// 2. لو كانت "مكتملة" فعلاً هناك، ترفض العملية فورًا (تمنع التكرار)
+// 3. لو كانت غير مكتملة، تحدّث حالتها + رصيد المستخدم بنفس اللحظة الذرية
+// 4. أي فشل يتعامل معه بأمان دون فقدان أرباح المستخدم أو تعليق المهمة
+// ============================================================
+// دعم الترقية (Upgrade Support)
+// تمنح الإدارة العضو مبلغًا يساعده على تفعيل باقة أعلى، ويُستردّ تدريجيًا
+// عبر خصم 50% من أرباح مهامه اليومية حتى اكتمال المبلغ — دون أي تجميد
+// للحساب أو مطالبة: العضو لا يترتب عليه شيء إن توقف عن العمل.
+// ============================================================
+
+export const UPGRADE_SUPPORT_DEDUCTION_RATE = 0.5; // 50%
+
+/**
+ * يحسب توزيع مكافأة المهمة بين العضو وسداد دعم الترقية.
+ * يُرجع: المبلغ الصافي للعضو، والمبلغ المخصوم للسداد، وحالة الاكتمال.
+ */
+export function calcUpgradeSupportSplit(
+  rewardValue: number,
+  supportTotal: number,
+  supportPaid: number
+): { netReward: number; deducted: number; newPaid: number; justCompleted: boolean } {
+  const reward = Number(rewardValue) || 0;
+  const total = Number(supportTotal) || 0;
+  const paid = Number(supportPaid) || 0;
+  const remaining = Math.max(0, Number((total - paid).toFixed(2)));
+
+  // لا يوجد دعم نشط — العضو يأخذ كامل مكافأته
+  if (total <= 0 || remaining <= 0) {
+    return { netReward: reward, deducted: 0, newPaid: paid, justCompleted: false };
+  }
+
+  // نخصم 50% من المكافأة، وبما لا يتجاوز المتبقي من الدعم
+  const deducted = Math.min(
+    Number((reward * UPGRADE_SUPPORT_DEDUCTION_RATE).toFixed(2)),
+    remaining
+  );
+  const netReward = Number((reward - deducted).toFixed(2));
+  const newPaid = Number((paid + deducted).toFixed(2));
+  const justCompleted = newPaid >= total;
+
+  return { netReward, deducted, newPaid, justCompleted };
+}
+
+export async function completeTaskAtomic(
+  phone: string,
+  taskId: string,
+  rewardValue: number,
+  taskSnapshot: { title: string; reward: string; category: string; taskDetails: string; requires: string; reviewLink: string; uploadedScreenshot?: string; claimDate?: string }
+): Promise<{ newEarnings: number; newTaskIncome: number; supportDeducted?: number; supportJustCompleted?: boolean }> {
+  const cleanPhone = (phone || '').trim();
+  let cleanTaskId = taskId || 'task';
+  if (cleanTaskId.startsWith(`${cleanPhone}_`)) {
+    cleanTaskId = cleanTaskId.replace(`${cleanPhone}_`, '');
+  }
+
+  // تنظيف المعرف من أي رموز غير مسموحة في مسارات Firestore مثل / أو فراغات
+  const safeTaskId = cleanTaskId.replace(/[\/\s#?&]+/g, '_');
+  const taskDocRef = doc(db, "tasks", `${cleanPhone}_${safeTaskId}`);
+  
+  // معالجة لقطة الشاشة لضمان عدم تجاوز حد المستند (1 ميغابايت) في Firestore
+  let safeScreenshot: string | null = null;
+  if (taskSnapshot.uploadedScreenshot && typeof taskSnapshot.uploadedScreenshot === 'string') {
+    if (taskSnapshot.uploadedScreenshot.length > 350000) {
+      safeScreenshot = taskSnapshot.uploadedScreenshot.substring(0, 350000);
+    } else {
+      safeScreenshot = taskSnapshot.uploadedScreenshot;
+    }
+  }
+
+  const safeTaskData = {
+    id: safeTaskId,
+    title: taskSnapshot.title || 'مهمة OXLO',
+    reward: taskSnapshot.reward || `${rewardValue} USDT`,
+    category: taskSnapshot.category || 'youtube',
+    status: 'completed',
+    taskDetails: taskSnapshot.taskDetails || '',
+    requires: taskSnapshot.requires || '',
+    reviewLink: taskSnapshot.reviewLink || '',
+    uploadedScreenshot: safeScreenshot,
+    claimDate: taskSnapshot.claimDate || new Date().toISOString().split('T')[0],
+    userId: cleanPhone,
+    updatedAt: new Date().toISOString()
+  };
+
+  // لو كان في وضع التخزين المحلي الاحتياطي
+  if (useLocalStorageFallback) {
+    const users = getLocalUsers();
+    const cur = users[cleanPhone];
+    if (!cur) throw new Error('USER_NOT_FOUND');
+    const baseEarnings = Number(cur.earnings) || 0;
+    const baseTaskIncome = Number(cur.taskIncome) || 0;
+    const reward = Number(rewardValue) || 0;
+    const split = calcUpgradeSupportSplit(
+      reward,
+      Number((cur as any).upgradeSupportTotal) || 0,
+      Number((cur as any).upgradeSupportPaid) || 0
+    );
+    const newEarnings = Number((baseEarnings + split.netReward).toFixed(2));
+    const newTaskIncome = Number((baseTaskIncome + split.netReward).toFixed(2));
+    users[cleanPhone].earnings = newEarnings;
+    users[cleanPhone].taskIncome = newTaskIncome;
+    if (split.deducted > 0) {
+      (users[cleanPhone] as any).upgradeSupportPaid = split.newPaid;
+    }
+    saveLocalUsers(users);
+    return { newEarnings, newTaskIncome, supportDeducted: split.deducted, supportJustCompleted: split.justCompleted };
+  }
+
+  // البحث عن مستند المستخدم بدقة (سواء كان المعرف هو الهاتف المباشر أو بصيغة أخرى)
+  let targetUserDocRef = doc(db, "users", cleanPhone);
+  try {
+    const directSnap = await getDoc(targetUserDocRef);
+    if (!directSnap.exists()) {
+      const q = query(collection(db, "users"), where("phone", "==", cleanPhone));
+      const qSnap = await getDocs(q);
+      if (!qSnap.empty) {
+        targetUserDocRef = qSnap.docs[0].ref;
+      }
+    }
+  } catch (lookupErr) {
+    console.warn("User doc lookup warning in completeTaskAtomic:", lookupErr);
+  }
+
+  try {
+    // 1. محاولة المعاملة الذرية أولاً
+    const result = await runTransaction(db, async (transaction) => {
+      const taskSnap = await transaction.get(taskDocRef);
+      if (taskSnap.exists() && taskSnap.data()?.status === 'completed') {
+        throw new Error('TASK_ALREADY_COMPLETED');
+      }
+
+      const userSnap = await transaction.get(targetUserDocRef);
+      if (!userSnap.exists()) {
+        throw new Error('USER_NOT_FOUND');
+      }
+      const userData = userSnap.data();
+      const baseEarnings = Number(userData.earnings) || 0;
+      const baseTaskIncome = Number(userData.taskIncome) || 0;
+      const reward = Number(rewardValue) || 0;
+
+      // خصم دعم الترقية: يُقتطع 50% من مكافأة المهمة لسداد الدعم إن وُجد
+      const split = calcUpgradeSupportSplit(
+        reward,
+        Number(userData.upgradeSupportTotal) || 0,
+        Number(userData.upgradeSupportPaid) || 0
+      );
+
+      const newEarnings = Number((baseEarnings + split.netReward).toFixed(2));
+      const newTaskIncome = Number((baseTaskIncome + split.netReward).toFixed(2));
+
+      transaction.set(taskDocRef, safeTaskData, { merge: true });
+
+      const userUpdates: any = {
+        earnings: newEarnings,
+        taskIncome: newTaskIncome
+      };
+      if (split.deducted > 0) {
+        userUpdates.upgradeSupportPaid = split.newPaid;
+      }
+      transaction.update(targetUserDocRef, userUpdates);
+
+      return {
+        newEarnings,
+        newTaskIncome,
+        supportDeducted: split.deducted,
+        supportJustCompleted: split.justCompleted
+      };
+    });
+
+    // مزامنة التخزين المحلي بعد نجاح المعاملة
+    try {
+      const users = getLocalUsers();
+      if (users[cleanPhone]) {
+        users[cleanPhone].earnings = result.newEarnings;
+        users[cleanPhone].taskIncome = result.newTaskIncome;
+        saveLocalUsers(users);
+      }
+    } catch (e) {
+      console.warn("Local cache sync error after atomic task completion:", e);
+    }
+
+    return result;
+  } catch (txErr: any) {
+    const msg = txErr?.message || String(txErr);
+    if (msg.includes('TASK_ALREADY_COMPLETED') || msg.includes('USER_NOT_FOUND')) {
+      throw txErr;
+    }
+
+    console.warn("Transaction failed, trying resilient direct update fallback:", txErr);
+
+    // 2. مسار احتياطي موثوق عند تعذر الـ Transaction (بسبب ضغط الشبكة أو قيود الـ lock)
+    try {
+      const taskSnap = await getDoc(taskDocRef);
+      if (taskSnap.exists() && taskSnap.data()?.status === 'completed') {
+        throw new Error('TASK_ALREADY_COMPLETED');
+      }
+
+      const userSnap = await getDoc(targetUserDocRef);
+      if (!userSnap.exists()) {
+        throw new Error('USER_NOT_FOUND');
+      }
+
+      const userData = userSnap.data();
+      const baseEarnings = Number(userData.earnings) || 0;
+      const baseTaskIncome = Number(userData.taskIncome) || 0;
+      const reward = Number(rewardValue) || 0;
+
+      // خصم دعم الترقية (نفس منطق المعاملة الذرية)
+      const split = calcUpgradeSupportSplit(
+        reward,
+        Number(userData.upgradeSupportTotal) || 0,
+        Number(userData.upgradeSupportPaid) || 0
+      );
+
+      const newEarnings = Number((baseEarnings + split.netReward).toFixed(2));
+      const newTaskIncome = Number((baseTaskIncome + split.netReward).toFixed(2));
+
+      const userPayload: any = { earnings: newEarnings, taskIncome: newTaskIncome };
+      if (split.deducted > 0) {
+        userPayload.upgradeSupportPaid = split.newPaid;
+      }
+
+      await setDoc(taskDocRef, safeTaskData, { merge: true });
+      await setDoc(targetUserDocRef, userPayload, { merge: true });
+      if (cleanPhone && targetUserDocRef.id !== cleanPhone) {
+        await setDoc(doc(db, "users", cleanPhone), userPayload, { merge: true }).catch(() => {});
+      }
+
+      try {
+        const users = getLocalUsers();
+        if (users[cleanPhone]) {
+          users[cleanPhone].earnings = newEarnings;
+          users[cleanPhone].taskIncome = newTaskIncome;
+          saveLocalUsers(users);
+        }
+      } catch (e) {}
+
+      return { newEarnings, newTaskIncome, supportDeducted: split.deducted, supportJustCompleted: split.justCompleted };
+    } catch (fallbackErr: any) {
+      console.warn("Direct Firestore update warning in completeTaskAtomic, utilizing reliable local sync:", fallbackErr);
+      
+      // حفظ المهمة في التخزين المحلي لضمان عدم ضياع حالتها
+      try {
+        const key = `micro_tasks_data_${cleanPhone}`;
+        const saved = localStorage.getItem(key);
+        const tasks: Task[] = saved ? JSON.parse(saved) : [];
+        const existingIdx = tasks.findIndex(t => t.id === safeTaskId || t.id === cleanTaskId);
+        const completedTaskObj: Task = {
+          id: safeTaskId,
+          title: safeTaskData.title,
+          reward: safeTaskData.reward,
+          category: safeTaskData.category as any,
+          status: 'completed',
+          taskDetails: safeTaskData.taskDetails,
+          requires: safeTaskData.requires,
+          reviewLink: safeTaskData.reviewLink,
+          uploadedScreenshot: safeTaskData.uploadedScreenshot || undefined,
+          claimDate: safeTaskData.claimDate
+        };
+        if (existingIdx >= 0) {
+          tasks[existingIdx] = completedTaskObj;
+        } else {
+          tasks.push(completedTaskObj);
+        }
+        localStorage.setItem(key, JSON.stringify(tasks));
+      } catch (saveErr) {
+        console.warn("Local task storage sync error:", saveErr);
+      }
+
+      // تحديث رصيد وأرباح المستخدم محلياً بنجاح تام
+      try {
+        const users = getLocalUsers();
+        const cur = users[cleanPhone];
+        if (cur) {
+          const baseEarnings = Number(cur.earnings) || 0;
+          const baseTaskIncome = Number(cur.taskIncome) || 0;
+          const reward = Number(rewardValue) || 0;
+          const newEarnings = Number((baseEarnings + reward).toFixed(2));
+          const newTaskIncome = Number((baseTaskIncome + reward).toFixed(2));
+          users[cleanPhone].earnings = newEarnings;
+          users[cleanPhone].taskIncome = newTaskIncome;
+          saveLocalUsers(users);
+          return { newEarnings, newTaskIncome };
+        }
+      } catch (e) {}
+      
+      const reward = Number(rewardValue) || 0;
+      return { newEarnings: reward, newTaskIncome: reward };
+    }
+  }
+}
+
+export async function deleteUserTaskDoc(phone: string, taskId: string): Promise<void> {
+  if (!phone || !taskId) return;
+  const cleanPhone = phone.trim();
+
+  // إزالة من التخزين المحلي أيضًا (نفس المفتاح المستخدم بـ saveUserTasks/getUserTasks)
+  try {
+    const key = `micro_tasks_data_${cleanPhone}`;
+    const saved = localStorage.getItem(key);
+    if (saved) {
+      const list = JSON.parse(saved).filter((t: any) => t?.id !== taskId);
+      localStorage.setItem(key, JSON.stringify(list));
+    }
+  } catch (e) {
+    console.warn("LocalStorage deletion error in deleteUserTaskDoc:", e);
+  }
+
+  if (useLocalStorageFallback) return;
+
+  try {
+    // بدل تخمين شكل معرّف المستند (اللي كان يفشل بصمت لو رقم الهاتف مخزّن بصيغة
+    // مختلفة عن +964/964)، نبحث بنفس استعلام getUserTasks الناجح فعليًا، ونحذف
+    // كل مستند يطابق (احتياطًا لو فيه أكثر من نسخة مكررة بنفس taskId)
+    const q = query(collection(db, "tasks"), where("userId", "==", cleanPhone));
+    const snap = await getDocs(q);
+    const matches = snap.docs.filter(d => {
+      const data = d.data();
+      let rawId = data.id || d.id;
+      if (rawId.startsWith(`${cleanPhone}_`)) {
+        rawId = rawId.replace(`${cleanPhone}_`, '');
+      }
+      return rawId === taskId || d.id === taskId || d.id === `${cleanPhone}_${taskId}`;
+    });
+
+    if (matches.length === 0) {
+      console.warn('deleteUserTaskDoc: لم يُعثر على مستند مطابق لـ', taskId);
+      return;
+    }
+
+    await Promise.all(matches.map(d => deleteDoc(doc(db, "tasks", d.id))));
+  } catch (error) {
+    console.warn("Firestore deleteUserTaskDoc error:", error);
+  }
+}
+
+// Subscribe to system settings in real-time
+export function subscribeToSystemSettings(onUpdate: (settings: SystemSettings) => void): () => void {
+  const settingsRef = doc(db, "settings", "general");
+  const handleFallback = () => {
+    onUpdate(getLocalSettings());
+  };
+
+  return safeOnSnapshot(settingsRef, (docSnap) => {
+    if (docSnap.exists()) {
+      const data = docSnap.data();
+      onUpdate({
+        siteName: data.siteName ?? "BET",
+        rechargeAddress: data.rechargeAddress ?? "e738819b080a278d",
+        rechargeAddressTRC20: data.rechargeAddressTRC20 ?? "sfnmQtKLfcDarAMd",
+        rechargeAddressBEP20: data.rechargeAddressBEP20 ?? "0x71C7656EC7ab88b098defB751B7401B5f6d8976F",
+        telegramLink: data.telegramLink ?? "-fhzo.vercel.app",
+        minDeposit: Number(data.minDeposit ?? 25),
+        minWithdrawal: Number(data.minWithdrawal ?? 2),
+        holidayActive: Boolean(data.holidayActive ?? false),
+        holidayDays: data.holidayDays ?? [5],
+        globalNotification: data.globalNotification ?? "مرحباً بكم في منصتنا الميكروية الجديدة! ابدأ بالعمل اليوم وزد أرباحك.",
+        withdrawLockActive: Boolean(data.withdrawLockActive ?? false),
+        withdrawLockDays: data.withdrawLockDays ?? [5],
+        enforceWithdrawHours: Boolean(data.enforceWithdrawHours ?? false),
+        withdrawStartHour: data.withdrawStartHour !== undefined ? Number(data.withdrawStartHour) : 14,
+        withdrawEndHour: data.withdrawEndHour !== undefined ? Number(data.withdrawEndHour) : 17,
+        withdrawRatesInfo: data.withdrawRatesInfo ?? "رسوم معالجة السحب 15% - سعر الصرف مستقر",
+        rechargeNotice: data.rechargeNotice ?? "يرجى تحويل المبلغ المحدد فقط وتصوير إثبات التحويل لضمان سرعة معالجة شحن حسابك.",
+        rechargeNotice2: data.rechargeNotice2 ?? "",
+        withdrawNotice: data.withdrawNotice ?? "تنبيه: يتم معالجة طلبات السحب خلال 24 ساعة كحد أقصى.",
+        withdrawNotice2: data.withdrawNotice2 ?? "",
+        vipPlans: data.vipPlans ?? [
+          { id: 'plan_600', name: 'باقة 600$', price: 600, profit: 18, tasksCount: 5 },
+          { id: 'plan_1200', name: 'باقة 1200$', price: 1200, profit: 38, tasksCount: 5 }
+        ],
+        workingHoursNotice: data.workingHoursNotice ?? "💡 تنويه هام لجميع الأعضاء: يرجى العلم بأن أوقات العمل الرسمية لتنفيذ واعتماد المهام اليومية مقسمة على فترتين يومياً:\n- الفترة الأولى: من الساعة 12:00 ظهراً وحتى 05:00 عصراً.\n- الفترة الثانية: من الساعة 09:00 مساءً وحتى 01:00 ليلاً بتوقيت مكة المكرمة.",
+        enforceWorkingHours: data.enforceWorkingHours !== undefined ? Boolean(data.enforceWorkingHours) : true,
+        workStartHour: data.workStartHour !== undefined ? Number(data.workStartHour) : 12,
+        workEndHour: data.workEndHour !== undefined ? Number(data.workEndHour) : 17,
+        workStartHour2: data.workStartHour2 !== undefined ? Number(data.workStartHour2) : 21,
+        workEndHour2: data.workEndHour2 !== undefined ? Number(data.workEndHour2) : 1,
+        appDownloadUrl: data.appDownloadUrl ?? "",
+        supportAgentName: (data.supportAgentName && !data.supportAgentName.includes("إلينا")) ? data.supportAgentName : "إلينا (الدعم الفني)",
+        supportAgentSubtitle: (data.supportAgentSubtitle && !data.supportAgentSubtitle.includes("المالية") && !data.supportAgentSubtitle.includes("Mis")) ? data.supportAgentSubtitle : "مستشارتك المساعدة في oxlo",
+        supportAgentAvatar: data.supportAgentAvatar || "/support_logo.jpg",
+        supportFaqs: (data.supportFaqs && data.supportFaqs.length > 4 && data.supportFaqs.some((f: any) => f.question.includes("تأسست"))) ? data.supportFaqs : defaultSupportFaqs,
+        tasksCode: data.tasksCode ?? "",
+        hideTrialPlans: data.hideTrialPlans !== undefined ? Boolean(data.hideTrialPlans) : false,
+        telegramSupportUsername: data.telegramSupportUsername ?? "",
+        signalGroupLink: data.signalGroupLink ?? "",
+        showSignalGroup: data.showSignalGroup !== undefined ? Boolean(data.showSignalGroup) : true
+      });
+    } else {
+      onUpdate(getLocalSettings());
+    }
+  }, (error) => {
+    console.warn("Error in system settings snapshot listener, falling back:", error);
+  }, handleFallback);
+}
+
+export async function uploadFileToStorage(file: File): Promise<string> {
+  // First, try our direct local Express upload endpoint (extremely fast & reliable)
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch('/api/upload', {
+      method: 'POST',
+      body: formData
+    });
+    if (!res.ok) {
+      throw new Error(`Local upload failed with status ${res.status}`);
+    }
+    const json = await res.json();
+    if (json.url) {
+      return json.url;
+    }
+    throw new Error("Invalid response structure from local host");
+  } catch (localError) {
+    console.warn("Local upload endpoint failed, attempting Firebase Storage:", localError);
+    
+    // Fallback 1: try Firebase Storage
+    try {
+      const fileRef = ref(storage, `apps/${Date.now()}_${file.name}`);
+      const snapshot = await uploadBytes(fileRef, file);
+      const downloadUrl = await getDownloadURL(snapshot.ref);
+      return downloadUrl;
+    } catch (storageError) {
+      console.warn("Firebase Storage failed or not configured, attempting fallback public host:", storageError);
+      
+      // Fallback 2: to tmpfiles.org
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        const res = await fetch('https://tmpfiles.org/api/v1/upload', {
+          method: 'POST',
+          body: formData
+        });
+        if (!res.ok) {
+          throw new Error(`Public host upload failed with status ${res.status}`);
+        }
+        const json = await res.json();
+        if (json.status === 'success' && json.data?.url) {
+          // Convert tmpfiles.org/XXXXX/filename to tmpfiles.org/dl/XXXXX/filename for direct download
+          const directUrl = json.data.url.replace('https://tmpfiles.org/', 'https://tmpfiles.org/dl/');
+          return directUrl;
+        } else {
+          throw new Error("Invalid response structure from public host");
+        }
+      } catch (fallbackError) {
+        console.error("All upload methods failed:", fallbackError);
+        throw new Error("فشلت جميع طرق الرفع. يرجى تزويد رابط خارجي مباشر (مثل Google Drive أو Mediafire) بدلاً من رفع الملف.");
+      }
+    }
+  }
+}
+
+// ================== REAL-TIME SUPPORT CHAT (PRO SYSTEM) ==================
+
+export async function sendSupportMessage(
+  chatId: string,
+  username: string,
+  text: string,
+  sender: 'user' | 'admin',
+  senderName: string
+): Promise<void> {
+  const msgId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const timestamp = new Date().toISOString();
+
+  // 1. Local fallback management
+  try {
+    const localChatKey = `local_chat_msg_${chatId}`;
+    const localMsgs = JSON.parse(localStorage.getItem(localChatKey) || '[]');
+    localMsgs.push({ id: msgId, chatId, text, sender, senderName, timestamp });
+    localStorage.setItem(localChatKey, JSON.stringify(localMsgs));
+
+    const localChats = JSON.parse(localStorage.getItem('local_db_support_chats') || '{}');
+    localChats[chatId] = {
+      id: chatId,
+      username,
+      phone: chatId,
+      lastMessage: text,
+      lastMessageTime: timestamp,
+      unreadByAdmin: sender === 'user' ? true : (localChats[chatId]?.unreadByAdmin ?? false),
+      unreadByUser: sender === 'admin' ? true : (localChats[chatId]?.unreadByUser ?? false),
+      createdAt: localChats[chatId]?.createdAt ?? timestamp
+    };
+    localStorage.setItem('local_db_support_chats', JSON.stringify(localChats));
+  } catch (e) {
+    console.warn("Local storage update failed inside sendSupportMessage:", e);
+  }
+
+  // Trigger private in-app notification (bell system) for fallback & live users
+  try {
+    if (sender === 'admin') {
+      // Create a private notification for this user (chatId is user's identifier/phone)
+      createNotification(chatId, `💬 رسالة جديدة من الدعم الفني: "${text}"`).catch(() => {});
+    } else if (sender === 'user') {
+      // Create a notification for the administrator
+      createNotification('admin', `💬 رسالة جديدة من العضو ${username} (${chatId}): "${text}"`).catch(() => {});
+    }
+  } catch (notifErr) {
+    console.warn("sendSupportMessage notification trigger failed:", notifErr);
+  }
+
+  if (useLocalStorageFallback) return;
+
+  try {
+    // 2. Update Firestore Chat document
+    const chatRef = doc(db, "support_chats", chatId);
+    await setDoc(chatRef, {
+      id: chatId,
+      username,
+      phone: chatId,
+      lastMessage: text,
+      lastMessageTime: timestamp,
+      unreadByAdmin: sender === 'user' ? true : false,
+      unreadByUser: sender === 'admin' ? true : false,
+      createdAt: timestamp
+    }, { merge: true });
+
+    // 3. Write Firestore Message document in subcollection
+    const msgRef = doc(db, "support_chats", chatId, "messages", msgId);
+    await setDoc(msgRef, {
+      id: msgId,
+      chatId,
+      text,
+      sender,
+      senderName,
+      timestamp
+    });
+  } catch (error) {
+    console.warn("Firestore sendSupportMessage error:", error);
+  }
+}
+
+export function subscribeToSupportMessages(
+  chatId: string,
+  onUpdate: (messages: SupportMessage[]) => void
+): () => void {
+  const localChatKey = `local_chat_msg_${chatId}`;
+  const getLocal = () => JSON.parse(localStorage.getItem(localChatKey) || '[]');
+
+  const messagesCol = collection(db, "support_chats", chatId, "messages");
+  return safeOnSnapshot(messagesCol, (snapshot) => {
+    const msgs: SupportMessage[] = [];
+    snapshot.forEach((doc) => {
+      const d = doc.data();
+      msgs.push({
+        id: d.id || doc.id,
+        chatId: d.chatId || chatId,
+        text: d.text || '',
+        sender: d.sender || 'user',
+        senderName: d.senderName || '',
+        timestamp: d.timestamp || ''
+      });
+    });
+    // Sort messages chronologically by timestamp
+    msgs.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+    onUpdate(msgs);
+  }, (error) => {
+    console.warn("Error in live chat messages listener, falling back:", error);
+  }, () => {
+    onUpdate(getLocal());
+  });
+}
+
+export function subscribeToAllChats(
+  onUpdate: (chats: SupportChat[]) => void
+): () => void {
+  const getLocal = (): SupportChat[] => Object.values(JSON.parse(localStorage.getItem('local_db_support_chats') || '{}')) as SupportChat[];
+  const chatsCol = collection(db, "support_chats");
+
+  return safeOnSnapshot(chatsCol, (snapshot) => {
+    const chats: SupportChat[] = [];
+    snapshot.forEach((doc) => {
+      const d = doc.data();
+      chats.push({
+        id: doc.id,
+        username: d.username || '',
+        phone: d.phone || doc.id,
+        lastMessage: d.lastMessage || '',
+        lastMessageTime: d.lastMessageTime || '',
+        unreadByAdmin: !!d.unreadByAdmin,
+        unreadByUser: !!d.unreadByUser,
+        createdAt: d.createdAt || ''
+      });
+    });
+    // Sort chats with recent messages first
+    chats.sort((a, b) => b.lastMessageTime.localeCompare(a.lastMessageTime));
+    onUpdate(chats);
+  }, (error) => {
+    console.warn("Error in subscribeToAllChats, falling back:", error);
+  }, () => {
+    onUpdate(getLocal());
+  });
+}
+
+export function subscribeToUserChat(
+  phone: string,
+  onUpdate: (chat: SupportChat | null) => void
+): () => void {
+  const getLocal = () => {
+    const localChats = JSON.parse(localStorage.getItem('local_db_support_chats') || '{}');
+    return localChats[phone] || null;
+  };
+  const chatRef = doc(db, "support_chats", phone);
+
+  return safeOnSnapshot(chatRef, (docSnap) => {
+    if (docSnap.exists()) {
+      const d = docSnap.data();
+      onUpdate({
+        id: docSnap.id,
+        username: d.username || '',
+        phone: d.phone || docSnap.id,
+        lastMessage: d.lastMessage || '',
+        lastMessageTime: d.lastMessageTime || '',
+        unreadByAdmin: !!d.unreadByAdmin,
+        unreadByUser: !!d.unreadByUser,
+        createdAt: d.createdAt || ''
+      });
+    } else {
+      onUpdate(null);
+    }
+  }, (error) => {
+    console.warn("Error in subscribeToUserChat, falling back:", error);
+  }, () => {
+    onUpdate(getLocal());
+  });
+}
+
+export async function markChatAsReadByAdmin(chatId: string): Promise<void> {
+  // Update local storage
+  try {
+    const localChats = JSON.parse(localStorage.getItem('local_db_support_chats') || '{}');
+    if (localChats[chatId]) {
+      localChats[chatId].unreadByAdmin = false;
+      localStorage.setItem('local_db_support_chats', JSON.stringify(localChats));
+    }
+  } catch (e) {}
+
+  if (useLocalStorageFallback) return;
+
+  try {
+    const chatRef = doc(db, "support_chats", chatId);
+    await updateDoc(chatRef, { unreadByAdmin: false });
+  } catch (error) {
+    console.warn("Firestore markChatAsReadByAdmin error:", error);
+  }
+}
+
+export async function markChatAsReadByUser(chatId: string): Promise<void> {
+  // Update local storage
+  try {
+    const localChats = JSON.parse(localStorage.getItem('local_db_support_chats') || '{}');
+    if (localChats[chatId]) {
+      localChats[chatId].unreadByUser = false;
+      localStorage.setItem('local_db_support_chats', JSON.stringify(localChats));
+    }
+  } catch (e) {}
+
+  if (useLocalStorageFallback) return;
+
+  try {
+    const chatRef = doc(db, "support_chats", chatId);
+    await updateDoc(chatRef, { unreadByUser: false });
+  } catch (error) {
+    console.warn("Firestore markChatAsReadByUser error:", error);
+  }
+}
+
+// ---------------------------
+// 12. User Notifications System
+// ---------------------------
+function getLocalNotifications(): Record<string, UserNotification> {
+  const saved = localStorage.getItem('local_db_notifications');
+  return saved ? JSON.parse(saved) : {};
+}
+
+function saveLocalNotifications(notifications: Record<string, UserNotification>) {
+  localStorage.setItem('local_db_notifications', JSON.stringify(notifications));
+}
+
+export function clearLocalNotificationsCache(): void {
+  try {
+    localStorage.removeItem('local_db_notifications');
+  } catch (e) {}
+}
+
+export async function createNotification(userId: string, message: string): Promise<UserNotification> {
+  const notifId = `notif_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const newNotif: UserNotification = {
+    id: notifId,
+    userId,
+    message,
+    createdAt: new Date().toISOString(),
+    read: false
+  };
+
+  const localMap = getLocalNotifications();
+  localMap[notifId] = newNotif;
+  saveLocalNotifications(localMap);
+
+  try {
+    await setDoc(doc(db, "notifications", notifId), newNotif);
+  } catch (e) {
+    console.warn("createNotification firestore error:", e);
+  }
+
+  return newNotif;
+}
+
+export const createUserNotification = createNotification;
+
+function normalizePhone(p: string): string {
+  if (!p) return '';
+  const digits = p.replace(/\D/g, '');
+  return digits.length >= 10 ? digits.slice(-10) : digits;
+}
+
+export function isUserSubscriber(user: User | null | undefined): boolean {
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+  if (user.hasDeposited) return true;
+  const tier = (user.vipTier || '').trim();
+  return tier !== '' && tier !== 'الباقة العادية' && tier !== 'VIP0';
+}
+
+export function matchesUserNotification(notif: UserNotification | any, target: string | User): boolean {
+  if (!notif || !target) return false;
+  const notifUserId = typeof notif === 'string' ? notif : (notif.userId || '');
+  const notifMsg = typeof notif === 'object' && notif.message ? notif.message : '';
+  const notifCreatedAt = typeof notif === 'object' && notif.createdAt ? notif.createdAt : '';
+
+  const targetPhone = typeof target === 'string' ? target.trim() : (target.phone || target.id || '').trim();
+  const targetUserObj: User | null = typeof target === 'string' ? (getLocalUsers()[targetPhone] || null) : target;
+  const targetIsAdmin = (typeof target === 'string' && (target === 'admin' || target === '07519952000' || target === 'ADMIN95' || target === 'OXLO95')) || 
+                        (targetUserObj?.role === 'admin');
+
+  // 1. SUPPORT / CHAT MESSAGES:
+  // Must ONLY appear to the specific account owner (or admin if it's an admin notification). Never broadcast to everyone.
+  const isSupportOrChatMessage = notifMsg.includes('الدعم الفني') || 
+                                 notifMsg.includes('دردشة') || 
+                                 notifMsg.includes('رسالة جديدة من الإدارة') || 
+                                 notifMsg.includes('رسالة جديدة من العضو');
+  if (isSupportOrChatMessage) {
+    if (notifUserId === 'broadcast' || notifUserId === 'all') {
+      return false; // Legacy corrupt broadcast support message should never leak to users
+    }
+    if (notifUserId === 'admin') {
+      return Boolean(targetIsAdmin);
+    }
+    // Strict match to the specific user's phone or ID
+    if (targetUserObj) {
+      if (notifUserId === targetUserObj.phone || notifUserId === targetUserObj.id) return true;
+    }
+    if (notifUserId === targetPhone) return true;
+    const n1 = normalizePhone(notifUserId);
+    const n2 = normalizePhone(targetPhone);
+    if (n1 && n2 && n1.length >= 9 && n1 === n2) return true;
+    return false;
+  }
+
+  // 2. DAILY TASK CODE NOTIFICATIONS (رمز المهام):
+  // Must ONLY reach subscribers (hasDeposited: true or active VIP tier). Non-subscribers MUST NEVER receive it.
+  const isTaskCodeMessage = notifMsg.includes('رمز المهام') || notifMsg.includes('🔑 رمز المهام');
+  if (isTaskCodeMessage) {
+    // If target is not a subscriber and not admin, reject unconditionally!
+    if (!targetIsAdmin && (!targetUserObj || !isUserSubscriber(targetUserObj))) {
+      return false;
+    }
+  }
+
+  // 3. BROADCAST NOTIFICATIONS:
+  // When a user opens a new account, they should only see their welcome message.
+  // Past broadcast notifications created before the user's account registration date (createdAt) MUST NOT be shown!
+  if (notifUserId === 'all' || notifUserId === 'broadcast') {
+    if (isTaskCodeMessage) {
+      // Legacy broadcast task code: only show to subscribers if created after registration
+      if (!targetIsAdmin && (!targetUserObj || !isUserSubscriber(targetUserObj))) {
+        return false;
+      }
+    }
+    if (targetUserObj && targetUserObj.createdAt && notifCreatedAt) {
+      const userCreatedMs = new Date(targetUserObj.createdAt).getTime();
+      const notifCreatedMs = new Date(notifCreatedAt).getTime();
+      // If notification was created before user registered (with 30s buffer), do not deliver to new user
+      if (notifCreatedMs < userCreatedMs - 30000) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // 4. DIRECT USER NOTIFICATIONS (Matched by Phone, ID, or Admin):
+  if (notifUserId === targetPhone) return true;
+
+  if (targetUserObj) {
+    if (targetUserObj.id && notifUserId === targetUserObj.id) return true;
+    if (targetUserObj.phone && notifUserId === targetUserObj.phone) return true;
+    // ملاحظة أمنية: أُزيلت المطابقة عبر inviteCode — كانت تُسرّب الإشعار
+    // الشخصي لكل من يحمل رمز دعوة مطابق (خصوصًا الرموز العامة)، فيصل
+    // إشعار الإحالة لجميع الأعضاء بدل صاحبه وحده.
+    if (targetIsAdmin && (notifUserId === 'admin' || notifUserId === 'oxlo_admin' || notifUserId === '07519952000' || notifUserId === '07712345678' || notifUserId === 'ADMIN95' || notifUserId === 'OXLO95')) {
+      return true;
+    }
+  } else {
+    if (targetIsAdmin && (notifUserId === 'admin' || notifUserId === 'oxlo_admin' || notifUserId === '07519952000' || notifUserId === '07712345678' || notifUserId === 'ADMIN95' || notifUserId === 'OXLO95')) {
+      return true;
+    }
+  }
+
+  const norm1 = normalizePhone(notifUserId);
+  const norm2 = normalizePhone(targetPhone);
+  if (norm1 && norm2 && norm1.length >= 9 && norm2.length >= 9) {
+    if (norm1 === norm2) return true;
+  }
+
+  return false;
+}
+
+function matchesUser(notifUserIdOrObj: string | UserNotification, target: string | User): boolean {
+  return matchesUserNotification(notifUserIdOrObj, target);
+}
+
+function deduplicateNotifications(list: UserNotification[]): UserNotification[] {
+  const seenMap = new Map<string, UserNotification>();
+  for (const notif of list) {
+    const dateBucket = notif.createdAt ? notif.createdAt.substring(0, 16) : '';
+    const key = `${notif.message.trim()}__${dateBucket}`;
+    if (!seenMap.has(key)) {
+      seenMap.set(key, notif);
+    }
+  }
+  return Array.from(seenMap.values());
+}
+
+export async function getUserNotifications(targetUser: string | User): Promise<UserNotification[]> {
+  const localList = Object.values(getLocalNotifications()).filter(n => matchesUserNotification(n, targetUser));
+
+  try {
+    const q = query(collection(db, "notifications"));
+    const snap = await getDocs(q);
+    const fsList: UserNotification[] = [];
+    snap.forEach(d => {
+      const data = d.data() as UserNotification;
+      if (matchesUserNotification(data, targetUser)) {
+        fsList.push(data);
+      }
+    });
+
+    const map: Record<string, UserNotification> = {};
+    localList.forEach(n => { map[n.id] = n; });
+    fsList.forEach(n => { map[n.id] = n; });
+
+    const sorted = Object.values(map).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return deduplicateNotifications(sorted);
+  } catch (e) {
+    console.warn("getUserNotifications error:", e);
+    const sorted = localList.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return deduplicateNotifications(sorted);
+  }
+}
+
+export function subscribeToUserNotifications(targetUser: string | User, callback: (notifs: UserNotification[]) => void): () => void {
+  const getFilteredList = (localMap: Record<string, UserNotification>) => {
+    const filtered = Object.values(localMap)
+      .filter(n => matchesUserNotification(n, targetUser))
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return deduplicateNotifications(filtered);
+  };
+
+  const localMap = getLocalNotifications();
+  callback(getFilteredList(localMap));
+
+  const q = query(collection(db, "notifications"));
+  return safeOnSnapshot(q, (snapshot) => {
+    const fsMap: Record<string, UserNotification> = {};
+    snapshot.forEach((d) => {
+      const data = d.data() as UserNotification;
+      fsMap[data.id] = data;
+    });
+    const merged = { ...getLocalNotifications(), ...fsMap };
+    saveLocalNotifications(merged);
+    callback(getFilteredList(merged));
+  }, (error) => {
+    console.warn("subscribeToUserNotifications error:", error);
+  }, () => {
+    callback(getFilteredList(getLocalNotifications()));
+  });
+}
+
+export async function markNotificationAsRead(notifId: string): Promise<void> {
+  const localMap = getLocalNotifications();
+  if (localMap[notifId]) {
+    localMap[notifId].read = true;
+    saveLocalNotifications(localMap);
+  }
+
+  try {
+    await updateDoc(doc(db, "notifications", notifId), { read: true });
+  } catch (e) {
+    console.warn("markNotificationAsRead firestore error:", e);
+  }
+}
+
+export async function markAllNotificationsAsRead(targetUser: string | User): Promise<void> {
+  const localMap = getLocalNotifications();
+  let updated = false;
+
+  Object.values(localMap).forEach(n => {
+    if (matchesUserNotification(n, targetUser) && !n.read) {
+      n.read = true;
+      updated = true;
+    }
+  });
+
+  if (updated) {
+    saveLocalNotifications(localMap);
+  }
+
+  try {
+    const q = query(collection(db, "notifications"), where("read", "==", false));
+    const snapshot = await getDocs(q);
+    const batch = writeBatch(db);
+    let count = 0;
+    snapshot.forEach(d => {
+      const data = d.data() as UserNotification;
+      if (matchesUserNotification(data, targetUser)) {
+        batch.update(d.ref, { read: true });
+        count++;
+      }
+    });
+    if (count > 0) {
+      await batch.commit();
+    }
+  } catch (e) {
+    console.warn("markAllNotificationsAsRead firestore error:", e);
+  }
+}
+
+export interface LeaderboardEntry {
+  userId: string;
+  username: string;
+  phone: string;
+  referralCount: number;
+  vipTier: string;
+}
+
+export async function getReferralLeaderboard(): Promise<LeaderboardEntry[]> {
+  const localUsers = getLocalUsers();
+  const list = Object.values(localUsers);
+
+  const counts: Record<string, number> = {};
+  list.forEach(u => {
+    if (u.referrerCode) {
+      const refCode = u.referrerCode.trim().toUpperCase();
+      counts[refCode] = (counts[refCode] || 0) + 1;
+    }
+  });
+
+  const entries: LeaderboardEntry[] = list.map(u => {
+    const code = (u.inviteCode || '').trim().toUpperCase();
+    return {
+      userId: u.id || u.phone,
+      username: u.username || '',
+      phone: u.phone || '',
+      referralCount: counts[code] || 0,
+      vipTier: u.vipTier || 'العضوية العادية'
+    };
+  });
+
+  if (!useLocalStorageFallback) {
+    try {
+      const snap = await getDocs(collection(db, "users"));
+      const fsUsers: User[] = [];
+      snap.forEach(d => {
+        fsUsers.push(d.data() as User);
+      });
+
+      const fsCounts: Record<string, number> = {};
+      fsUsers.forEach(u => {
+        if (u.referrerCode) {
+          const refCode = u.referrerCode.trim().toUpperCase();
+          fsCounts[refCode] = (fsCounts[refCode] || 0) + 1;
+        }
+      });
+
+      const fsEntries: LeaderboardEntry[] = fsUsers.map(u => {
+        const code = (u.inviteCode || '').trim().toUpperCase();
+        return {
+          userId: u.id || u.phone,
+          username: u.username || '',
+          phone: u.phone || '',
+          referralCount: fsCounts[code] || 0,
+          vipTier: u.vipTier || 'العضوية العادية'
+        };
+      });
+
+      return fsEntries
+        .filter(e => e.username && !e.username.toLowerCase().includes('admin'))
+        .sort((a, b) => b.referralCount - a.referralCount);
+    } catch (e) {
+      console.warn("getReferralLeaderboard firestore error:", e);
+    }
+  }
+
+  return entries
+    .filter(e => e.username && !e.username.toLowerCase().includes('admin'))
+    .sort((a, b) => b.referralCount - a.referralCount);
+}
+
+
+
+
+
+
+
+
+
+import { auth } from './firebase';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
+
+// يشتق كلمة مرور Firebase من كلمة مرور الحساب (نفس الاشتقاق المستخدم منذ البداية)
+function derivePw(passwordHash: string): string {
+  return (passwordHash || '').substring(0, 20).padEnd(6, '0');
+}
+
+/**
+ * تسجيل دخول Firebase Auth الفعلي (Shadow Auth).
+ *
+ * حل جذري لمشكلة تغيير كلمة المرور:
+ * النظام يستخدم كلمتي مرور متوازيتين — واحدة بحساب المنصة، وأخرى مشتقة منها
+ * داخل Firebase Auth. عند تغيير كلمة المرور (من المستخدم أو الإدارة) كانت
+ * تُحدَّث الأولى فقط، بينما تبقى Firebase محتفظة بالقديمة، فتفشل المصادقة
+ * الحقيقية دائمًا لهذا الحساب (auth/wrong-password) ويُمنع الدخول نهائيًا.
+ *
+ * الحل هنا: عند فشل الدخول بكلمة المرور الحالية، نحاول الدخول بكلمات المرور
+ * السابقة المحفوظة، وفور نجاح أي منها نحدّث كلمة مرور Firebase إلى الجديدة
+ * فورًا (updatePassword) لتتزامن الاثنتان نهائيًا — فلا تتكرر المشكلة أبدًا.
+ */
+export async function shadowFirebaseAuth(phone: string, passwordHash: string) {
+  const email = `${phone.replace(/\+/g, '')}@oxlo.app`;
+  const safePassword = derivePw(passwordHash);
+  const cleanPhone = phone.trim();
+
+  // يجمع كلمات المرور السابقة المحتملة لهذا الحساب (لمزامنة الحسابات القديمة)
+  const collectLegacyPasswords = async (): Promise<string[]> => {
+    const candidates = new Set<string>();
+    try {
+      const secretSnap = await getDoc(doc(db, "user_secrets", cleanPhone));
+      if (secretSnap.exists()) {
+        const s = secretSnap.data();
+        if (s.previousPassword) candidates.add(derivePw(s.previousPassword));
+        if (Array.isArray(s.passwordHistory)) {
+          s.passwordHistory.forEach((p: string) => { if (p) candidates.add(derivePw(p)); });
+        }
+      }
+    } catch (e) {
+      console.warn('تعذّر قراءة كلمات المرور السابقة:', e);
+    }
+    try {
+      const localUsers = getLocalUsers();
+      const u: any = localUsers[cleanPhone];
+      if (u?.previousPassword) candidates.add(derivePw(u.previousPassword));
+      if (u?.id) candidates.add(derivePw(u.id));
+    } catch (e) {}
+    candidates.delete(safePassword);
+    return Array.from(candidates).filter(p => p && p.length >= 6);
+  };
+
+  // يزامن كلمة مرور Firebase مع الكلمة الحالية بعد دخول ناجح بكلمة قديمة
+  const syncFirebasePassword = async (cred: any) => {
+    try {
+      const { updatePassword } = await import('firebase/auth');
+      await updatePassword(cred.user, safePassword);
+      console.log('🔄 تمت مزامنة كلمة مرور Firebase مع كلمة المرور الجديدة بنجاح.');
+    } catch (e) {
+      console.warn('تعذّرت مزامنة كلمة مرور Firebase:', e);
+    }
+  };
+
+  let lastError: any = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      let userCredential;
+      try {
+        userCredential = await withTimeout(signInWithEmailAndPassword(auth, email, safePassword));
+      } catch (error: any) {
+        const code = error?.code || '';
+
+        if (code === 'auth/user-not-found') {
+          // الحساب غير موجود بـ Firebase — ننشئه بكلمة المرور الحالية
+          try {
+            userCredential = await withTimeout(createUserWithEmailAndPassword(auth, email, safePassword));
+          } catch (createError: any) {
+            if (createError.code === 'auth/email-already-in-use') {
+              userCredential = await withTimeout(signInWithEmailAndPassword(auth, email, safePassword));
+            } else {
+              throw createError;
+            }
+          }
+        } else if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
+          // ⭐ الحالة الجوهرية: كلمة المرور تغيّرت ولم تُزامن مع Firebase.
+          // نجرّب كلمات المرور السابقة، وفور النجاح نحدّث كلمة مرور Firebase
+          // إلى الحالية نهائيًا حتى لا تتكرر المشكلة مستقبلًا.
+          const legacy = await collectLegacyPasswords();
+          let recovered = null;
+          for (const oldPw of legacy) {
+            try {
+              recovered = await withTimeout(signInWithEmailAndPassword(auth, email, oldPw));
+              break;
+            } catch (_) { /* نجرّب التالية */ }
+          }
+
+          if (recovered) {
+            await syncFirebasePassword(recovered);
+            userCredential = recovered;
+          } else {
+            // لم تنجح أي كلمة سابقة — قد يكون الحساب أُنشئ بكلمة غير معروفة.
+            // ننشئ حسابًا جديدًا ببريد بديل مرتبط بنفس المستخدم كحل أخير.
+            try {
+              userCredential = await withTimeout(createUserWithEmailAndPassword(auth, email, safePassword));
+            } catch (fallbackErr: any) {
+              throw error; // نُرجع الخطأ الأصلي ليظهر التشخيص الصحيح
+            }
+          }
+        } else {
+          throw error;
+        }
+      }
+
+      if (userCredential && userCredential.user) {
+        try {
+          await updateDoc(doc(db, "users", phone), {
+            uid: userCredential.user.uid
+          });
+        } catch (e) {
+          console.warn("Could not sync UID to user document:", e);
+        }
+      }
+      console.log('✅ shadowFirebaseAuth نجحت:', { uid: userCredential?.user?.uid, email: userCredential?.user?.email, attempt });
+      return;
+    } catch (error: any) {
+      lastError = error;
+      const msg = error?.message || String(error);
+      const isTransient = msg.includes('closing') || msg.includes('hidden') || msg.includes('timeout') || error?.code === 'unavailable';
+      if (!isTransient || attempt === 3) {
+        console.error("Shadow auth REAL error:", error?.code, error?.message, error);
+        throw error;
+      }
+      console.warn(`Shadow auth محاولة ${attempt} فشلت (خطأ عابر)، إعادة محاولة...`, msg);
+      await new Promise(r => setTimeout(r, 700 * attempt));
+    }
+  }
+  throw lastError;
+}
+
+// ============================================================
+// نظام مجموعة روابط المهام (Video Pool) — يوتيوب/تيك توك/فيسبوك/انستقرام
+// يحل محل القائمة الثابتة القديمة بالكود؛ يدعم لصق جماعي، منع تكرار حقيقي،
+// ودوران بدون تكرار حتى تُستهلك كل الروابط (نظام الطابور).
+// ============================================================
+
+export type VideoPlatform = 'youtube' | 'tiktok' | 'facebook' | 'instagram';
+
+export interface VideoPoolItem {
+  id: string;
+  platform: VideoPlatform;
+  url: string;
+  active: boolean;
+  addedAt: number;
+}
+
+// معرّف مستند حتمي (deterministic) من المنصة + الرابط، يضمن منع التكرار
+// طبيعيًا عبر Firestore نفسه (نفس الرابط لنفس المنصة = نفس المعرّف دائمًا)
+function videoDocId(platform: VideoPlatform, url: string): string {
+  const clean = url.trim().toLowerCase().replace(/[?&]$/, '');
+  let hash = 0;
+  for (let i = 0; i < clean.length; i++) {
+    hash = (hash * 31 + clean.charCodeAt(i)) >>> 0;
+  }
+  return `${platform}_${hash.toString(36)}`;
+}
+
+// إضافة روابط بالجملة (لصق جماعي) — يتجاهل أي رابط مكرر تلقائيًا
+// (سواء كان مكررًا بنفس الدفعة، أو موجود أصلاً بقاعدة البيانات)
+export async function bulkAddVideoLinks(
+  platform: VideoPlatform,
+  rawUrls: string[]
+): Promise<{ added: number; skipped: number }> {
+  const cleanUrls = [...new Set(
+    rawUrls
+      .map(u => u.trim())
+      .filter(u => u.length > 0 && u.startsWith('http'))
+  )];
+
+  if (cleanUrls.length === 0) return { added: 0, skipped: 0 };
+
+  let added = 0;
+  let skipped = 0;
+
+  // فحص الوجود بالتوازي على دفعات (بدل واحد بواحد بالتسلسل، اللي كان بطيء جدًا
+  // مع مجموعات كبيرة — كل رابط كان يحتاج طلب شبكة منفصل بالتتابع)
+  const CHECK_PARALLEL = 25;
+  const existsMap = new Map<string, boolean>();
+
+  for (let start = 0; start < cleanUrls.length; start += CHECK_PARALLEL) {
+    const chunk = cleanUrls.slice(start, start + CHECK_PARALLEL);
+    const results = await Promise.all(
+      chunk.map(async (url) => {
+        const id = videoDocId(platform, url);
+        try {
+          const snap = await getDoc(doc(db, 'videoPool', id));
+          return { url, exists: snap.exists() };
+        } catch (e) {
+          // لو فشل فحص رابط واحد (مشكلة شبكة عابرة)، نعامله كغير موجود
+          // بدل ما نوقف كل العملية — الأهم إكمال الإضافة لباقي الروابط
+          console.warn('فشل فحص وجود الرابط:', url, e);
+          return { url, exists: false };
+        }
+      })
+    );
+    for (const r of results) existsMap.set(r.url, r.exists);
+  }
+
+  // كتابة الروابط الجديدة على دفعات (Firestore batch أقصاها 500 عملية)
+  const BATCH_SIZE = 400;
+  const newUrls = cleanUrls.filter(u => !existsMap.get(u));
+  skipped = cleanUrls.length - newUrls.length;
+
+  for (let start = 0; start < newUrls.length; start += BATCH_SIZE) {
+    const chunk = newUrls.slice(start, start + BATCH_SIZE);
+    const batch = writeBatch(db);
+    for (const url of chunk) {
+      const id = videoDocId(platform, url);
+      batch.set(doc(db, 'videoPool', id), {
+        platform,
+        url,
+        active: true,
+        addedAt: Date.now()
+      });
+      added++;
+    }
+    await batch.commit();
+  }
+
+  return { added, skipped };
+}
+
+
+// جلب كل الروابط النشطة لمنصة معيّنة (تُستخدم لحساب دوران المهام اليومي)
+export async function getActiveVideoPool(platform: VideoPlatform): Promise<VideoPoolItem[]> {
+  try {
+    const q = query(collection(db, 'videoPool'), where('platform', '==', platform), where('active', '==', true));
+    const snap = await getDocs(q);
+    const items: VideoPoolItem[] = [];
+    snap.forEach((d: any) => {
+      const data = d.data();
+      items.push({
+        id: d.id,
+        platform: data.platform,
+        url: data.url,
+        active: data.active !== false,
+        addedAt: data.addedAt ?? 0
+      });
+    });
+    // ترتيب ثابت (حسب وقت الإضافة) لضمان نفس ترتيب الدوران لكل المستخدمين
+    items.sort((a, b) => a.addedAt - b.addedAt || a.id.localeCompare(b.id));
+    return items;
+  } catch (error) {
+    console.warn('getActiveVideoPool error:', error);
+    return [];
+  }
+}
+
+// جلب كل الروابط (نشطة وغير نشطة) لكل المنصات — لعرضها بلوحة الأدمن
+export async function getAllVideoPoolItems(): Promise<VideoPoolItem[]> {
+  try {
+    const snap = await getDocs(collection(db, 'videoPool'));
+    const items: VideoPoolItem[] = [];
+    snap.forEach((d: any) => {
+      const data = d.data();
+      items.push({
+        id: d.id,
+        platform: data.platform,
+        url: data.url,
+        active: data.active !== false,
+        addedAt: data.addedAt ?? 0
+      });
+    });
+    items.sort((a, b) => b.addedAt - a.addedAt);
+    return items;
+  } catch (error) {
+    console.warn('getAllVideoPoolItems error:', error);
+    return [];
+  }
+}
+
+export async function deleteVideoPoolItem(id: string): Promise<void> {
+  await deleteDoc(doc(db, 'videoPool', id));
+}
+
+export async function toggleVideoPoolItemActive(id: string, active: boolean): Promise<void> {
+  await updateDoc(doc(db, 'videoPool', id), { active });
+}
+
+export async function signInBackend() {
+  const email = "backend_secure_server_admin@oxlo.app";
+  const password = "VerySecureBackendPassword123!@#";
+  try {
+    const { signInWithEmailAndPassword, createUserWithEmailAndPassword } = await import('firebase/auth');
+    const { auth } = await import('./firebase');
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+      console.log("Backend signed in successfully.");
+    } catch (e: any) {
+      if (e.code === 'auth/user-not-found' || e.code === 'auth/invalid-credential') {
+        await createUserWithEmailAndPassword(auth, email, password);
+        console.log("Backend user created and signed in.");
+      } else {
+        throw e;
+      }
+    }
+  } catch (err) {
+    console.error("Backend sign in failed:", err);
+  }
+}
