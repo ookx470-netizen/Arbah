@@ -474,7 +474,11 @@ export default function ProfileCenter({
     setTimeout(() => setCopiedText(false), 2000);
   };
 
+  // تفاصيل تشخيص فشل ربط المحفظة (تُعرض بالشاشة عند الفشل)
+  const [walletDiagnostic, setWalletDiagnostic] = useState<string | null>(null);
+
   const handleBindWallet = async () => {
+    setWalletDiagnostic(null);
     // إصلاح: بعد أول ربط لعنوان المحفظة، يُقفل التعديل على العضو نهائيًا —
     // فقط الأدمن يقدر يغيّره بعدها من لوحة الإدارة
     if (currentUser.walletAddress) {
@@ -488,6 +492,20 @@ export default function ProfileCenter({
     setLoading(true);
     try {
       const addr = bindWalletInput.trim();
+
+      // التأكد من نشاط جلسة المصادقة قبل الحفظ — فبدونها تُرفض
+      // الكتابة بقواعد الأمان ويظهر الخطأ permission-denied.
+      try {
+        const { getAuth } = await import('firebase/auth');
+        if (!getAuth().currentUser) {
+          const { shadowFirebaseAuth } = await import('../firebaseService');
+          const pw = (currentUser as any).password || (currentUser as any).rawPassword || currentUser.id;
+          if (pw) await shadowFirebaseAuth(currentUser.phone, pw);
+        }
+      } catch (e) {
+        console.warn('تعذّر تجديد جلسة المصادقة:', e);
+      }
+
       await updateUserWallet(currentUser.phone, addr);
 
       // ============================================================
@@ -537,7 +555,10 @@ export default function ProfileCenter({
       if (msg.includes('WALLET_ALREADY_LINKED')) {
         showToast("⚠️ عنوان المحفظة هذا مرتبط بحساب آخر بالفعل. لا يمكن ربط المحفظة نفسها بأكثر من حساب — يرجى استخدام عنوان محفظة خاص بك.");
       } else if (msg.includes('WALLET_SAVE_FAILED')) {
-        showToast("⚠️ تعذّر حفظ عنوان المحفظة. يرجى المحاولة مرة أخرى أو التواصل مع الدعم الفني.");
+        // نعرض تفاصيل التشخيص بالشاشة ليراها الأدمن من جواله مباشرة
+        const details = msg.split('WALLET_SAVE_FAILED::')[1] || '';
+        setWalletDiagnostic(details || 'لا تتوفر تفاصيل');
+        showToast("⚠️ تعذّر حفظ عنوان المحفظة. راجع تفاصيل التشخيص أدناه.");
       } else {
         showToast("فشل ربط المحفظة");
       }
@@ -1938,6 +1959,27 @@ export default function ProfileCenter({
                 {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <BadgeCheck className="w-4 h-4" />}
                 <span>{currentUser.walletAddress ? 'المحفظة مربوطة بالفعل' : 'حفظ العنوان'}</span>
               </button>
+
+              {/* لوحة تشخيص فشل الربط — تظهر بالشاشة عند الفشل فقط */}
+              {walletDiagnostic && (
+                <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black text-rose-700">🔍 تفاصيل التشخيص</span>
+                    <button
+                      onClick={() => setWalletDiagnostic(null)}
+                      className="text-[9px] font-bold text-rose-400 hover:text-rose-600 cursor-pointer"
+                    >
+                      إخفاء
+                    </button>
+                  </div>
+                  <p className="text-[9.5px] text-rose-600 font-mono leading-relaxed break-all" dir="ltr">
+                    {walletDiagnostic}
+                  </p>
+                  <p className="text-[9px] text-rose-400 font-bold leading-relaxed">
+                    أرسل هذي التفاصيل للدعم الفني لتحديد السبب بدقة.
+                  </p>
+                </div>
+              )}
             </div>
 
             {currentUser.walletAddress && (
