@@ -1598,6 +1598,34 @@ export async function updateUserWallet(phone: string, walletAddress: string) {
   // تفشل الكتابة ويُبتلع الخطأ بصمت مع حفظ محلي فقط — فيرى العضو
   // «تم الحفظ» ثم يجد العنوان مختفيًا بعد التحديث.
   // ============================================================
+  // ============================================================
+  // التأكد من جلسة Firebase Auth قبل الكتابة.
+  //
+  // سبب الرفض (permission-denied) لم يكن القاعدة، بل أن جلسة
+  // المصادقة غير نشطة لحظة الحفظ — فتعتبر القواعد الطلب صادرًا
+  // من زائر (guest) وترفض كل الكتابات. نستعيد الجلسة أولاً.
+  // ============================================================
+  try {
+    const { getAuth } = await import('firebase/auth');
+    const authInstance = getAuth();
+
+    if (!authInstance.currentUser) {
+      // نحاول استعادة الجلسة من بيانات المستخدم المحفوظة
+      const localUsers = getLocalUsers();
+      const me: any = localUsers[phone] ||
+        Object.values(localUsers).find((u: any) =>
+          (u?.phone || '').replace(/\D/g, '') === phone.replace(/\D/g, '')
+        );
+
+      const pw = me?.password || me?.rawPassword || me?.id;
+      if (pw) {
+        await shadowFirebaseAuth(phone, pw);
+      }
+    }
+  } catch (authErr) {
+    console.warn('تعذّر التحقق من جلسة المصادقة:', authErr);
+  }
+
   const digits = phone.replace(/\D/g, '');
   const noZero = digits.replace(/^0+/, '');
   const candidates = Array.from(new Set([
@@ -1633,13 +1661,38 @@ export async function updateUserWallet(phone: string, walletAddress: string) {
   } catch (e) {}
 
   if (!savedToFirestore) {
-    console.error('فشل حفظ عنوان المحفظة بقاعدة البيانات:', {
-      الهاتف: phone,
-      الصيغ_المجرّبة: candidates,
-      الخطأ: lastError?.code || lastError
-    });
+    // نجمع تفاصيل التشخيص لعرضها داخل التطبيق مباشرة،
+    // فلا يحتاج الأدمن لأدوات المطور أو جهاز حاسوب.
+    let foundDocId = 'لا يوجد';
+    let hasWalletField = 'غير معروف';
+    try {
+      for (const id of candidates) {
+        const s = await getDoc(doc(db, "users", id));
+        if (s.exists()) {
+          foundDocId = id;
+          hasWalletField = ('walletAddress' in (s.data() || {})) ? 'موجود' : 'مفقود';
+          break;
+        }
+      }
+    } catch (e) {}
+
+    let authState = 'غير معروف';
+    try {
+      const { getAuth } = await import('firebase/auth');
+      authState = getAuth().currentUser ? 'نشطة' : 'غير نشطة (زائر)';
+    } catch (e) {}
+
+    const details = [
+      `الهاتف: ${phone}`,
+      `معرّف المستند: ${foundDocId}`,
+      `حقل walletAddress: ${hasWalletField}`,
+      `جلسة المصادقة: ${authState}`,
+      `رمز الخطأ: ${lastError?.code || 'غير محدد'}`
+    ].join(' | ');
+
+    console.error('فشل حفظ عنوان المحفظة:', details);
     checkForQuotaExceeded(lastError);
-    throw new Error('WALLET_SAVE_FAILED');
+    throw new Error('WALLET_SAVE_FAILED::' + details);
   }
 }
 
