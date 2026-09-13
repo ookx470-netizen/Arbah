@@ -661,9 +661,25 @@ export async function grantActivationHonorPoints(phone: string): Promise<void> {
   try {
     const snap = await getDoc(doc(db, "users", cleanPhone));
     if (!snap.exists()) return;
-    const currentPoints = Number(snap.data()?.honorPoints) || 0;
+    const data: any = snap.data();
+
+    const currentPoints = Number(data?.honorPoints) || 0;
     // نمنحها فقط إذا كانت النقاط صفرًا (أي لم يسبق تفعيله)
     if (currentPoints > 0) return;
+
+    // ============================================================
+    // فحص التفعيل داخل الدالة نفسها.
+    //
+    // كانت الدالة تمنح 100 نقطة لأي عضو نقاطه صفر دون التحقق من
+    // وجود باقة، فيكفي أن تُستدعى من أي مسار ليحصل عليها عضو جديد
+    // لم يفعّل حسابه بعد. الآن تتحقق بنفسها فلا تعتمد على المستدعي.
+    // ============================================================
+    const tier = (data?.vipTier || '').trim();
+    const isActivated = tier !== '' &&
+      tier !== 'العضوية العادية' &&
+      tier !== 'الباقة العادية' &&
+      tier !== 'VIP0';
+    if (!isActivated) return;
 
     await updateDoc(doc(db, "users", cleanPhone), { honorPoints: HONOR_POINTS_ON_ACTIVATION });
 
@@ -1574,17 +1590,56 @@ export async function updateUserWallet(phone: string, walletAddress: string) {
     return;
   }
 
+  // ============================================================
+  // إصلاح: الكتابة على المعرّف الفعلي للمستند.
+  //
+  // كانت الدالة تكتب على users/{phone} بالصيغة المرسلة حرفيًا، فإن
+  // كان معرّف المستند مخزّنًا بصيغة أخرى (+964.../964.../07...)
+  // تفشل الكتابة ويُبتلع الخطأ بصمت مع حفظ محلي فقط — فيرى العضو
+  // «تم الحفظ» ثم يجد العنوان مختفيًا بعد التحديث.
+  // ============================================================
+  const digits = phone.replace(/\D/g, '');
+  const noZero = digits.replace(/^0+/, '');
+  const candidates = Array.from(new Set([
+    phone, digits, '+' + digits, noZero, '+' + noZero,
+    noZero.startsWith('964') ? '0' + noZero.substring(3) : '0' + noZero,
+    noZero.startsWith('964') ? noZero : '964' + noZero,
+    noZero.startsWith('964') ? '+' + noZero : '+964' + noZero,
+  ].filter(Boolean)));
+
+  let savedToFirestore = false;
+  let lastError: any = null;
+
+  for (const id of candidates) {
+    try {
+      const snap = await getDoc(doc(db, "users", id));
+      if (!snap.exists()) continue;
+
+      await updateDoc(doc(db, "users", id), { walletAddress: cleanAddress });
+      savedToFirestore = true;
+      break;
+    } catch (err: any) {
+      lastError = err;
+    }
+  }
+
+  // تحديث النسخة المحلية دائمًا لتبقى الواجهة متسقة
   try {
-    const userRef = doc(db, "users", phone);
-    await updateDoc(userRef, { walletAddress: cleanAddress });
-  } catch (error) {
-    console.warn("Firestore updateUserWallet error, falling back:", error);
-    checkForQuotaExceeded(error);
     const users = getLocalUsers();
     if (users[phone]) {
       users[phone].walletAddress = cleanAddress;
       saveLocalUsers(users);
     }
+  } catch (e) {}
+
+  if (!savedToFirestore) {
+    console.error('فشل حفظ عنوان المحفظة بقاعدة البيانات:', {
+      الهاتف: phone,
+      الصيغ_المجرّبة: candidates,
+      الخطأ: lastError?.code || lastError
+    });
+    checkForQuotaExceeded(lastError);
+    throw new Error('WALLET_SAVE_FAILED');
   }
 }
 
