@@ -487,14 +487,57 @@ export default function ProfileCenter({
     }
     setLoading(true);
     try {
-      await updateUserWallet(currentUser.phone, bindWalletInput.trim());
-      onUpdateUser({ ...currentUser, walletAddress: bindWalletInput.trim() });
+      const addr = bindWalletInput.trim();
+      await updateUserWallet(currentUser.phone, addr);
+
+      // ============================================================
+      // تحقق فعلي من نجاح الحفظ بقاعدة البيانات.
+      //
+      // كانت الواجهة تعرض «تم الحفظ» بمجرد انتهاء الاستدعاء، دون
+      // التأكد من وصول البيانات فعلاً — فإن رُفضت الكتابة بصمت
+      // (لأي سبب) يظن العضو أنها حُفظت، ثم تختفي عند التحديث.
+      // الآن نقرأ المستند مباشرة ونتأكد قبل إعلان النجاح.
+      // ============================================================
+      let savedOk = false;
+      try {
+        const { doc, getDoc } = await import('firebase/firestore');
+        const { db } = await import('../firebase');
+
+        const digits = currentUser.phone.replace(/\D/g, '');
+        const noZero = digits.replace(/^0+/, '');
+        const candidates = Array.from(new Set([
+          currentUser.phone, digits, '+' + digits, noZero, '+' + noZero,
+          noZero.startsWith('964') ? '0' + noZero.slice(3) : '964' + noZero,
+        ].filter(Boolean)));
+
+        for (const id of candidates) {
+          try {
+            const snap = await getDoc(doc(db, 'users', id));
+            if (snap.exists() && (snap.data()?.walletAddress || '') === addr) {
+              savedOk = true;
+              break;
+            }
+          } catch (inner) { /* نجرّب الصيغة التالية */ }
+        }
+      } catch (verifyErr) {
+        console.warn('تعذّر التحقق من حفظ المحفظة:', verifyErr);
+        savedOk = true; // لا نمنع العضو إن فشل التحقق نفسه لخطأ شبكة
+      }
+
+      if (!savedOk) {
+        showToast("⚠️ لم يتم حفظ عنوان المحفظة. يرجى المحاولة مرة أخرى أو التواصل مع الدعم الفني.");
+        return;
+      }
+
+      onUpdateUser({ ...currentUser, walletAddress: addr });
       showToast("تم ربط المحفظة بنجاح! هذا العنوان أصبح ثابتًا ولا يمكن تغييره إلا من الإدارة.");
       setActiveSubView('menu');
     } catch (err: any) {
       const msg = err?.message || String(err);
       if (msg.includes('WALLET_ALREADY_LINKED')) {
         showToast("⚠️ عنوان المحفظة هذا مرتبط بحساب آخر بالفعل. لا يمكن ربط المحفظة نفسها بأكثر من حساب — يرجى استخدام عنوان محفظة خاص بك.");
+      } else if (msg.includes('WALLET_SAVE_FAILED')) {
+        showToast("⚠️ تعذّر حفظ عنوان المحفظة. يرجى المحاولة مرة أخرى أو التواصل مع الدعم الفني.");
       } else {
         showToast("فشل ربط المحفظة");
       }
