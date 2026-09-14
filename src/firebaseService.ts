@@ -3693,6 +3693,21 @@ export const UPGRADE_SUPPORT_DEDUCTION_RATE = 0.5; // 50%
  * يحسب توزيع مكافأة المهمة بين العضو وسداد دعم الترقية.
  * يُرجع: المبلغ الصافي للعضو، والمبلغ المخصوم للسداد، وحالة الاكتمال.
  */
+/**
+ * يطبّق تخفيض الأرباح للنصف إن كان مفعّلاً لهذا العضو.
+ *
+ * يُفعّل يدويًا من لوحة الإدارة (حقل halfEarnings) لعضو بعينه،
+ * فتُحتسب مكافأة كل مهمة بنصف قيمتها — ويعود لكامل أرباحه فور
+ * إلغاء التفعيل، دون أي أثر على بقية الأعضاء.
+ */
+export function applyHalfEarnings(rewardValue: number, userData: any): number {
+  const reward = Number(rewardValue) || 0;
+  if (userData?.halfEarnings === true) {
+    return Number((reward / 2).toFixed(2));
+  }
+  return reward;
+}
+
 export function calcUpgradeSupportSplit(
   rewardValue: number,
   supportTotal: number,
@@ -3768,7 +3783,7 @@ export async function completeTaskAtomic(
     if (!cur) throw new Error('USER_NOT_FOUND');
     const baseEarnings = Number(cur.earnings) || 0;
     const baseTaskIncome = Number(cur.taskIncome) || 0;
-    const reward = Number(rewardValue) || 0;
+    const reward = applyHalfEarnings(rewardValue, cur);
     const split = calcUpgradeSupportSplit(
       reward,
       Number((cur as any).upgradeSupportTotal) || 0,
@@ -3815,7 +3830,7 @@ export async function completeTaskAtomic(
       const userData = userSnap.data();
       const baseEarnings = Number(userData.earnings) || 0;
       const baseTaskIncome = Number(userData.taskIncome) || 0;
-      const reward = Number(rewardValue) || 0;
+      const reward = applyHalfEarnings(rewardValue, userData);
 
       // خصم دعم الترقية: يُقتطع 50% من مكافأة المهمة لسداد الدعم إن وُجد
       const split = calcUpgradeSupportSplit(
@@ -3882,7 +3897,7 @@ export async function completeTaskAtomic(
       const userData = userSnap.data();
       const baseEarnings = Number(userData.earnings) || 0;
       const baseTaskIncome = Number(userData.taskIncome) || 0;
-      const reward = Number(rewardValue) || 0;
+      const reward = applyHalfEarnings(rewardValue, userData);
 
       // خصم دعم الترقية (نفس منطق المعاملة الذرية)
       const split = calcUpgradeSupportSplit(
