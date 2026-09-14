@@ -40,7 +40,8 @@ import { db } from '../firebase';
 import { User, Deposit, Withdrawal, SystemSettings, VipPlan, UserNotification, SupportChat, SupportMessage } from '../types';
 import { formatHourToArabic, calculateRemainingEffectiveDays } from '../utils';
 import { 
-  ShieldAlert, 
+  ShieldAlert,
+  TrendingDown, 
   Users, 
   ArrowDownCircle, 
   ArrowUpCircle, 
@@ -485,6 +486,8 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
   const [editWalletAddressInput, setEditWalletAddressInput] = useState<string>('');
   const [editVipTierInput, setEditVipTierInput] = useState<string>('');
   const [editWithdrawalBlocked, setEditWithdrawalBlocked] = useState<boolean>(false);
+  // تخفيض أرباح المهام للنصف لهذا العضو (يدوي)
+  const [editHalfEarnings, setEditHalfEarnings] = useState<boolean>(false);
   const [editBypassHoliday, setEditBypassHoliday] = useState<boolean>(false);
   const [editIsBanned, setEditIsBanned] = useState<boolean>(false);
   const [editBanReason, setEditBanReason] = useState<string>('');
@@ -550,6 +553,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
       setEditTaskIncome(selectedUserForEdit.taskIncome || 0);
       setEditEffectiveDays(calculateRemainingEffectiveDays(selectedUserForEdit, settings.holidayDays ?? [5]));
       setEditWithdrawalBlocked(!!selectedUserForEdit.isWithdrawalBlocked);
+      setEditHalfEarnings(!!(selectedUserForEdit as any).halfEarnings);
       setEditBypassHoliday(!!selectedUserForEdit.bypassHoliday);
       setEditCommissionRate(
         typeof (selectedUserForEdit as any).commissionRate === 'number'
@@ -931,6 +935,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
         effectiveDays: Number(editEffectiveDays),
         vipStartDate: new Date().toISOString(),
         isWithdrawalBlocked: editWithdrawalBlocked,
+        halfEarnings: editHalfEarnings,
         bypassHoliday: editBypassHoliday,
         commissionRate: Number(editCommissionRate),
         manualLeaderLevel: Number(editLeaderLevel),
@@ -976,6 +981,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
             effectiveDays: Number(editEffectiveDays),
             vipStartDate: new Date().toISOString(),
             isWithdrawalBlocked: editWithdrawalBlocked,
+            halfEarnings: editHalfEarnings,
             bypassHoliday: editBypassHoliday,
             commissionRate: Number(editCommissionRate),
             manualLeaderLevel: Number(editLeaderLevel),
@@ -5022,6 +5028,44 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
               </div>
 
               {/* Withdrawal Block Setting */}
+              {/* تخفيض أرباح المهام للنصف — يدوي لعضو بعينه */}
+              <div className="p-3 bg-orange-50/50 border border-orange-200/60 rounded-xl space-y-2">
+                <span className="block text-[10px] text-orange-800 font-extrabold flex items-center gap-1.5">
+                  <TrendingDown className="w-4 h-4 text-orange-600" />
+                  أرباح المهام لهذا العضو:
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditHalfEarnings(false)}
+                    className={`flex-1 py-2 px-3 rounded-lg border font-bold text-[11px] transition-all cursor-pointer text-center ${
+                      !editHalfEarnings
+                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm font-extrabold'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    كاملة (100%)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditHalfEarnings(true)}
+                    className={`flex-1 py-2 px-3 rounded-lg border font-bold text-[11px] transition-all cursor-pointer text-center ${
+                      editHalfEarnings
+                        ? 'bg-orange-600 text-white border-orange-600 shadow-sm font-extrabold'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    مخفّضة للنصف (50%) ⬇️
+                  </button>
+                </div>
+                {editHalfEarnings && (
+                  <p className="text-[10px] text-orange-700 font-bold bg-white p-2 rounded-lg border border-orange-150 leading-relaxed text-right">
+                    ⚠️ ستُحتسب مكافأة كل مهمة بنصف قيمتها لهذا العضو وحده (مثال: 3.2 تصبح 1.6).
+                    يعود لكامل أرباحه فور إعادة الخيار إلى «كاملة».
+                  </p>
+                )}
+              </div>
+
               <div className="p-3 bg-red-50/50 border border-red-200/60 rounded-xl space-y-2">
                 <span className="block text-[10px] text-red-800 font-extrabold flex items-center gap-1.5">
                   <ShieldAlert className="w-4 h-4 text-red-600" />

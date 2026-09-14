@@ -30,7 +30,8 @@ import {
   Check, 
   ArrowDownCircle, 
   ArrowUpCircle, 
-  Users, 
+  Users,
+  TrendingDown, 
   User as UserIcon,
   UserPlus,
   ShieldCheck,
@@ -1051,6 +1052,19 @@ export default function ProfileCenter({
                   {referralBonusTotal.toFixed(2)} <span className="text-[10px] text-slate-400 font-bold">USDT</span>
                 </span>
               </div>
+
+              {/* تنبيه تخفيض الأرباح — يظهر فقط لمن فُعّل له من الإدارة */}
+              {(currentUser as any).halfEarnings === true && (
+                <div className="flex items-center justify-between px-2 pt-2 border-t border-slate-50">
+                  <div className="flex items-center gap-2">
+                    <TrendingDown className="w-3.5 h-3.5 text-orange-500" />
+                    <span className="text-[10px] font-bold text-orange-500">أرباح المهام</span>
+                  </div>
+                  <span className="text-[10px] font-black text-orange-600 bg-orange-50 px-2.5 py-1 rounded-full">
+                    مخفّضة 50%
+                  </span>
+                </div>
+              )}
 
               {/* نسبة عمولة الإحالة الحالية — تُحدد من الإدارة، الافتراضي 10% */}
               <div className="flex items-center justify-between px-2 pt-2 border-t border-slate-50">
