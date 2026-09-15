@@ -31,7 +31,8 @@ import {
   ArrowDownCircle, 
   ArrowUpCircle, 
   Users,
-  TrendingDown, 
+  TrendingDown,
+  PauseCircle, 
   User as UserIcon,
   UserPlus,
   ShieldCheck,
@@ -992,6 +993,42 @@ export default function ProfileCenter({
               </div>
             )}
           </div>
+
+          {/* لافتة إيقاف العمل — تظهر فقط للعضو الموقوف، وتختفي تلقائيًا بعد ترقيته */}
+          {(() => {
+            const susp = (currentUser as any).workSuspended === true;
+            if (!susp) return null;
+
+            const tierAtSuspend = ((currentUser as any).workSuspendedAtTier || '').trim();
+            const currentTier = (currentUser.vipTier || '').trim();
+            // رقّى باقته → الإيقاف مرفوع تلقائيًا فلا نعرض اللافتة
+            if (tierAtSuspend && currentTier && currentTier !== tierAtSuspend) return null;
+
+            return (
+              <div className="px-5 -mt-10 relative z-20 mb-4">
+                <div className="bg-gradient-to-l from-slate-800 to-slate-900 rounded-[2rem] p-5 shadow-xl border border-slate-700">
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 bg-amber-500/20 rounded-xl flex items-center justify-center shrink-0 border border-amber-500/30">
+                      <PauseCircle className="w-5 h-5 text-amber-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[12px] font-black text-amber-400 mb-1.5">
+                        تم إيقاف العمل مؤقتًا على حسابك
+                      </p>
+                      <p className="text-[10px] text-slate-300 font-bold leading-relaxed mb-2">
+                        يرجى ترقية باقتك الاستثمارية لاستئناف المهام والسحب.
+                      </p>
+                      <div className="bg-emerald-500/10 border border-emerald-500/25 rounded-xl px-3 py-2">
+                        <p className="text-[9.5px] text-emerald-300 font-bold leading-relaxed">
+                          ✅ يعود حسابك للعمل <b>تلقائيًا</b> بمجرد إتمام الترقية — دون أي انتظار.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Overlapping Primary Stats Card */}
           <div className="px-5 -mt-10 relative z-20">
