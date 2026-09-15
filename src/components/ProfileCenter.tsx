@@ -457,7 +457,7 @@ export default function ProfileCenter({
   };
 
   const showToast = (msg: string) => {
-    if (msg.includes("تعليق ميزة السحب مؤقتاً") || (msg.includes("VIP (B1)") && msg.includes("دعوة"))) {
+    if (msg.includes("تعليق ميزة السحب مؤقتاً") || (msg.includes("VIP (B") && msg.includes("دعوة"))) {
       setShowBlockWithdrawalModal(true);
       return;
     }
@@ -794,7 +794,7 @@ export default function ProfileCenter({
                   الشرط المطلوب لإعادة التفعيل:
                 </span>
                 <p className="text-[10px] text-slate-700 leading-relaxed font-bold text-right">
-                  يرجى دعوة <span className="text-red-600 font-black text-[11px] underline">(2) من المشتركين الجدد والنشطين</span> على الأقل للترقية إلى فئة <span className="bg-indigo-100 text-indigo-800 px-1.5 py-0.5 rounded-md font-extrabold text-[9px]">VIP (B1)</span> باستخدام رابط أو كود الإحالة الخاص بك.
+                  يرجى دعوة <span className="text-red-600 font-black text-[11px] underline">({Number((currentUser as any).requiredInvitesToUnblock) || 2}) من المشتركين الجدد والنشطين</span> على الأقل للترقية إلى فئة <span className="bg-indigo-100 text-indigo-800 px-1.5 py-0.5 rounded-md font-extrabold text-[9px]">VIP (B)</span> باستخدام رابط أو كود الإحالة الخاص بك.
                 </p>
               </div>
 
