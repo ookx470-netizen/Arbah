@@ -943,7 +943,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
         vipStartDate: new Date().toISOString(),
         isWithdrawalBlocked: editWithdrawalBlocked,
         halfEarnings: editHalfEarnings,
-        requiredInvitesToUnblock: Number(editRequiredInvites),
+        requiredInvitesToUnblock: Math.max(1, Number(editRequiredInvites) || 2),
         workSuspended: editWorkSuspended,
         workSuspendedAtTier: editWorkSuspended ? editVipTierInput : '',
         bypassHoliday: editBypassHoliday,
@@ -992,7 +992,7 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
             vipStartDate: new Date().toISOString(),
             isWithdrawalBlocked: editWithdrawalBlocked,
             halfEarnings: editHalfEarnings,
-            requiredInvitesToUnblock: Number(editRequiredInvites),
+            requiredInvitesToUnblock: Math.max(1, Number(editRequiredInvites) || 2),
             workSuspended: editWorkSuspended,
             workSuspendedAtTier: editWorkSuspended ? editVipTierInput : '',
             bypassHoliday: editBypassHoliday,
@@ -5143,12 +5143,18 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                     type="number"
                     min={1}
                     value={editRequiredInvites}
-                    onChange={(e) => setEditRequiredInvites(Number(e.target.value))}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      setEditRequiredInvites(!v || v < 1 ? 1 : v);
+                    }}
                     className="w-16 px-2 py-2 bg-white border border-violet-200 rounded-lg text-[11px] font-bold text-violet-700 text-center focus:outline-none focus:border-violet-500"
                   />
                 </div>
                 <p className="text-[9px] text-violet-500 font-bold text-right">
                   * يظهر هذا الرقم في رسالة الحظر التي يراها العضو.
+                </p>
+                <p className="text-[10px] text-violet-700 font-black text-right bg-white px-2 py-1.5 rounded-lg border border-violet-150">
+                  العدد المحدد حاليًا: <span className="text-violet-900">{editRequiredInvites}</span> دعوات
                 </p>
               </div>
 
