@@ -41,6 +41,7 @@ import { User, Deposit, Withdrawal, SystemSettings, VipPlan, UserNotification, S
 import { formatHourToArabic, calculateRemainingEffectiveDays } from '../utils';
 import { 
   ShieldAlert,
+  PauseCircle,
   TrendingDown, 
   Users, 
   ArrowDownCircle, 
@@ -488,6 +489,10 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
   const [editWithdrawalBlocked, setEditWithdrawalBlocked] = useState<boolean>(false);
   // تخفيض أرباح المهام للنصف لهذا العضو (يدوي)
   const [editHalfEarnings, setEditHalfEarnings] = useState<boolean>(false);
+  // عدد الدعوات المطلوبة لفك حظر السحب (يظهر بالرسالة للعضو)
+  const [editRequiredInvites, setEditRequiredInvites] = useState<number>(2);
+  // إيقاف العمل (مهام + سحب) — يُلغى تلقائيًا عند ترقية الباقة
+  const [editWorkSuspended, setEditWorkSuspended] = useState<boolean>(false);
   const [editBypassHoliday, setEditBypassHoliday] = useState<boolean>(false);
   const [editIsBanned, setEditIsBanned] = useState<boolean>(false);
   const [editBanReason, setEditBanReason] = useState<string>('');
@@ -554,6 +559,8 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
       setEditEffectiveDays(calculateRemainingEffectiveDays(selectedUserForEdit, settings.holidayDays ?? [5]));
       setEditWithdrawalBlocked(!!selectedUserForEdit.isWithdrawalBlocked);
       setEditHalfEarnings(!!(selectedUserForEdit as any).halfEarnings);
+      setEditRequiredInvites(Number((selectedUserForEdit as any).requiredInvitesToUnblock) || 2);
+      setEditWorkSuspended(!!(selectedUserForEdit as any).workSuspended);
       setEditBypassHoliday(!!selectedUserForEdit.bypassHoliday);
       setEditCommissionRate(
         typeof (selectedUserForEdit as any).commissionRate === 'number'
@@ -936,6 +943,9 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
         vipStartDate: new Date().toISOString(),
         isWithdrawalBlocked: editWithdrawalBlocked,
         halfEarnings: editHalfEarnings,
+        requiredInvitesToUnblock: Number(editRequiredInvites),
+        workSuspended: editWorkSuspended,
+        workSuspendedAtTier: editWorkSuspended ? editVipTierInput : '',
         bypassHoliday: editBypassHoliday,
         commissionRate: Number(editCommissionRate),
         manualLeaderLevel: Number(editLeaderLevel),
@@ -982,6 +992,9 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
             vipStartDate: new Date().toISOString(),
             isWithdrawalBlocked: editWithdrawalBlocked,
             halfEarnings: editHalfEarnings,
+            requiredInvitesToUnblock: Number(editRequiredInvites),
+            workSuspended: editWorkSuspended,
+            workSuspendedAtTier: editWorkSuspended ? editVipTierInput : '',
             bypassHoliday: editBypassHoliday,
             commissionRate: Number(editCommissionRate),
             manualLeaderLevel: Number(editLeaderLevel),
@@ -5028,6 +5041,45 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
               </div>
 
               {/* Withdrawal Block Setting */}
+              {/* إيقاف العمل — يدوي، ويُلغى تلقائيًا عند ترقية الباقة */}
+              <div className="p-3 bg-slate-100/70 border border-slate-300/60 rounded-xl space-y-2">
+                <span className="block text-[10px] text-slate-800 font-extrabold flex items-center gap-1.5">
+                  <PauseCircle className="w-4 h-4 text-slate-600" />
+                  حالة العمل لهذا العضو:
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditWorkSuspended(false)}
+                    className={`flex-1 py-2 px-3 rounded-lg border font-bold text-[11px] transition-all cursor-pointer text-center ${
+                      !editWorkSuspended
+                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm font-extrabold'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    يعمل طبيعي
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditWorkSuspended(true)}
+                    className={`flex-1 py-2 px-3 rounded-lg border font-bold text-[11px] transition-all cursor-pointer text-center ${
+                      editWorkSuspended
+                        ? 'bg-slate-700 text-white border-slate-700 shadow-sm font-extrabold'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    إيقاف العمل ⏸️
+                  </button>
+                </div>
+                {editWorkSuspended && (
+                  <p className="text-[10px] text-slate-700 font-bold bg-white p-2 rounded-lg border border-slate-200 leading-relaxed text-right">
+                    ⏸️ ستتوقف مهامه وسحبه، وتظهر له رسالة تطالبه بترقية باقته.
+                    <br />
+                    ✅ يعود للعمل <b>تلقائيًا</b> بمجرد ترقيته — دون أي تدخل منك.
+                  </p>
+                )}
+              </div>
+
               {/* تخفيض أرباح المهام للنصف — يدوي لعضو بعينه */}
               <div className="p-3 bg-orange-50/50 border border-orange-200/60 rounded-xl space-y-2">
                 <span className="block text-[10px] text-orange-800 font-extrabold flex items-center gap-1.5">
@@ -5064,6 +5116,40 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                     يعود لكامل أرباحه فور إعادة الخيار إلى «كاملة».
                   </p>
                 )}
+              </div>
+
+              {/* عدد الدعوات المطلوبة لفك حظر السحب */}
+              <div className="p-3 bg-violet-50/50 border border-violet-200/60 rounded-xl space-y-2">
+                <span className="block text-[10px] text-violet-800 font-extrabold flex items-center gap-1.5">
+                  <UserPlus className="w-4 h-4 text-violet-600" />
+                  عدد الدعوات المطلوبة لفك حظر السحب:
+                </span>
+                <div className="flex gap-1.5">
+                  {[1, 2, 3, 5].map(v => (
+                    <button
+                      key={v}
+                      type="button"
+                      onClick={() => setEditRequiredInvites(v)}
+                      className={`flex-1 py-2 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                        editRequiredInvites === v
+                          ? 'bg-violet-600 text-white'
+                          : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      {v}
+                    </button>
+                  ))}
+                  <input
+                    type="number"
+                    min={1}
+                    value={editRequiredInvites}
+                    onChange={(e) => setEditRequiredInvites(Number(e.target.value))}
+                    className="w-16 px-2 py-2 bg-white border border-violet-200 rounded-lg text-[11px] font-bold text-violet-700 text-center focus:outline-none focus:border-violet-500"
+                  />
+                </div>
+                <p className="text-[9px] text-violet-500 font-bold text-right">
+                  * يظهر هذا الرقم في رسالة الحظر التي يراها العضو.
+                </p>
               </div>
 
               <div className="p-3 bg-red-50/50 border border-red-200/60 rounded-xl space-y-2">
