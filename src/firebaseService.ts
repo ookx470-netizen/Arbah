@@ -2117,9 +2117,16 @@ export async function createWithdrawal(
     if (!isExemptFromDepositRequirement(users[phone])) {
       throw new Error("⚠️ عذراً! لا يمكنك سحب الأرباح إلا بعد إيداع وتفعيل باقتك الاستثمارية الأولى في المنصة.");
     }
+    // إيقاف العمل: يمنع السحب حتى يرقّي العضو باقته
+    if (isWorkSuspended(users[phone])) {
+      throw new Error("⏸️ تم إيقاف العمل مؤقتًا على حسابك.\n\nيرجى ترقية باقتك الاستثمارية لاستئناف المهام والسحب. وبمجرد إتمام الترقية يعود حسابك للعمل تلقائيًا.\n\nللاستفسار تواصل مع الدعم الفني.");
+    }
     // 2. ثم فحص الحظر اليدوي أو الأمني
     if (users[phone].isWithdrawalBlocked) {
-      throw new Error("🔒 نأسف لإعلامك بأنه قد تم تعليق ميزة السحب مؤقتاً لحسابك لدواعي الأمان والتحقق من جودة النشاط. لتفعيل السحب التلقائي مجدداً ومواصلة العمل وجني الأرباح بشكل طبيعي، يرجى دعوة (2) من المشتركين الجدد والنشطين على الأقل للترقية فئة VIP (B1) باستخدام رابط الإحالة الخاص بك. نشكر تفهمكم وحرصكم على استدامة المجتمع الرقمي للمنصة.");
+      {
+        const needed = Number(users[phone]?.requiredInvitesToUnblock) || 2;
+        throw new Error(`🔒 نأسف لإعلامك بأنه قد تم تعليق ميزة السحب مؤقتاً لحسابك لدواعي الأمان والتحقق من جودة النشاط. لتفعيل السحب التلقائي مجدداً ومواصلة العمل وجني الأرباح بشكل طبيعي، يرجى دعوة (${needed}) من المشتركين الجدد والنشطين على الأقل للترقية فئة VIP (B2) فما فوق باستخدام رابط الإحالة الخاص بك. نشكر تفهمكم وحرصكم على استدامة المجتمع الرقمي للمنصة.`);
+      }
     }
     if (users[phone].earnings < amount) {
       throw new Error("رصيد الأرباح غير كافٍ لإجراء هذا السحب!");
@@ -2160,9 +2167,16 @@ export async function createWithdrawal(
     if (!isExemptFromDepositRequirement(userData)) {
       throw new Error("⚠️ عذراً! لا يمكنك سحب الأرباح إلا بعد إيداع وتفعيل باقتك الاستثمارية الأولى في المنصة.");
     }
+    // إيقاف العمل: يمنع السحب حتى يرقّي العضو باقته
+    if (isWorkSuspended(userData)) {
+      throw new Error("⏸️ تم إيقاف العمل مؤقتًا على حسابك.\n\nيرجى ترقية باقتك الاستثمارية لاستئناف المهام والسحب. وبمجرد إتمام الترقية يعود حسابك للعمل تلقائيًا.\n\nللاستفسار تواصل مع الدعم الفني.");
+    }
     // 2. ثم فحص الحظر اليدوي أو الأمني
     if (userData.isWithdrawalBlocked) {
-      throw new Error("🔒 نأسف لإعلامك بأنه قد تم تعليق ميزة السحب مؤقتاً لحسابك لدواعي الأمان والتحقق من جودة النشاط. لتفعيل السحب التلقائي مجدداً ومواصلة العمل وجني الأرباح بشكل طبيعي، يرجى دعوة (2) من المشتركين الجدد والنشطين على الأقل للترقية فئة VIP (B1) باستخدام رابط الإحالة الخاص بك. نشكر تفهمكم وحرصكم على استدامة المجتمع الرقمي للمنصة.");
+      {
+        const needed = Number((userData as any)?.requiredInvitesToUnblock) || 2;
+        throw new Error(`🔒 نأسف لإعلامك بأنه قد تم تعليق ميزة السحب مؤقتاً لحسابك لدواعي الأمان والتحقق من جودة النشاط. لتفعيل السحب التلقائي مجدداً ومواصلة العمل وجني الأرباح بشكل طبيعي، يرجى دعوة (${needed}) من المشتركين الجدد والنشطين على الأقل للترقية فئة VIP (B2) فما فوق باستخدام رابط الإحالة الخاص بك. نشكر تفهمكم وحرصكم على استدامة المجتمع الرقمي للمنصة.`);
+      }
     }
     if (userData.earnings < amount) {
       throw new Error("رصيد الأرباح غير كافٍ لإجراء هذا السحب!");
@@ -3700,6 +3714,27 @@ export const UPGRADE_SUPPORT_DEDUCTION_RATE = 0.5; // 50%
  * فتُحتسب مكافأة كل مهمة بنصف قيمتها — ويعود لكامل أرباحه فور
  * إلغاء التفعيل، دون أي أثر على بقية الأعضاء.
  */
+/**
+ * يتحقق من إيقاف العمل لعضو معيّن.
+ *
+ * الإيقاف يُفعَّل يدويًا من لوحة الإدارة (workSuspended)، ويُلغى
+ * تلقائيًا بمجرد أن يرقّي العضو باقته — نقارن باقته الحالية بالباقة
+ * المسجّلة وقت الإيقاف، فإن اختلفت فقد رقّى ويُستأنف عمله فورًا
+ * دون أي تدخل من الإدارة.
+ */
+export function isWorkSuspended(userData: any): boolean {
+  if (!userData?.workSuspended) return false;
+
+  const tierAtSuspend = (userData?.workSuspendedAtTier || '').trim();
+  const currentTier = (userData?.vipTier || '').trim();
+
+  // رقّى باقته → يُرفع الإيقاف تلقائيًا
+  if (tierAtSuspend && currentTier && currentTier !== tierAtSuspend) {
+    return false;
+  }
+  return true;
+}
+
 export function applyHalfEarnings(rewardValue: number, userData: any): number {
   const reward = Number(rewardValue) || 0;
   if (userData?.halfEarnings === true) {
@@ -3783,6 +3818,8 @@ export async function completeTaskAtomic(
     if (!cur) throw new Error('USER_NOT_FOUND');
     const baseEarnings = Number(cur.earnings) || 0;
     const baseTaskIncome = Number(cur.taskIncome) || 0;
+    // إيقاف العمل: يمنع إكمال المهام حتى الترقية
+    if (isWorkSuspended(cur)) throw new Error('WORK_SUSPENDED');
     const reward = applyHalfEarnings(rewardValue, cur);
     const split = calcUpgradeSupportSplit(
       reward,
@@ -3830,6 +3867,8 @@ export async function completeTaskAtomic(
       const userData = userSnap.data();
       const baseEarnings = Number(userData.earnings) || 0;
       const baseTaskIncome = Number(userData.taskIncome) || 0;
+      // إيقاف العمل: يمنع إكمال المهام حتى الترقية
+      if (isWorkSuspended(userData)) throw new Error('WORK_SUSPENDED');
       const reward = applyHalfEarnings(rewardValue, userData);
 
       // خصم دعم الترقية: يُقتطع 50% من مكافأة المهمة لسداد الدعم إن وُجد
@@ -3897,6 +3936,8 @@ export async function completeTaskAtomic(
       const userData = userSnap.data();
       const baseEarnings = Number(userData.earnings) || 0;
       const baseTaskIncome = Number(userData.taskIncome) || 0;
+      // إيقاف العمل: يمنع إكمال المهام حتى الترقية
+      if (isWorkSuspended(userData)) throw new Error('WORK_SUSPENDED');
       const reward = applyHalfEarnings(rewardValue, userData);
 
       // خصم دعم الترقية (نفس منطق المعاملة الذرية)

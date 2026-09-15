@@ -1909,7 +1909,13 @@ export default function TaskView() {
     } catch (err: any) {
       console.error("Error confirming task and updating earnings:", err);
       const errorMessage = err.message || "فشل غير معروف";
-      triggerNotification(`🔴 فشل تحديث الرصيد: ${errorMessage}`);
+
+      // رسالة خاصة عند إيقاف العمل — توجّه العضو للترقية
+      if (errorMessage.includes('WORK_SUSPENDED')) {
+        triggerNotification('⏸️ تم إيقاف العمل مؤقتًا على حسابك — يرجى ترقية باقتك لاستئناف المهام. يعود حسابك تلقائيًا بعد الترقية.');
+      } else {
+        triggerNotification(`🔴 فشل تحديث الرصيد: ${errorMessage}`);
+      }
     } finally {
       setIsSubmittingTask(false);
     }
