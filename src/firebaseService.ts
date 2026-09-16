@@ -2204,6 +2204,28 @@ export async function createWithdrawal(
     return newWithdrawal;
   } catch (error: any) {
     console.warn("Firestore createWithdrawal error:", error?.code, error?.message);
+
+    // ============================================================
+    // إصلاح مهم: لا نبتلع الرسائل الدقيقة.
+    //
+    // كانت هذه الكتلة تستبدل كل رسالة بنص عام («حدث خطأ أثناء
+    // معالجة طلب السحب»)، فيرى العضو «تعذّر» مهما كان السبب —
+    // إيقاف العمل، حظر السحب، أو نقص الرصيد. الآن نُمرّر الرسالة
+    // الأصلية كما هي، ولا نستبدلها إلا لأخطاء تقنية غير مفهومة.
+    // ============================================================
+    const msg = String(error?.message || '');
+    const isKnownMessage =
+      msg.includes('إيقاف العمل') ||
+      msg.includes('تعليق ميزة السحب') ||
+      msg.includes('رصيد الأرباح غير كافٍ') ||
+      msg.includes('المستخدم غير موجود') ||
+      msg.includes('تفعيل باقتك') ||
+      msg.includes('طلب سحب قيد');
+
+    if (isKnownMessage) {
+      throw error;
+    }
+
     throw new Error("حدث خطأ أثناء معالجة طلب السحب، يرجى المحاولة لاحقاً أو التواصل مع الدعم.");
   }
 }

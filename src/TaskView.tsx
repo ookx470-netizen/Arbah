@@ -1444,6 +1444,23 @@ export default function TaskView() {
   })();
 
   const handleClaimTask = (template: any) => {
+    // ============================================================
+    // حاجز إيقاف العمل — يمنع بدء المهمة أو إرسالها.
+    //
+    // يُفحص محليًا بالواجهة أيضًا (لا على الخادم وحده)، فلا يستطيع
+    // العضو الموقوف فتح مهمة أو تسليمها. ويُرفع الحاجز تلقائيًا
+    // بمجرد ترقيته — بمقارنة باقته الحالية بالمسجّلة وقت الإيقاف.
+    // ============================================================
+    if ((currentUser as any)?.workSuspended === true) {
+      const tierAtSuspend = ((currentUser as any).workSuspendedAtTier || '').trim();
+      const currentTier = (currentUser?.vipTier || '').trim();
+      const stillSuspended = !(tierAtSuspend && currentTier && currentTier !== tierAtSuspend);
+      if (stillSuspended) {
+        triggerNotification('⏸️ تم إيقاف العمل مؤقتًا على حسابك — يرجى ترقية باقتك لاستئناف المهام. يعود حسابك تلقائيًا بعد الترقية.');
+        return;
+      }
+    }
+
     if (userPlanDetails.isTrial && currentUser?.vipStartDate) {
       const trialDuration = 24 * 60 * 60 * 1000; // 1 day
       const trialStart = new Date(currentUser.vipStartDate).getTime();
@@ -1691,6 +1708,17 @@ export default function TaskView() {
   // Complete/Confirm task submission with live earnings linking and strict re-claim prevention
   const handleConfirmTask = async () => {
     if (isSubmittingTask) return;
+
+    // حاجز إيقاف العمل — يمنع تسليم المهمة أيضًا
+    if ((currentUser as any)?.workSuspended === true) {
+      const tierAtSuspend = ((currentUser as any).workSuspendedAtTier || '').trim();
+      const currentTier = (currentUser?.vipTier || '').trim();
+      const stillSuspended = !(tierAtSuspend && currentTier && currentTier !== tierAtSuspend);
+      if (stillSuspended) {
+        triggerNotification('⏸️ تم إيقاف العمل مؤقتًا على حسابك — يرجى ترقية باقتك لاستئناف المهام. يعود حسابك تلقائيًا بعد الترقية.');
+        return;
+      }
+    }
 
     if (isTodayHoliday) {
       triggerNotification(`⚠️ عذراً! اليوم (${getArabicDayName(new Date().getDay())}) هو عطلة عمل رسمية في المنصة.`);
