@@ -733,7 +733,13 @@ export default function ProfileCenter({
       onUpdateUser({ ...currentUser, earnings: currentUser.earnings - amount });
       setActiveSubView('with_log');
     } catch (err: any) {
-      showToast(err.message || "فشل إرسال طلب السحب");
+      const m = err?.message || '';
+      // رسالة صريحة عند إيقاف العمل بدل النص العام المبهم
+      if (m.includes('تم إيقاف العمل') || m.includes('WORK_SUSPENDED')) {
+        showToast('⏸️ تم إيقاف العمل مؤقتًا على حسابك — يرجى ترقية باقتك لاستئناف السحب. يعود حسابك تلقائيًا بعد الترقية.');
+      } else {
+        showToast(m || "فشل إرسال طلب السحب");
+      }
     } finally {
       setLoading(false);
     }
