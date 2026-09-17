@@ -1096,6 +1096,33 @@ export default function ProfileCenter({
                 </span>
               </div>
 
+              {/* تنبيه الباقة التجريبية — السحب بعد الترقية فقط */}
+              {(() => {
+                const norm = (s: string) =>
+                  (s || '').trim().toUpperCase().replace(/\s+/g, '').replace(/^VIP/, '');
+                const tierN = norm(currentUser.vipTier || '');
+                if (!tierN) return null;
+                const plans = settings?.vipPlans || [];
+                const myPlan = plans.find((p: any) => norm(p?.name) === tierN)
+                  || plans.find((p: any) => {
+                       const pn = norm(p?.name);
+                       return pn && (pn.includes(tierN) || tierN.includes(pn));
+                     });
+                if (!myPlan?.isTrial) return null;
+
+                return (
+                  <div className="flex items-center justify-between px-2 pt-2 border-t border-slate-50">
+                    <div className="flex items-center gap-2">
+                      <Gift className="w-3.5 h-3.5 text-violet-500" />
+                      <span className="text-[10px] font-bold text-violet-500">الباقة التجريبية</span>
+                    </div>
+                    <span className="text-[9.5px] font-black text-violet-600 bg-violet-50 px-2.5 py-1 rounded-full">
+                      السحب بعد الترقية
+                    </span>
+                  </div>
+                );
+              })()}
+
               {/* تنبيه تخفيض الأرباح — يظهر فقط لمن فُعّل له من الإدارة */}
               {(currentUser as any).halfEarnings === true && (
                 <div className="flex items-center justify-between px-2 pt-2 border-t border-slate-50">
