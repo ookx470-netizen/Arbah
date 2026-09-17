@@ -3441,7 +3441,15 @@ export default function TaskView() {
                     // وسعر الباقة الحالية فقط، وليس السعر الكامل — فالعضو
                     // سبق أن دفع قيمة باقته الحالية.
                     const allPlans = settings.vipPlans && settings.vipPlans.length > 0 ? settings.vipPlans : [];
-                    const myPlan = allPlans.find(p => p.name === currentUser?.vipTier);
+                    // مطابقة مرنة (نفس منطق الحساب أدناه) لتفادي فروق التسمية
+                    const norm = (s: string) =>
+                      (s || '').trim().toUpperCase().replace(/\s+/g, '').replace(/^VIP/, '');
+                    const myTierN = norm(currentUser?.vipTier || '');
+                    const myPlan = allPlans.find(p => norm(p.name) === myTierN)
+                      || (myTierN ? allPlans.find(p => {
+                           const pn = norm(p.name);
+                           return pn && (pn.includes(myTierN) || myTierN.includes(pn));
+                         }) : undefined);
                     const myPlanPrice = myPlan ? Number(myPlan.price) || 0 : 0;
                     const newPrice = Number(selectedPlanForUpgrade.price) || 0;
                     const diff = Math.max(0, Number((newPrice - myPlanPrice).toFixed(2)));
@@ -3474,7 +3482,32 @@ export default function TaskView() {
                       // نخصم فرق الترقية فقط (سعر الجديدة − سعر الحالية)،
                       // لأن العضو سبق أن دفع قيمة باقته الحالية بالكامل.
                       const allPlansForCalc = settings.vipPlans && settings.vipPlans.length > 0 ? settings.vipPlans : [];
-                      const myCurrentPlan = allPlansForCalc.find(p => p.name === currentUser?.vipTier);
+
+                      // ============================================================
+                      // مطابقة مرنة لاسم الباقة الحالية.
+                      //
+                      // كانت المقارنة حرفية (p.name === vipTier)، فتفشل لأي فرق
+                      // بسيط بالتسمية أو المسافات (مثل "B1" مقابل "VIP B1")،
+                      // فيُحتسب سعر باقته صفرًا ويُطلب منه المبلغ كاملاً بدل
+                      // الفرق. الآن نطابق بعد تنظيف الاسم، ثم باحتواء الرمز.
+                      // ============================================================
+                      const normalizeTier = (s: string) =>
+                        (s || '').trim().toUpperCase().replace(/\s+/g, '').replace(/^VIP/, '');
+
+                      const myTierNorm = normalizeTier(currentUser?.vipTier || '');
+
+                      let myCurrentPlan = allPlansForCalc.find(
+                        p => normalizeTier(p.name) === myTierNorm
+                      );
+
+                      // احتياط: مطابقة جزئية إن لم يتطابق الاسم بالكامل
+                      if (!myCurrentPlan && myTierNorm) {
+                        myCurrentPlan = allPlansForCalc.find(p => {
+                          const pn = normalizeTier(p.name);
+                          return pn && (pn.includes(myTierNorm) || myTierNorm.includes(pn));
+                        });
+                      }
+
                       const myCurrentPrice = myCurrentPlan ? Number(myCurrentPlan.price) || 0 : 0;
 
                       // منع النزول لباقة أرخص أو مساوية
