@@ -2117,6 +2117,16 @@ export async function createWithdrawal(
     if (!isExemptFromDepositRequirement(users[phone])) {
       throw new Error("⚠️ عذراً! لا يمكنك سحب الأرباح إلا بعد إيداع وتفعيل باقتك الاستثمارية الأولى في المنصة.");
     }
+    // الباقة التجريبية: السحب متاح فقط بعد الترقية
+    try {
+      const sysSettings = await getSystemSettings();
+      if (isOnTrialPlan(users[phone], sysSettings?.vipPlans)) {
+        throw new Error("🎁 أنت مشترك حاليًا بالباقة التجريبية المجانية.\n\nسحب الأرباح متاح فقط بعد الترقية إلى باقة مدفوعة (VIP B فما فوق).\n\nأرباحك محفوظة بالكامل وتُسحب فور الترقية.");
+      }
+    } catch (trialErr: any) {
+      if (String(trialErr?.message || '').includes('الباقة التجريبية')) throw trialErr;
+    }
+
     // إيقاف العمل: يمنع السحب حتى يرقّي العضو باقته
     if (isWorkSuspended(users[phone])) {
       throw new Error("⏸️ تم إيقاف العمل مؤقتًا على حسابك.\n\nيرجى ترقية باقتك الاستثمارية لاستئناف المهام والسحب. وبمجرد إتمام الترقية يعود حسابك للعمل تلقائيًا.\n\nللاستفسار تواصل مع الدعم الفني.");
@@ -2167,6 +2177,16 @@ export async function createWithdrawal(
     if (!isExemptFromDepositRequirement(userData)) {
       throw new Error("⚠️ عذراً! لا يمكنك سحب الأرباح إلا بعد إيداع وتفعيل باقتك الاستثمارية الأولى في المنصة.");
     }
+    // الباقة التجريبية: السحب متاح فقط بعد الترقية لباقة مدفوعة
+    try {
+      const sysSettings = await getSystemSettings();
+      if (isOnTrialPlan(userData, sysSettings?.vipPlans)) {
+        throw new Error("🎁 أنت مشترك حاليًا بالباقة التجريبية المجانية.\n\nسحب الأرباح متاح فقط بعد الترقية إلى باقة مدفوعة (VIP B فما فوق).\n\nأرباحك محفوظة بالكامل وتُسحب فور الترقية.");
+      }
+    } catch (trialErr: any) {
+      if (String(trialErr?.message || '').includes('الباقة التجريبية')) throw trialErr;
+    }
+
     // إيقاف العمل: يمنع السحب حتى يرقّي العضو باقته
     if (isWorkSuspended(userData)) {
       throw new Error("⏸️ تم إيقاف العمل مؤقتًا على حسابك.\n\nيرجى ترقية باقتك الاستثمارية لاستئناف المهام والسحب. وبمجرد إتمام الترقية يعود حسابك للعمل تلقائيًا.\n\nللاستفسار تواصل مع الدعم الفني.");
@@ -2216,6 +2236,7 @@ export async function createWithdrawal(
     const msg = String(error?.message || '');
     const isKnownMessage =
       msg.includes('إيقاف العمل') ||
+      msg.includes('الباقة التجريبية') ||
       msg.includes('تعليق ميزة السحب') ||
       msg.includes('رصيد الأرباح غير كافٍ') ||
       msg.includes('المستخدم غير موجود') ||
@@ -3744,6 +3765,30 @@ export const UPGRADE_SUPPORT_DEDUCTION_RATE = 0.5; // 50%
  * المسجّلة وقت الإيقاف، فإن اختلفت فقد رقّى ويُستأنف عمله فورًا
  * دون أي تدخل من الإدارة.
  */
+/**
+ * يتحقق إن كان العضو على باقة تجريبية مجانية.
+ *
+ * أصحاب الباقة التجريبية لا يمكنهم سحب أرباحهم إلا بعد الترقية
+ * إلى باقة مدفوعة — والأرباح تبقى محفوظة لهم بالكامل حتى ذلك.
+ */
+export function isOnTrialPlan(userData: any, plans?: any[]): boolean {
+  const tier = (userData?.vipTier || '').trim();
+  if (!tier) return false;
+
+  const norm = (s: string) =>
+    (s || '').trim().toUpperCase().replace(/\s+/g, '').replace(/^VIP/, '');
+  const tierN = norm(tier);
+
+  const list = Array.isArray(plans) ? plans : [];
+  const match = list.find(p => norm(p?.name) === tierN)
+    || list.find(p => {
+         const pn = norm(p?.name);
+         return pn && (pn.includes(tierN) || tierN.includes(pn));
+       });
+
+  return !!match?.isTrial;
+}
+
 export function isWorkSuspended(userData: any): boolean {
   if (!userData?.workSuspended) return false;
 

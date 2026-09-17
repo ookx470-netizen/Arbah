@@ -1462,7 +1462,7 @@ export default function TaskView() {
     }
 
     if (userPlanDetails.isTrial && currentUser?.vipStartDate) {
-      const trialDuration = 24 * 60 * 60 * 1000; // 1 day
+      const trialDuration = 3 * 24 * 60 * 60 * 1000; // 3 أيام
       const trialStart = new Date(currentUser.vipStartDate).getTime();
       const now = new Date().getTime();
       if (now - trialStart > trialDuration) {
@@ -3544,7 +3544,7 @@ export default function TaskView() {
                             await updateUserByAdminFn(phoneKey, {
                               earnings: newEarnings,
                               vipTier: selectedPlanForUpgrade.name,
-                              effectiveDays: (selectedPlanForUpgrade?.isTrial ? 1 : 365),
+                              effectiveDays: (selectedPlanForUpgrade?.isTrial ? 3 : 365),
                               vipStartDate: new Date().toISOString(),
                               hasDeposited: true
                             });
@@ -3554,7 +3554,7 @@ export default function TaskView() {
                                 await updateUserByAdminFn(idKey, {
                                   earnings: newEarnings,
                                   vipTier: selectedPlanForUpgrade.name,
-                                  effectiveDays: (selectedPlanForUpgrade?.isTrial ? 1 : 365),
+                                  effectiveDays: (selectedPlanForUpgrade?.isTrial ? 3 : 365),
                                   vipStartDate: new Date().toISOString(),
                                   hasDeposited: true
                                 });
@@ -3567,7 +3567,7 @@ export default function TaskView() {
                           ...currentUser,
                           earnings: newEarnings,
                           vipTier: selectedPlanForUpgrade.name,
-                          effectiveDays: (selectedPlanForUpgrade?.isTrial ? 1 : 365),
+                          effectiveDays: (selectedPlanForUpgrade?.isTrial ? 3 : 365),
                           vipStartDate: new Date().toISOString(),
                           hasDeposited: true
                         };
