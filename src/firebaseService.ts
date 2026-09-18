@@ -1340,6 +1340,28 @@ export async function creditReferrerCommission(childPhone: string, rewardValue: 
   // بالمُحيل نفسه (تحدده الإدارة يدويًا)، والافتراضي 10% لمن لم تُحدد له.
   if (rewardValue <= 0) return;
 
+  // ============================================================
+  // إصلاح: لا عمولة من عضو على باقة تجريبية.
+  //
+  // كانت العمولة تُصرف لمجرد وجود مُحيل، بصرف النظر عن نوع باقة
+  // العضو المُحال — فمن هو على الباقة المجانية (بلا أي قيمة مالية
+  // حقيقية) كان يولّد عمولة فعلية للمُحيل، وهذا استنزاف بلا مقابل.
+  // الآن نتحقق أولًا: إن كانت باقته تجريبية، لا تُصرف أي عمولة.
+  // ============================================================
+  try {
+    const childSnap = await getDoc(doc(db, "users", childPhone));
+    if (childSnap.exists()) {
+      const childData: any = childSnap.data();
+      const sysSettings = await getSystemSettings();
+      if (isOnTrialPlan(childData, sysSettings?.vipPlans)) {
+        return; // عضو على الباقة التجريبية — لا عمولة لأي مُحيل
+      }
+    }
+  } catch (trialCheckErr) {
+    console.warn('تعذّر التحقق من نوع باقة العضو لأغراض العمولة:', trialCheckErr);
+    // لا نمنع العمولة إن فشل الفحص نفسه لخطأ شبكة — نكمل بحذر
+  }
+
   let referrerPhone: string | null = null;
   let childReferrerCode = "";
 
