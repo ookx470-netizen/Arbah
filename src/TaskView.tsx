@@ -1462,7 +1462,10 @@ export default function TaskView() {
     }
 
     if (userPlanDetails.isTrial && currentUser?.vipStartDate) {
-      const trialDuration = 3 * 24 * 60 * 60 * 1000; // 3 أيام
+      // مدة الباقة تُقرأ من إعداداتها (durationDays) بدل رقم ثابت،
+      // فيستطيع الأدمن تغييرها من لوحة الإدارة دون تعديل الكود.
+      const planDays = Number((userPlanDetails as any)?.durationDays) || 3;
+      const trialDuration = planDays * 24 * 60 * 60 * 1000;
       const trialStart = new Date(currentUser.vipStartDate).getTime();
       const now = new Date().getTime();
       if (now - trialStart > trialDuration) {
@@ -3544,7 +3547,7 @@ export default function TaskView() {
                             await updateUserByAdminFn(phoneKey, {
                               earnings: newEarnings,
                               vipTier: selectedPlanForUpgrade.name,
-                              effectiveDays: (selectedPlanForUpgrade?.isTrial ? 3 : 365),
+                              effectiveDays: (Number((selectedPlanForUpgrade as any)?.durationDays) || (selectedPlanForUpgrade?.isTrial ? 3 : 365)),
                               vipStartDate: new Date().toISOString(),
                               hasDeposited: true
                             });
@@ -3554,7 +3557,7 @@ export default function TaskView() {
                                 await updateUserByAdminFn(idKey, {
                                   earnings: newEarnings,
                                   vipTier: selectedPlanForUpgrade.name,
-                                  effectiveDays: (selectedPlanForUpgrade?.isTrial ? 3 : 365),
+                                  effectiveDays: (Number((selectedPlanForUpgrade as any)?.durationDays) || (selectedPlanForUpgrade?.isTrial ? 3 : 365)),
                                   vipStartDate: new Date().toISOString(),
                                   hasDeposited: true
                                 });
@@ -3567,7 +3570,7 @@ export default function TaskView() {
                           ...currentUser,
                           earnings: newEarnings,
                           vipTier: selectedPlanForUpgrade.name,
-                          effectiveDays: (selectedPlanForUpgrade?.isTrial ? 3 : 365),
+                          effectiveDays: (Number((selectedPlanForUpgrade as any)?.durationDays) || (selectedPlanForUpgrade?.isTrial ? 3 : 365)),
                           vipStartDate: new Date().toISOString(),
                           hasDeposited: true
                         };
