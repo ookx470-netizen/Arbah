@@ -1374,7 +1374,27 @@ export default function TaskView() {
       { id: 'plan_business', name: 'business', price: 90000, profit: 2550, tasksCount: 5 }
     ];
     
-    const matchedPlan = plans.find(p => p.name === tierName);
+    // ============================================================
+    // مطابقة مرنة لاسم الباقة (نفس منطق حساب فرق الترقية).
+    //
+    // كانت المقارنة حرفية، فأي فرق بسيط بتسمية الباقة بين ما هو
+    // مخزّن بحساب العضو (خصوصًا الحسابات القديمة) وما هو مكتوب
+    // بلوحة الإدارة الآن يفشل المطابقة — فيُحتسب isTrial خطأً بـ
+    // false، وتُطبَّق عليه قيود لا تخصه (مثل قفل العطلة).
+    // ============================================================
+    const normalizeTierName = (s: string) =>
+      (s || '').trim().toUpperCase().replace(/\s+/g, '').replace(/^VIP/, '');
+
+    const tierNorm = normalizeTierName(tierName);
+    let matchedPlan = plans.find(p => normalizeTierName(p.name) === tierNorm);
+
+    if (!matchedPlan && tierNorm) {
+      matchedPlan = plans.find(p => {
+        const pn = normalizeTierName(p.name);
+        return pn && (pn.includes(tierNorm) || tierNorm.includes(pn));
+      });
+    }
+
     if (matchedPlan) {
       return {
         name: matchedPlan.name,
