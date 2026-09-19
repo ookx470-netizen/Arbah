@@ -944,10 +944,11 @@ export default function ProfileCenter({
                           type="button"
                           onClick={() => handleCopy(currentUser.memberId || '')}
                           title="اضغط لنسخ رقمك التعريفي"
-                          className="inline-flex items-center gap-1 bg-sky-500/15 hover:bg-sky-500/25 text-sky-300 border border-sky-500/30 text-[9.5px] font-black px-2 py-0.5 rounded-full shrink-0 transition-all cursor-pointer active:scale-95"
+                          className="inline-flex items-center gap-1.5 bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/30 text-[9.5px] font-black px-2 py-0.5 rounded-full shrink-0 transition-all cursor-pointer active:scale-95"
                         >
-                          <span className="font-mono tracking-wider" dir="ltr">{currentUser.memberId}</span>
-                          <Copy className="w-2.5 h-2.5" />
+                          <span className="text-slate-400">الرقم التعريفي:</span>
+                          <span className="font-mono tracking-wider text-sky-300" dir="ltr">{currentUser.memberId}</span>
+                          <Copy className="w-2.5 h-2.5 text-sky-300" />
                         </button>
                       </>
                     )}
