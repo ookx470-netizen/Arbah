@@ -1474,7 +1474,9 @@ export default function TaskView() {
       }
     }
 
-    if (isTodayHoliday) {
+    // استثناء: أصحاب الباقة التجريبية (TEST) يعملون حتى في العطلة،
+    // فمدتها قصيرة أصلاً (3 أيام) ولا يصح خصم يوم منها.
+    if (isTodayHoliday && !userPlanDetails?.isTrial) {
       triggerNotification(`⚠️ عذراً! اليوم (${getArabicDayName(new Date().getDay())}) هو عطلة عمل رسمية في المنصة.`);
       return;
     }
@@ -1620,7 +1622,9 @@ export default function TaskView() {
 
   // Switch views cleanly
   const viewDetails = (taskId: string) => {
-    if (isTodayHoliday) {
+    // استثناء: أصحاب الباقة التجريبية (TEST) يعملون حتى في العطلة،
+    // فمدتها قصيرة أصلاً (3 أيام) ولا يصح خصم يوم منها.
+    if (isTodayHoliday && !userPlanDetails?.isTrial) {
       triggerNotification(`⚠️ عذراً! اليوم (${getArabicDayName(new Date().getDay())}) هو عطلة عمل رسمية في المنصة.`);
       return;
     }
@@ -1723,7 +1727,9 @@ export default function TaskView() {
       }
     }
 
-    if (isTodayHoliday) {
+    // استثناء: أصحاب الباقة التجريبية (TEST) يعملون حتى في العطلة،
+    // فمدتها قصيرة أصلاً (3 أيام) ولا يصح خصم يوم منها.
+    if (isTodayHoliday && !userPlanDetails?.isTrial) {
       triggerNotification(`⚠️ عذراً! اليوم (${getArabicDayName(new Date().getDay())}) هو عطلة عمل رسمية في المنصة.`);
       return;
     }
