@@ -1444,6 +1444,8 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
 
   // User Online Filter State
   const [userOnlineFilter, setUserOnlineFilter] = useState<'all' | 'online' | 'offline' | 'activated'>('all');
+  // فلتر عرض الأعضاء حسب باقتهم تحديدًا — 'all' يعرض الجميع
+  const [userPlanFilter, setUserPlanFilter] = useState<string>('all');
 
   const isUserOnline = (u: User) => {
     if (!u) return false;
@@ -1493,13 +1495,20 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
     if (!matchesSearch) return false;
 
     if (userOnlineFilter === 'online') {
-      return isUserOnline(u);
+      if (!isUserOnline(u)) return false;
     } else if (userOnlineFilter === 'offline') {
-      return !isUserOnline(u);
+      if (isUserOnline(u)) return false;
     } else if (userOnlineFilter === 'activated') {
       // الأعضاء المفعّلون فقط (أصحاب باقات VIP حقيقية)
-      return isActivatedMember(u);
+      if (!isActivatedMember(u)) return false;
     }
+
+    // فلتر الباقة: يعمل بالتوازي مع فلتر الحالة أعلاه، لا بدلاً عنه
+    if (userPlanFilter !== 'all') {
+      const tier = (u.vipTier || '').trim();
+      if (tier !== userPlanFilter) return false;
+    }
+
     return true;
   });
 
@@ -1966,6 +1975,36 @@ export default function AdminPanel({ adminUser, onLogout }: AdminPanelProps) {
                     </button>
                   ))}
                 </div>
+
+                {/* فلتر عرض الأعضاء حسب الباقة — كل باقة بزر منفصل */}
+                {(settings.vipPlans || []).length > 0 && (
+                  <div className="flex items-center gap-1 bg-slate-200/80 p-1 rounded-xl text-[10px] font-bold flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => setUserPlanFilter('all')}
+                      className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+                        userPlanFilter === 'all' ? 'bg-white text-slate-900 shadow-sm font-extrabold' : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      كل الباقات
+                    </button>
+                    {(settings.vipPlans || []).map(plan => {
+                      const count = users.filter(u => !u.isBanned && (u.vipTier || '').trim() === plan.name).length;
+                      return (
+                        <button
+                          key={plan.id}
+                          type="button"
+                          onClick={() => setUserPlanFilter(plan.name)}
+                          className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer whitespace-nowrap ${
+                            userPlanFilter === plan.name ? 'bg-white text-indigo-700 shadow-sm font-extrabold' : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          {plan.isTrial ? '🎁 ' : ''}{plan.name} ({count})
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
 
                 {/* Quick Selection Helpers */}
                 <button
